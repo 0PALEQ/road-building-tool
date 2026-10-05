@@ -1,0 +1,2188 @@
+package com.cookiecraftmods.roadbuilder.gametest;
+
+import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
+import com.cookiecraftmods.roadbuilder.geometry.StraightGeometry;
+import com.cookiecraftmods.roadbuilder.network.PreparedRoadAddition;
+import com.cookiecraftmods.roadbuilder.network.RoadGraph;
+import com.cookiecraftmods.roadbuilder.network.RoadGraphDelta;
+import com.cookiecraftmods.roadbuilder.network.RoadGraphSnapshot;
+import com.cookiecraftmods.roadbuilder.networking.PlacementResultCode;
+import com.cookiecraftmods.roadbuilder.networking.PlacementResultS2CPacket;
+import com.cookiecraftmods.roadbuilder.networking.PlacementRemovalEndpoint;
+import com.cookiecraftmods.roadbuilder.networking.PlayerRequestSessionState;
+import com.cookiecraftmods.roadbuilder.networking.RemovalIntentC2SPacket;
+import com.cookiecraftmods.roadbuilder.networking.RemovalRequestAction;
+import com.cookiecraftmods.roadbuilder.networking.RemovalResultCode;
+import com.cookiecraftmods.roadbuilder.networking.RemovalResultS2CPacket;
+import com.cookiecraftmods.roadbuilder.networking.SegmentRemovalIntentC2SPacket;
+import com.cookiecraftmods.roadbuilder.networking.StraightRoadIntentC2SPacket;
+import com.cookiecraftmods.roadbuilder.networking.StraightRoadPlacementEndpoint;
+import com.cookiecraftmods.roadbuilder.persistence.RoadBuilderPlacementSavedData;
+import com.cookiecraftmods.roadbuilder.persistence.RoadBuilderConstructionJobSavedData;
+import com.cookiecraftmods.roadbuilder.persistence.RoadBuilderNetworkSavedData;
+import com.cookiecraftmods.roadbuilder.placement.BlockPlacementPlan;
+import com.cookiecraftmods.roadbuilder.placement.BlockPlanCommitter;
+import com.cookiecraftmods.roadbuilder.placement.BlockPlanResult;
+import com.cookiecraftmods.roadbuilder.placement.ConstructionAuthorizer;
+import com.cookiecraftmods.roadbuilder.placement.ConstructionLimits;
+import com.cookiecraftmods.roadbuilder.placement.ConstructionValidationCode;
+import com.cookiecraftmods.roadbuilder.placement.ConstructionValidationResult;
+import com.cookiecraftmods.roadbuilder.placement.PlacementBlockWorld;
+import com.cookiecraftmods.roadbuilder.placement.PlacementCommitFailureCode;
+import com.cookiecraftmods.roadbuilder.placement.PlacementCommitResult;
+import com.cookiecraftmods.roadbuilder.placement.PlacementOperationId;
+import com.cookiecraftmods.roadbuilder.placement.PlacementOwnershipLedger;
+import com.cookiecraftmods.roadbuilder.placement.PlacementRemovalFailureCode;
+import com.cookiecraftmods.roadbuilder.placement.PlacementRemovalResult;
+import com.cookiecraftmods.roadbuilder.placement.PlacementRemovalService;
+import com.cookiecraftmods.roadbuilder.placement.PlannedBlock;
+import com.cookiecraftmods.roadbuilder.placement.RemovalMode;
+import com.cookiecraftmods.roadbuilder.placement.RoadMaterializationOwner;
+import com.cookiecraftmods.roadbuilder.placement.RoadGraphMaterializationConsistency;
+import com.cookiecraftmods.roadbuilder.placement.ServerLevelPlacementBlockWorld;
+import com.cookiecraftmods.roadbuilder.placement.StraightRoadIntent;
+import com.cookiecraftmods.roadbuilder.placement.StraightRoadPlanner;
+import com.cookiecraftmods.roadbuilder.placement.StraightRoadPlanningService;
+import com.cookiecraftmods.roadbuilder.preset.RoadPresetResources;
+import com.cookiecraftmods.roadbuilder.preset.TrafficHandedness;
+import com.mojang.authlib.GameProfile;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
+import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
+import net.minecraft.core.BlockPos;
+import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoublePlantBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.chunk.LevelChunk;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+public final class RoadBuilderPlacementGameTests implements FabricGameTest {
+    private static final int UPDATE_FLAGS = Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS;
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 100)
+    public void authoritativeEndpointPlacesAndRemovesTestPreset(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos start = helper.absolutePos(new BlockPos(4, 2, 2));
+        BlockPos end = helper.absolutePos(new BlockPos(4, 2, 5));
+        ResourceLocation presetId = new ResourceLocation("roadbuilder", "two_way");
+        ConstructionLimits limits = ConstructionLimits.defaults();
+        StraightRoadPlanningService planningService = new StraightRoadPlanningService(
+                RoadPresetResources.repository(),
+                new StraightRoadPlanner()
+        );
+        StraightRoadIntent intent = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(start),
+                pointAtBlockCenter(end),
+                presetId,
+                testPresetRevision(presetId)
+        );
+        BlockPlanResult.Success planned = requireType(
+                helper,
+                planningService.plan(intent, limits),
+                BlockPlanResult.Success.class,
+                "the built-in straight intent should plan successfully"
+        );
+        for (PlannedBlock block : planned.plan().blocks()) {
+            level.setBlock(block.position(), Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+        }
+
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+        RoadGraph graph = new RoadGraph(level.dimension());
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(start.getX() + 0.5, start.getY() + 1.0, start.getZ() + 0.5);
+        StraightRoadPlacementEndpoint endpoint = new StraightRoadPlacementEndpoint(
+                planningService,
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new BlockPlanCommitter()
+        );
+        StraightRoadIntentC2SPacket packet = StraightRoadIntentC2SPacket.current(
+                UUID.randomUUID(),
+                level.dimension().location(),
+                presetId,
+                intent.expectedPresetRevision(),
+                intent.start().x(), intent.start().y(), intent.start().z(),
+                intent.end().x(), intent.end().y(), intent.end().z()
+        );
+
+        PlacementResultS2CPacket result = endpoint.handle(packet, player, ledger, graph);
+
+        helper.assertTrue(result.resultCode() == PlacementResultCode.ACCEPTED, "endpoint should accept the road");
+        helper.assertTrue(
+                result.acceptedPlacement().orElseThrow().affectedBlockCount()
+                        >= planned.plan().affectedBlockCount(),
+                "accepted materialization should contain the canonical surface"
+        );
+        for (PlannedBlock block : planned.plan().blocks()) {
+            helper.assertTrue(
+                    level.getBlockState(block.position()).equals(block.targetState()),
+                    "the endpoint should place the preset surface at " + block.position().toShortString()
+            );
+        }
+
+        PlacementOperationId operationId = new PlacementOperationId(
+                result.acceptedPlacement().orElseThrow().operationId()
+        );
+        helper.assertTrue(
+                graph.snapshot().segments().size() == 1,
+                "accepted placement should publish one canonical graph segment"
+        );
+        helper.assertTrue(
+                ledger.operation(operationId).orElseThrow().materializationOwner().isPresent(),
+                "accepted placement operation should be owned by that graph segment"
+        );
+        var segmentId = graph.snapshot().segments().keySet().iterator().next();
+        PlacementRemovalEndpoint removalEndpoint = new PlacementRemovalEndpoint(
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new PlacementRemovalService()
+        );
+        RemovalResultS2CPacket staleRemoval = removalEndpoint.handle(
+                segmentRemovalPacket(
+                        level,
+                        segmentId.value(),
+                        graph.revision() - 1,
+                        RemovalRequestAction.EXECUTE,
+                        RemovalMode.SAFE
+                ),
+                player,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                staleRemoval.resultCode() == RemovalResultCode.STALE_GRAPH,
+                "segment removal should reject a stale synchronized graph revision"
+        );
+        RemovalResultS2CPacket removal = removalEndpoint.handle(
+                segmentRemovalPacket(
+                        level,
+                        segmentId.value(),
+                        graph.revision(),
+                        RemovalRequestAction.EXECUTE,
+                        RemovalMode.SAFE
+                ),
+                player,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                removal.resultCode() == RemovalResultCode.SUCCESS,
+                "accepted endpoint graph segment should be removable"
+        );
+        helper.assertTrue(
+                graph.snapshot().segments().isEmpty()
+                        && graph.snapshot().nodes().isEmpty()
+                        && graph.snapshot().roads().isEmpty(),
+                "segment removal should clean up its orphaned graph records"
+        );
+        for (PlannedBlock block : planned.plan().blocks()) {
+            helper.assertTrue(
+                    level.getBlockState(block.position()).is(Blocks.DIRT),
+                    "safe removal should restore dirt at " + block.position().toShortString()
+            );
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 100)
+    public void roadPlacementAdoptsVegetationBrokenByItsOwnSurfaceUpdate(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        BlockPos start = helper.absolutePos(new BlockPos(2, 2, 8));
+        BlockPos end = helper.absolutePos(new BlockPos(10, 2, 8));
+        BlockPos reactiveSurface =
+                helper.absolutePos(new BlockPos(6, 2, 8));
+        ResourceLocation presetId = new ResourceLocation(
+                "roadbuilder",
+                "two_way"
+        );
+        ConstructionLimits limits = ConstructionLimits.defaults();
+        StraightRoadPlanningService planningService =
+                new StraightRoadPlanningService(
+                        RoadPresetResources.repository(),
+                        new StraightRoadPlanner()
+                );
+        StraightRoadIntent intent = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(start),
+                pointAtBlockCenter(end),
+                presetId,
+                testPresetRevision(presetId)
+        );
+        BlockPlacementPlan surfacePlan = requireType(
+                helper,
+                planningService.plan(intent, limits),
+                BlockPlanResult.Success.class,
+                "reactive-block road fixture should plan"
+        ).plan();
+        for (PlannedBlock block : surfacePlan.blocks()) {
+            level.setBlock(
+                    block.position(),
+                    Blocks.DIRT.defaultBlockState(),
+                    UPDATE_FLAGS
+            );
+        }
+        level.setBlock(
+                reactiveSurface.above(),
+                Blocks.GRASS.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        helper.assertTrue(
+                level.getBlockState(reactiveSurface.above()).is(Blocks.GRASS),
+                "fixture grass should initially be supported by dirt"
+        );
+
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(
+                level.dimension()
+        );
+        RoadGraph graph = new RoadGraph(level.dimension());
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(
+                start.getX() + 0.5,
+                start.getY() + 1.0,
+                start.getZ() + 0.5
+        );
+        PlacementResultS2CPacket result =
+                new StraightRoadPlacementEndpoint(
+                        planningService,
+                        ConstructionAuthorizer.creativeOnly(),
+                        limits,
+                        new BlockPlanCommitter()
+                ).handle(
+                        placementPacket(level, presetId, intent),
+                        player,
+                        ledger,
+                        graph
+                );
+
+        helper.assertTrue(
+                result.resultCode() == PlacementResultCode.ACCEPTED,
+                "one request should place a road through update-sensitive vegetation"
+        );
+        helper.assertTrue(
+                level.getBlockState(reactiveSurface).equals(
+                        surfacePlan.blocks().stream()
+                                .filter(block -> block.position().equals(
+                                        reactiveSurface
+                                ))
+                                .findFirst()
+                                .orElseThrow()
+                                .targetState()
+                )
+                        && level.getBlockState(reactiveSurface.above()).isAir(),
+                "the road should replace its surface and clear the updated vegetation"
+        );
+        helper.assertTrue(
+                ledger.stack(reactiveSurface.above())
+                        .orElseThrow()
+                        .top()
+                        .beforeState()
+                        .is(Blocks.GRASS),
+                "ownership should retain the vegetation state for later demolition"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 150)
+    public void largeRemovalQueuesAndCompletesThroughServerTicks(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        BlockPos start = helper.absolutePos(new BlockPos(2, 2, 2));
+        ResourceLocation presetId = new ResourceLocation("roadbuilder", "two_way");
+        ConstructionLimits limits = ConstructionLimits.defaults();
+        List<PlannedBlock> blocks = new ArrayList<>();
+        BlockPos plantLower = start.offset(9, 0, 0);
+        BlockPos plantUpper = plantLower.above();
+        for (int y = 0; y < 5; y++) {
+            for (int x = 0; x < 8; x++) {
+                for (int z = 0; z < 8; z++) {
+                    blocks.add(new PlannedBlock(
+                            start.offset(x, y, z),
+                            Blocks.GRAY_CONCRETE.defaultBlockState()
+                    ));
+                }
+            }
+        }
+        blocks.add(new PlannedBlock(
+                plantUpper,
+                Blocks.AIR.defaultBlockState()
+        ));
+        BlockPlacementPlan planned = BlockPlacementPlan.create(
+                level.dimension(),
+                blocks
+        );
+        helper.assertTrue(
+                planned.affectedBlockCount() > 256,
+                "fixture must exceed one construction-job batch"
+        );
+        for (PlannedBlock block : planned.blocks()) {
+            level.setBlock(
+                    block.position(),
+                    Blocks.DIRT.defaultBlockState(),
+                    UPDATE_FLAGS
+            );
+        }
+        int setupFlags = Block.UPDATE_CLIENTS | Block.UPDATE_SUPPRESS_DROPS;
+        level.setBlock(
+                plantLower.below(),
+                Blocks.DIRT.defaultBlockState(),
+                setupFlags
+        );
+        level.setBlock(
+                plantLower,
+                Blocks.TALL_GRASS.defaultBlockState().setValue(
+                        DoublePlantBlock.HALF,
+                        DoubleBlockHalf.LOWER
+                ),
+                setupFlags
+        );
+        level.setBlock(
+                plantUpper,
+                Blocks.TALL_GRASS.defaultBlockState().setValue(
+                        DoublePlantBlock.HALF,
+                        DoubleBlockHalf.UPPER
+                ),
+                setupFlags
+        );
+
+        RoadBuilderPlacementSavedData placementData =
+                RoadBuilderPlacementSavedData.get(level);
+        RoadBuilderNetworkSavedData networkData =
+                RoadBuilderNetworkSavedData.get(level);
+        RoadBuilderConstructionJobSavedData jobData =
+                RoadBuilderConstructionJobSavedData.get(level);
+        PreparedRoadAddition graphAddition = networkData.graph().prepareStraightRoad(
+                new StraightGeometry(
+                        pointAtBlockCenter(start),
+                        pointAtBlockCenter(start.offset(1, 0, 0))
+                ),
+                presetId,
+                RoadPresetResources.repository().find(presetId).orElseThrow(),
+                TrafficHandedness.RHT
+        );
+        networkData.graph().applyAddition(graphAddition);
+        PlacementCommitResult.Success placement = requireType(
+                helper,
+                new BlockPlanCommitter().commitOwned(
+                        RoadMaterializationOwner.segment(
+                                graphAddition.segment().id()
+                        ),
+                        planned,
+                        new ServerLevelPlacementBlockWorld(level),
+                        placementData.ledger()
+                ),
+                PlacementCommitResult.Success.class,
+                "large graph-owned fixture should commit"
+        );
+        level.setBlock(
+                plantLower,
+                Blocks.AIR.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(
+                start.getX() + 0.5,
+                start.getY() + 1.0,
+                start.getZ() + 0.5
+        );
+        UUID operationId = placement.operation().id().value();
+        var owner = placementData.ledger()
+                .operation(new PlacementOperationId(operationId))
+                .orElseThrow()
+                .materializationOwner()
+                .orElseThrow();
+        PlacementRemovalEndpoint removalEndpoint = new PlacementRemovalEndpoint(
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new PlacementRemovalService()
+        );
+        RemovalResultS2CPacket removal = removalEndpoint.handle(
+                segmentRemovalPacket(
+                        level,
+                        owner.segmentId().value(),
+                        networkData.graph().revision(),
+                        RemovalRequestAction.EXECUTE,
+                        RemovalMode.SAFE
+                ),
+                player,
+                placementData.ledger(),
+                networkData.graph(),
+                jobData
+        );
+        helper.assertTrue(
+                removal.resultCode() == RemovalResultCode.QUEUED,
+                "large removal should be queued instead of rejected"
+        );
+        helper.assertTrue(
+                jobData.job(operationId).isPresent(),
+                "queued removal should be persisted before its first world batch"
+        );
+        helper.succeedWhen(() -> {
+            helper.assertTrue(
+                    jobData.job(operationId).isEmpty(),
+                    "completed removal job should be cleaned up"
+            );
+            helper.assertTrue(
+                    placementData.ledger()
+                            .operation(new PlacementOperationId(operationId))
+                            .isEmpty(),
+                    "completion should release placement ownership"
+            );
+            helper.assertTrue(
+                    networkData.graph().segment(owner.segmentId()).isEmpty(),
+                    "completion should publish graph removal"
+            );
+            for (PlannedBlock block : planned.blocks()) {
+                if (block.position().equals(plantUpper)) {
+                    BlockState restoredPlant = level.getBlockState(plantUpper);
+                    helper.assertTrue(
+                            restoredPlant.is(Blocks.TALL_GRASS)
+                                    || restoredPlant.isAir(),
+                            "restored vegetation may remain until its next "
+                                    + "neighbor update or update away immediately"
+                    );
+                } else {
+                    helper.assertTrue(
+                            level.getBlockState(block.position()).is(Blocks.DIRT),
+                            "incremental removal should restore dirt at "
+                                    + block.position().toShortString()
+                    );
+                }
+            }
+        });
+    }
+
+    @GameTest(
+            template = FabricGameTest.EMPTY_STRUCTURE,
+            batch = "roadbuilderPlacementJobs",
+            timeoutTicks = 150
+    )
+    public void largePlacementQueuesAndPublishesThroughServerTicks(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        BlockPos start = helper.absolutePos(new BlockPos(2, 2, 2));
+        BlockPos end = start.offset(0, 0, 48);
+        ResourceLocation presetId = new ResourceLocation("roadbuilder", "two_way");
+        ConstructionLimits limits = ConstructionLimits.defaults();
+        StraightRoadPlanningService planningService =
+                new StraightRoadPlanningService(
+                        RoadPresetResources.repository(),
+                        new StraightRoadPlanner()
+                );
+        StraightRoadIntent intent = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(start),
+                pointAtBlockCenter(end),
+                presetId,
+                testPresetRevision(presetId)
+        );
+        BlockPlanResult.Success planned = requireType(
+                helper,
+                planningService.plan(intent, limits),
+                BlockPlanResult.Success.class,
+                "large straight intent should plan successfully"
+        );
+        helper.assertTrue(
+                planned.plan().affectedBlockCount() > 256,
+                "fixture must exceed one construction-job batch"
+        );
+        for (PlannedBlock block : planned.plan().blocks()) {
+            level.setBlock(
+                    block.position(),
+                    Blocks.DIRT.defaultBlockState(),
+                    UPDATE_FLAGS
+            );
+        }
+        BlockPos reactiveSurface = planned.plan().blocks().stream()
+                .map(PlannedBlock::position)
+                .filter(position -> position.getZ()
+                        == (start.getZ() + end.getZ()) / 2)
+                .findFirst()
+                .orElseThrow();
+        BlockPos updateDrivenLeaf = planned.plan().blocks().stream()
+                .map(PlannedBlock::position)
+                .filter(position -> !position.equals(reactiveSurface))
+                .reduce((firstPosition, secondPosition) -> secondPosition)
+                .orElseThrow();
+        level.setBlock(
+                reactiveSurface.below(),
+                Blocks.DIRT.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        DoublePlantBlock.placeAt(
+                level,
+                Blocks.TALL_GRASS.defaultBlockState(),
+                reactiveSurface,
+                UPDATE_FLAGS
+        );
+        level.setBlock(
+                updateDrivenLeaf,
+                Blocks.OAK_LEAVES.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        helper.assertTrue(
+                level.getBlockState(reactiveSurface).is(Blocks.TALL_GRASS)
+                        && level.getBlockState(reactiveSurface.above())
+                        .is(Blocks.TALL_GRASS),
+                "queued placement fixture should contain two-block vegetation"
+        );
+
+        RoadBuilderPlacementSavedData placementData =
+                RoadBuilderPlacementSavedData.get(level);
+        RoadBuilderNetworkSavedData networkData =
+                RoadBuilderNetworkSavedData.get(level);
+        RoadBuilderConstructionJobSavedData jobData =
+                RoadBuilderConstructionJobSavedData.get(level);
+        long graphRevisionBefore = networkData.graph().revision();
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(
+                start.getX() + 0.5,
+                start.getY() + 1.0,
+                start.getZ() + 0.5
+        );
+        StraightRoadPlacementEndpoint endpoint =
+                new StraightRoadPlacementEndpoint(
+                        planningService,
+                        ConstructionAuthorizer.creativeOnly(),
+                        limits,
+                        new BlockPlanCommitter()
+                );
+        PlacementResultS2CPacket result = endpoint.handle(
+                StraightRoadIntentC2SPacket.current(
+                        UUID.randomUUID(),
+                        level.dimension().location(),
+                        presetId,
+                        intent.expectedPresetRevision(),
+                        intent.start().x(),
+                        intent.start().y(),
+                        intent.start().z(),
+                        intent.end().x(),
+                        intent.end().y(),
+                        intent.end().z()
+                ),
+                player,
+                placementData.ledger(),
+                networkData.graph(),
+                jobData
+        );
+
+        helper.assertTrue(
+                result.resultCode() == PlacementResultCode.ACCEPTED,
+                "large placement should be accepted into the job runner"
+        );
+        level.setBlock(
+                updateDrivenLeaf,
+                Blocks.AIR.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        UUID operationUuid =
+                result.acceptedPlacement().orElseThrow().operationId();
+        PlacementOperationId operationId =
+                new PlacementOperationId(operationUuid);
+        helper.assertTrue(
+                jobData.job(operationUuid).isPresent(),
+                "placement job should persist before its first world batch"
+        );
+        helper.assertTrue(
+                placementData.ledger().operation(operationId).isEmpty()
+                        && networkData.graph().revision() == graphRevisionBefore,
+                "ownership and graph metadata must remain unpublished while queued"
+        );
+
+        helper.succeedWhen(() -> {
+            helper.assertTrue(
+                    jobData.job(operationUuid).isEmpty(),
+                    "completed placement job should be cleaned up"
+            );
+            var operation = placementData.ledger()
+                    .operation(operationId)
+                    .orElseThrow();
+            var owner = operation.materializationOwner().orElseThrow();
+            helper.assertTrue(
+                    networkData.graph().segment(owner.segmentId()).isPresent(),
+                    "completion should publish the canonical graph segment"
+            );
+            helper.assertTrue(
+                    operation.positions().contains(reactiveSurface)
+                            && placementData.ledger().stack(reactiveSurface)
+                            .orElseThrow()
+                            .top()
+                            .beforeState()
+                            .is(Blocks.TALL_GRASS),
+                    "queued placement should retain the update-removed lower plant"
+            );
+            helper.assertTrue(
+                    placementData.ledger().stack(updateDrivenLeaf)
+                            .orElseThrow()
+                            .top()
+                            .beforeState()
+                            .is(Blocks.OAK_LEAVES),
+                    "queued placement should retain a leaf removed by a world update"
+            );
+            for (PlannedBlock block : planned.plan().blocks()) {
+                helper.assertTrue(
+                        level.getBlockState(block.position()).equals(
+                                block.targetState()
+                        ),
+                        "incremental placement should materialize "
+                                + block.position().toShortString()
+                );
+            }
+
+            PlacementRemovalResult cleanup = new PlacementRemovalService().remove(
+                    operationId,
+                    RemovalMode.FORCE,
+                    new ServerLevelPlacementBlockWorld(level),
+                    placementData.ledger()
+            );
+            helper.assertTrue(
+                    cleanup instanceof PlacementRemovalResult.Success,
+                    "large placement fixture should clean up its world ownership"
+            );
+            networkData.graph().applyRemoval(
+                    networkData.graph().prepareSegmentRemoval(owner.segmentId())
+            );
+        });
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 100)
+    public void gradedEndpointPlacesPersistsTopologyAndRestoresTerrain(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        BlockPos start = helper.absolutePos(new BlockPos(2, 2, 8));
+        BlockPos end = helper.absolutePos(new BlockPos(10, 6, 8));
+        ResourceLocation presetId = new ResourceLocation("roadbuilder", "two_way");
+        ConstructionLimits limits = ConstructionLimits.defaults();
+        StraightRoadPlanningService planningService = new StraightRoadPlanningService(
+                RoadPresetResources.repository(),
+                new StraightRoadPlanner()
+        );
+        StraightRoadIntent intent = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(start),
+                pointAtBlockCenter(end),
+                presetId,
+                testPresetRevision(presetId)
+        );
+        BlockPlanResult.Success planned = requireType(
+                helper,
+                planningService.plan(intent, limits),
+                BlockPlanResult.Success.class,
+                "the maximum-default-grade intent should plan successfully"
+        );
+        helper.assertTrue(
+                planned.plan().bounds().minimum().getY() == start.getY()
+                        && planned.plan().bounds().maximum().getY() == end.getY(),
+                "the canonical plan should span both endpoint elevations"
+        );
+        for (PlannedBlock block : planned.plan().blocks()) {
+            level.setBlock(block.position(), Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+        }
+
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+        RoadGraph graph = new RoadGraph(level.dimension());
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(start.getX() + 0.5, start.getY() + 1.0, start.getZ() + 0.5);
+        StraightRoadPlacementEndpoint endpoint = new StraightRoadPlacementEndpoint(
+                planningService,
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new BlockPlanCommitter()
+        );
+
+        PlacementResultS2CPacket result = endpoint.handle(
+                placementPacket(level, presetId, intent),
+                player,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                result.resultCode() == PlacementResultCode.ACCEPTED,
+                "the server should accept the graded road"
+        );
+        for (PlannedBlock block : planned.plan().blocks()) {
+            helper.assertTrue(
+                    level.getBlockState(block.position()).equals(block.targetState()),
+                    "graded placement should write its surface at "
+                            + block.position().toShortString()
+            );
+        }
+        var segment = graph.snapshot().segments().values().iterator().next();
+        helper.assertTrue(
+                segment.referenceGeometry().start().y() == start.getY()
+                        && segment.referenceGeometry().end().y() == end.getY()
+                        && segment.lanes().stream().allMatch(lane ->
+                        lane.geometry().start().y() == start.getY()
+                                || lane.geometry().start().y() == end.getY()),
+                "the graph and directed lanes should retain the graded geometry"
+        );
+
+        PlacementRemovalEndpoint removalEndpoint = new PlacementRemovalEndpoint(
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new PlacementRemovalService()
+        );
+        RemovalResultS2CPacket removal = removalEndpoint.handle(
+                segmentRemovalPacket(
+                        level,
+                        segment.id().value(),
+                        graph.revision(),
+                        RemovalRequestAction.EXECUTE,
+                        RemovalMode.SAFE
+                ),
+                player,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                removal.resultCode() == RemovalResultCode.SUCCESS,
+                "the graded segment should remove through the normal graph-backed workflow"
+        );
+        for (PlannedBlock block : planned.plan().blocks()) {
+            helper.assertTrue(
+                    level.getBlockState(block.position()).is(Blocks.DIRT),
+                    "graded removal should restore dirt at "
+                            + block.position().toShortString()
+            );
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 100)
+    public void exactEndpointPlacementPublishesJoinedTopologyAndConnectors(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        BlockPos start = helper.absolutePos(new BlockPos(2, 2, 8));
+        BlockPos middle = helper.absolutePos(new BlockPos(7, 2, 8));
+        BlockPos end = helper.absolutePos(new BlockPos(12, 2, 8));
+        ResourceLocation presetId = new ResourceLocation("roadbuilder", "two_way");
+        ConstructionLimits limits = ConstructionLimits.defaults();
+        StraightRoadPlanningService planningService = new StraightRoadPlanningService(
+                RoadPresetResources.repository(),
+                new StraightRoadPlanner()
+        );
+        StraightRoadIntent firstIntent = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(start),
+                pointAtBlockCenter(middle),
+                presetId,
+                testPresetRevision(presetId)
+        );
+        StraightRoadIntent secondIntent = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(middle),
+                pointAtBlockCenter(end),
+                presetId,
+                testPresetRevision(presetId)
+        );
+        BlockPlanResult.Success firstPlan = requireType(
+                helper,
+                planningService.plan(firstIntent, limits),
+                BlockPlanResult.Success.class,
+                "the first joined segment should plan successfully"
+        );
+        BlockPlanResult.Success secondPlan = requireType(
+                helper,
+                planningService.plan(secondIntent, limits),
+                BlockPlanResult.Success.class,
+                "the second joined segment should plan successfully"
+        );
+        for (PlannedBlock block : firstPlan.plan().blocks()) {
+            level.setBlock(block.position(), Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+        }
+        for (PlannedBlock block : secondPlan.plan().blocks()) {
+            level.setBlock(block.position(), Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+        }
+
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+        RoadGraph graph = new RoadGraph(level.dimension());
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(start.getX() + 0.5, start.getY() + 1.0, start.getZ() + 0.5);
+        StraightRoadPlacementEndpoint endpoint = new StraightRoadPlacementEndpoint(
+                planningService,
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new BlockPlanCommitter()
+        );
+
+        PlacementResultS2CPacket firstResult = endpoint.handle(
+                placementPacket(level, presetId, firstIntent),
+                player,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                firstResult.resultCode() == PlacementResultCode.ACCEPTED,
+                "the first segment should be accepted"
+        );
+        RoadGraphSnapshot beforeJoin = graph.snapshot();
+        PlacementResultS2CPacket secondResult = endpoint.handle(
+                placementPacket(level, presetId, secondIntent),
+                player,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                secondResult.resultCode() == PlacementResultCode.ACCEPTED,
+                "the exact endpoint continuation should be accepted"
+        );
+
+        RoadGraphSnapshot joined = graph.snapshot();
+        helper.assertTrue(
+                joined.roads().size() == 1
+                        && joined.nodes().size() == 3
+                        && joined.segments().size() == 2
+                        && joined.lanes().size() == 4
+                        && joined.connectors().size() == 2,
+                "joined placement should share one node and publish two directed lane connectors"
+        );
+        helper.assertTrue(
+                RoadGraphDelta.between(beforeJoin, joined).applyTo(beforeJoin).equals(joined),
+                "an observer should reconstruct the joined topology from its graph delta"
+        );
+        helper.assertTrue(
+                ledger.operations().size() == 2,
+                "each independently removable segment should retain its own materialization"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 100)
+    public void dedicatedServerTwoPlayerAuthorityReplayAndSynchronizationSmoke(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        BlockPos start = helper.absolutePos(new BlockPos(2, 2, 7));
+        BlockPos end = helper.absolutePos(new BlockPos(7, 2, 7));
+        ResourceLocation presetId = new ResourceLocation("roadbuilder", "two_way");
+        ConstructionLimits limits = ConstructionLimits.defaults();
+        StraightRoadPlanningService planningService = new StraightRoadPlanningService(
+                RoadPresetResources.repository(),
+                new StraightRoadPlanner()
+        );
+        StraightRoadIntent intent = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(start),
+                pointAtBlockCenter(end),
+                presetId,
+                testPresetRevision(presetId)
+        );
+        BlockPlanResult.Success planned = requireType(
+                helper,
+                planningService.plan(intent, limits),
+                BlockPlanResult.Success.class,
+                "the smoke-test intent should plan"
+        );
+        for (PlannedBlock block : planned.plan().blocks()) {
+            level.setBlock(block.position(), Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+        }
+
+        ServerPlayer creative = testPlayer(level, true);
+        creative.setPos(start.getX() + 0.5, start.getY() + 1.0, start.getZ() + 0.5);
+        ServerPlayer survival = testPlayer(level, false);
+        survival.setPos(start.getX() + 0.5, start.getY() + 1.0, start.getZ() + 0.5);
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+        RoadGraph graph = new RoadGraph(level.dimension());
+        RoadGraphSnapshot observerBefore = graph.snapshot();
+        PlayerRequestSessionState sessions = new PlayerRequestSessionState();
+        StraightRoadPlacementEndpoint endpoint = new StraightRoadPlacementEndpoint(
+                planningService,
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new BlockPlanCommitter()
+        );
+        UUID requestId = UUID.randomUUID();
+        StraightRoadIntentC2SPacket packet = StraightRoadIntentC2SPacket.current(
+                requestId,
+                level.dimension().location(),
+                presetId,
+                intent.expectedPresetRevision(),
+                intent.start().x(), intent.start().y(), intent.start().z(),
+                intent.end().x(), intent.end().y(), intent.end().z()
+        );
+
+        helper.assertTrue(
+                sessions.tryAcquire(creative.getUUID(), level.getServer().getTickCount()),
+                "the creative connection should acquire its request budget"
+        );
+        PlacementResultS2CPacket accepted = endpoint.handle(packet, creative, ledger, graph);
+        sessions.rememberPlacement(creative.getUUID(), accepted);
+        helper.assertTrue(
+                accepted.resultCode() == PlacementResultCode.ACCEPTED
+                        && accepted.acceptedPlacement().isPresent(),
+                "the creative connection should receive an accepted operation ID"
+        );
+        UUID operationId = accepted.acceptedPlacement().orElseThrow().operationId();
+        helper.assertTrue(
+                ledger.operation(new PlacementOperationId(operationId)).isPresent(),
+                "the delivered operation ID should resolve to exactly one server operation"
+        );
+
+        PlacementResultS2CPacket replay = sessions.placementResult(
+                creative.getUUID(),
+                requestId
+        ).orElseThrow();
+        helper.assertTrue(replay.equals(accepted), "duplicate request should replay its exact result");
+        helper.assertTrue(
+                ledger.operations().size() == 1,
+                "replaying the request must not place a second operation"
+        );
+
+        RoadGraphSnapshot authoritativeAfter = graph.snapshot();
+        RoadGraphSnapshot observerAfter = RoadGraphDelta
+                .between(observerBefore, authoritativeAfter)
+                .applyTo(observerBefore);
+        helper.assertTrue(
+                observerAfter.equals(authoritativeAfter),
+                "a second client view should reconstruct the accepted graph mutation"
+        );
+
+        StraightRoadIntentC2SPacket survivalPacket = StraightRoadIntentC2SPacket.current(
+                UUID.randomUUID(),
+                level.dimension().location(),
+                presetId,
+                intent.expectedPresetRevision(),
+                intent.start().x(), intent.start().y(), intent.start().z(),
+                intent.end().x(), intent.end().y(), intent.end().z()
+        );
+        PlacementResultS2CPacket denied = endpoint.handle(
+                survivalPacket,
+                survival,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                denied.resultCode() == PlacementResultCode.NOT_AUTHORIZED,
+                "the survival connection should be rejected by server authority"
+        );
+        helper.assertTrue(
+                graph.snapshot().equals(authoritativeAfter) && ledger.operations().size() == 1,
+                "the rejected second connection must not mutate blocks or graph state"
+        );
+
+        sessions.disconnect(creative.getUUID());
+        helper.assertTrue(
+                sessions.placementResult(creative.getUUID(), requestId).isEmpty(),
+                "disconnect should discard connection-local replay history"
+        );
+        helper.assertTrue(
+                sessions.tryAcquire(creative.getUUID(), level.getServer().getTickCount()),
+                "a reconnect should start with a fresh request budget"
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 120)
+    public void crossingPlacementPublishesSharedNodeAndIndependentChildOwnership(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        ResourceLocation presetId = new ResourceLocation(
+                "roadbuilder",
+                "marked_two_way"
+        );
+        int presetRevision = testPresetRevision(presetId);
+        ConstructionLimits limits = ConstructionLimits.defaults();
+        StraightRoadPlanningService planningService = new StraightRoadPlanningService(
+                RoadPresetResources.repository(),
+                new StraightRoadPlanner()
+        );
+        StraightRoadIntent eastWest = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(helper.absolutePos(new BlockPos(3, 2, 8))),
+                pointAtBlockCenter(helper.absolutePos(new BlockPos(13, 2, 8))),
+                presetId,
+                presetRevision
+        );
+        StraightRoadIntent northSouth = new StraightRoadIntent(
+                level.dimension(),
+                pointAtBlockCenter(helper.absolutePos(new BlockPos(8, 2, 3))),
+                pointAtBlockCenter(helper.absolutePos(new BlockPos(8, 2, 13))),
+                presetId,
+                presetRevision
+        );
+        BlockPlanResult.Success eastPlan = requireType(
+                helper,
+                planningService.plan(eastWest, limits),
+                BlockPlanResult.Success.class,
+                "east-west crossing fixture should plan"
+        );
+        BlockPlanResult.Success northPlan = requireType(
+                helper,
+                planningService.plan(northSouth, limits),
+                BlockPlanResult.Success.class,
+                "north-south crossing fixture should plan"
+        );
+        java.util.stream.Stream.concat(
+                eastPlan.plan().blocks().stream(),
+                northPlan.plan().blocks().stream()
+        ).forEach(block -> level.setBlock(
+                block.position(),
+                Blocks.DIRT.defaultBlockState(),
+                UPDATE_FLAGS
+        ));
+        BlockPos eastClearanceColumn =
+                helper.absolutePos(new BlockPos(4, 2, 8));
+        level.setBlock(
+                eastClearanceColumn.above(),
+                Blocks.OAK_LOG.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        level.setBlock(
+                eastClearanceColumn.above(4),
+                Blocks.OAK_LEAVES.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        BlockPos intersectionSurface =
+                helper.absolutePos(new BlockPos(8, 2, 8));
+
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+        RoadGraph graph = new RoadGraph(level.dimension());
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(eastWest.start().x(), eastWest.start().y() + 1.0, eastWest.start().z());
+        StraightRoadPlacementEndpoint endpoint = new StraightRoadPlacementEndpoint(
+                planningService,
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new BlockPlanCommitter()
+        );
+        PlacementResultS2CPacket first = endpoint.handle(
+                placementPacket(level, presetId, eastWest),
+                player,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                level.getBlockState(eastClearanceColumn.above()).isAir()
+                        && level.getBlockState(eastClearanceColumn.above(4)).isAir(),
+                "road placement should clear tree blocks throughout its headroom"
+        );
+        level.setBlock(
+                intersectionSurface.above(),
+                Blocks.GRASS_BLOCK.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        level.setBlock(
+                intersectionSurface.above(2),
+                Blocks.OAK_LOG.defaultBlockState(),
+                UPDATE_FLAGS
+        );
+        PlacementResultS2CPacket crossing = endpoint.handle(
+                placementPacket(level, presetId, northSouth),
+                player,
+                ledger,
+                graph
+        );
+
+        helper.assertTrue(
+                first.resultCode() == PlacementResultCode.ACCEPTED
+                        && crossing.resultCode() == PlacementResultCode.ACCEPTED,
+                "both crossing roads should be accepted"
+        );
+        RoadGraphSnapshot snapshot = graph.snapshot();
+        helper.assertTrue(
+                snapshot.segments().size() == 4
+                        && snapshot.nodes().size() == 5
+                        && ledger.operations().size() == 5,
+                "crossing should publish four segment children and one node surface"
+        );
+        helper.assertTrue(
+                level.getBlockState(intersectionSurface).is(Blocks.GRAY_CONCRETE)
+                        && level.getBlockState(intersectionSurface.above()).isAir()
+                        && level.getBlockState(intersectionSurface.above(2)).isAir(),
+                "junction pavement should mask crossing markings and clear overhead blocks"
+        );
+        helper.assertTrue(
+                RoadGraphMaterializationConsistency.validate(graph, ledger).isEmpty(),
+                "split graph and ownership must agree"
+        );
+        var crossingNode = snapshot.nodes().values().stream()
+                .filter(node -> snapshot.segments().values().stream()
+                        .filter(segment -> segment.startNodeId().equals(node.id())
+                                || segment.endNodeId().equals(node.id()))
+                        .count() == 4)
+                .findFirst()
+                .orElseThrow();
+        boolean foundJunctionMarking = false;
+        for (int xOffset = -4; xOffset <= 4; xOffset++) {
+            for (int zOffset = -4; zOffset <= 4; zOffset++) {
+                BlockPos position = intersectionSurface.offset(
+                        xOffset,
+                        0,
+                        zOffset
+                );
+                boolean marking = level.getBlockState(position).is(
+                        Blocks.YELLOW_CONCRETE
+                ) || level.getBlockState(position).is(
+                        Blocks.WHITE_CONCRETE
+                );
+                foundJunctionMarking |= marking;
+                int absoluteX = Math.abs(xOffset);
+                int absoluteZ = Math.abs(zOffset);
+                boolean roundedCorner = (Math.max(absoluteX, absoluteZ) == 4
+                        && Math.min(absoluteX, absoluteZ) >= 1)
+                        || Math.min(absoluteX, absoluteZ) >= 3;
+                helper.assertTrue(
+                        marking || level.getBlockState(position)
+                                .is(Blocks.GRAY_CONCRETE)
+                                || roundedCorner
+                                && level.getBlockState(position)
+                                .is(Blocks.SMOOTH_STONE),
+                        "junction cell " + position.toShortString()
+                                + " was " + level.getBlockState(position)
+                                + "; the conflict center should remain paved and markings should use the road material"
+                );
+            }
+        }
+        helper.assertTrue(
+                level.getBlockState(intersectionSurface.offset(4, 0, 4))
+                        .is(Blocks.GRAY_CONCRETE),
+                "a one-block curb must not close the intersection corner"
+        );
+        helper.assertTrue(
+                !level.getBlockState(intersectionSurface.offset(2, 0, 2))
+                        .is(Blocks.SMOOTH_STONE),
+                "the rounded curb should leave the inner conflict area asphalt"
+        );
+        for (int xDirection : List.of(-1, 1)) {
+            for (int zDirection : List.of(-1, 1)) {
+                helper.assertTrue(
+                        level.getBlockState(intersectionSurface.offset(
+                                xDirection * 5,
+                                0,
+                                zDirection * 6
+                        )).is(Blocks.SMOOTH_STONE)
+                                && level.getBlockState(
+                                        intersectionSurface.offset(
+                                                xDirection * 6,
+                                                0,
+                                                zDirection * 5
+                                        )
+                                ).is(Blocks.SMOOTH_STONE)
+                                && level.getBlockState(
+                                        intersectionSurface.offset(
+                                                xDirection * 5,
+                                                0,
+                                                zDirection * 5
+                                        )
+                                ).is(Blocks.GRAY_CONCRETE),
+                        "junction curb returns should curve outside the original conflict square"
+                );
+            }
+        }
+        helper.assertTrue(
+                foundJunctionMarking,
+                "junction should materialize preset-driven crosswalk or stop-line markings"
+        );
+        helper.assertTrue(
+                snapshot.connectors().size() == 12,
+                "crossing node should publish straight, left, and right movements"
+        );
+        helper.assertTrue(
+                ledger.operation(RoadMaterializationOwner.node(crossingNode.id()))
+                        .isPresent(),
+                "the shared crossing node should own its pavement materialization"
+        );
+        helper.assertTrue(
+                snapshot.segments().values().stream()
+                        .allMatch(segment -> segment.startNodeId().equals(crossingNode.id())
+                                || segment.endNodeId().equals(crossingNode.id())),
+                "every child should terminate at the shared crossing node"
+        );
+
+        var removedChild = snapshot.segments().values().stream()
+                .sorted(java.util.Comparator.comparing(
+                        com.cookiecraftmods.roadbuilder.network.RoadSegment::id
+                ))
+                .findFirst()
+                .orElseThrow();
+        PlacementRemovalEndpoint removalEndpoint = new PlacementRemovalEndpoint(
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                new PlacementRemovalService()
+        );
+        RemovalResultS2CPacket removal = removalEndpoint.handle(
+                segmentRemovalPacket(
+                        level,
+                        removedChild.id().value(),
+                        graph.revision(),
+                        RemovalRequestAction.EXECUTE,
+                        RemovalMode.SAFE
+                ),
+                player,
+                ledger,
+                graph
+        );
+        helper.assertTrue(
+                removal.resultCode() == RemovalResultCode.SUCCESS
+                        && graph.snapshot().segments().size() == 3
+                        && ledger.operations().size() == 4,
+                "one crossing child should demolish without removing its three neighbors"
+        );
+        helper.assertTrue(
+                RoadGraphMaterializationConsistency.validate(graph, ledger).isEmpty(),
+                "graph and ownership must remain consistent after child demolition"
+        );
+        for (var remaining : graph.snapshot().segments().values().stream()
+                .sorted(java.util.Comparator.comparing(
+                        com.cookiecraftmods.roadbuilder.network.RoadSegment::id
+                ))
+                .toList()) {
+            RemovalResultS2CPacket remainingRemoval = removalEndpoint.handle(
+                    segmentRemovalPacket(
+                            level,
+                            remaining.id().value(),
+                            graph.revision(),
+                            RemovalRequestAction.EXECUTE,
+                            RemovalMode.SAFE
+                    ),
+                    player,
+                    ledger,
+                    graph
+            );
+            helper.assertTrue(
+                    remainingRemoval.resultCode() == RemovalResultCode.SUCCESS,
+                    "every remaining crossing child should demolish safely"
+            );
+        }
+        helper.assertTrue(
+                graph.snapshot().segments().isEmpty()
+                        && graph.snapshot().nodes().isEmpty()
+                        && ledger.operations().isEmpty(),
+                "the final child should remove the orphan junction surface and node"
+        );
+        helper.assertTrue(
+                level.getBlockState(eastClearanceColumn.above()).is(Blocks.OAK_LOG)
+                        && level.getBlockState(eastClearanceColumn.above(4))
+                        .is(Blocks.OAK_LEAVES)
+                        && level.getBlockState(intersectionSurface.above())
+                        .is(Blocks.GRASS_BLOCK)
+                        && level.getBlockState(intersectionSurface.above(2))
+                        .is(Blocks.OAK_LOG),
+                "full demolition should restore cleared overhead blocks; log="
+                        + level.getBlockState(eastClearanceColumn.above())
+                        + ", leaves="
+                        + level.getBlockState(eastClearanceColumn.above(4))
+                        + ", intersection-1="
+                        + level.getBlockState(intersectionSurface.above())
+                        + ", intersection-2="
+                        + level.getBlockState(intersectionSurface.above(2))
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void realWorldCommitPersistsAndSafelyRestores(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos relative = new BlockPos(2, 2, 2);
+        BlockPos position = helper.absolutePos(relative);
+        helper.setBlock(relative, Blocks.DIRT);
+        RoadBuilderPlacementSavedData savedData = RoadBuilderPlacementSavedData.get(level);
+        PlacementOperationId operationId = PlacementOperationId.create();
+        BlockPlacementPlan plan = plan(
+                level,
+                new PlannedBlock(position, Blocks.STONE.defaultBlockState())
+        );
+
+        PlacementCommitResult.Success committed = requireType(
+                helper,
+                new BlockPlanCommitter().commit(
+                        operationId,
+                        plan,
+                        new ServerLevelPlacementBlockWorld(level),
+                        savedData.ledger()
+                ),
+                PlacementCommitResult.Success.class,
+                "real ServerLevel commit should succeed"
+        );
+
+        helper.assertTrue(committed.changedBlockCount() == 1, "one real block should change");
+        helper.assertBlockPresent(Blocks.STONE, relative);
+        helper.assertTrue(savedData.isDirty(), "ledger publication should mark SavedData dirty");
+        RoadBuilderPlacementSavedData decoded = RoadBuilderPlacementSavedData.load(
+                level.dimension(),
+                savedData.save(new CompoundTag())
+        );
+        helper.assertTrue(decoded.isCompatible(), "serialized real-world ownership should decode");
+        helper.assertTrue(
+                decoded.ledger().operation(operationId).isPresent(),
+                "decoded ownership should rebuild the operation index"
+        );
+
+        requireType(
+                helper,
+                new PlacementRemovalService().remove(
+                        operationId,
+                        RemovalMode.SAFE,
+                        new ServerLevelPlacementBlockWorld(level),
+                        savedData.ledger()
+                ),
+                PlacementRemovalResult.Success.class,
+                "persisted operation should remove successfully"
+        );
+        helper.assertBlockPresent(Blocks.DIRT, relative);
+        helper.assertTrue(savedData.ledger().operation(operationId).isEmpty(), "operation should be released");
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void overlappingOperationsRestoreInEitherRemovalOrder(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(level);
+        PlacementRemovalService removalService = new PlacementRemovalService();
+        BlockPos olderFirstRelative = new BlockPos(2, 2, 2);
+        BlockPos newerFirstRelative = new BlockPos(5, 2, 2);
+        BlockPos olderFirst = helper.absolutePos(olderFirstRelative);
+        BlockPos newerFirst = helper.absolutePos(newerFirstRelative);
+        helper.setBlock(olderFirstRelative, Blocks.DIRT);
+        helper.setBlock(newerFirstRelative, Blocks.DIRT);
+
+        PlacementOwnershipLedger olderFirstLedger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId firstA = operationId(10);
+        PlacementOperationId firstB = operationId(11);
+        commitSingle(helper, world, olderFirstLedger, firstA, olderFirst, Blocks.STONE.defaultBlockState());
+        commitSingle(helper, world, olderFirstLedger, firstB, olderFirst, Blocks.COBBLESTONE.defaultBlockState());
+        PlacementRemovalResult.Success hiddenRemoval = requireType(
+                helper,
+                removalService.remove(firstA, RemovalMode.SAFE, world, olderFirstLedger),
+                PlacementRemovalResult.Success.class,
+                "hidden older operation should remove"
+        );
+        helper.assertTrue(hiddenRemoval.summary().shadowedCount() == 1, "older layer should be shadowed");
+        helper.assertBlockPresent(Blocks.COBBLESTONE, olderFirstRelative);
+        requireType(
+                helper,
+                removalService.remove(firstB, RemovalMode.SAFE, world, olderFirstLedger),
+                PlacementRemovalResult.Success.class,
+                "newer operation should restore the rebased base"
+        );
+        helper.assertBlockPresent(Blocks.DIRT, olderFirstRelative);
+
+        PlacementOwnershipLedger newerFirstLedger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId secondA = operationId(12);
+        PlacementOperationId secondB = operationId(13);
+        commitSingle(helper, world, newerFirstLedger, secondA, newerFirst, Blocks.STONE.defaultBlockState());
+        commitSingle(helper, world, newerFirstLedger, secondB, newerFirst, Blocks.COBBLESTONE.defaultBlockState());
+        requireType(
+                helper,
+                removalService.remove(secondB, RemovalMode.SAFE, world, newerFirstLedger),
+                PlacementRemovalResult.Success.class,
+                "newer operation should restore the older surface"
+        );
+        helper.assertBlockPresent(Blocks.STONE, newerFirstRelative);
+        requireType(
+                helper,
+                removalService.remove(secondA, RemovalMode.SAFE, world, newerFirstLedger),
+                PlacementRemovalResult.Success.class,
+                "older operation should then restore terrain"
+        );
+        helper.assertBlockPresent(Blocks.DIRT, newerFirstRelative);
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void safeAndForceRemovalHandleExternalEdits(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(level);
+        PlacementRemovalService removalService = new PlacementRemovalService();
+        BlockPos safeRelative = new BlockPos(2, 2, 2);
+        BlockPos forceRelative = new BlockPos(5, 2, 2);
+        BlockPos safePosition = helper.absolutePos(safeRelative);
+        BlockPos forcePosition = helper.absolutePos(forceRelative);
+        helper.setBlock(safeRelative, Blocks.DIRT);
+        helper.setBlock(forceRelative, Blocks.DIRT);
+
+        PlacementOwnershipLedger safeLedger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId safeId = operationId(20);
+        commitSingle(helper, world, safeLedger, safeId, safePosition, Blocks.STONE.defaultBlockState());
+        helper.setBlock(safeRelative, Blocks.GOLD_BLOCK);
+        PlacementRemovalResult.Success safe = requireType(
+                helper,
+                removalService.remove(safeId, RemovalMode.SAFE, world, safeLedger),
+                PlacementRemovalResult.Success.class,
+                "safe removal should complete with a conflict"
+        );
+        helper.assertTrue(safe.summary().conflictCount() == 1, "safe removal should report one conflict");
+        helper.assertBlockPresent(Blocks.GOLD_BLOCK, safeRelative);
+        helper.assertTrue(safeLedger.operation(safeId).isEmpty(), "safe conflict should release ownership");
+
+        PlacementOwnershipLedger forceLedger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId forceId = operationId(21);
+        commitSingle(helper, world, forceLedger, forceId, forcePosition, Blocks.STONE.defaultBlockState());
+        helper.setBlock(forceRelative, Blocks.GOLD_BLOCK);
+        PlacementRemovalResult.Success forced = requireType(
+                helper,
+                removalService.remove(forceId, RemovalMode.FORCE, world, forceLedger),
+                PlacementRemovalResult.Success.class,
+                "force removal should restore a supported edit"
+        );
+        helper.assertTrue(forced.summary().forcedConflictCount() == 1, "force should count the overwrite");
+        helper.assertBlockPresent(Blocks.DIRT, forceRelative);
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void placementSupportsRealFluidsAndRejectsBlockEntities(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(level);
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+        BlockPos waterRelative = new BlockPos(1, 2, 1);
+        BlockPos chestRelative = new BlockPos(3, 2, 1);
+        BlockPos waterTargetRelative = new BlockPos(1, 2, 4);
+        BlockPos chestTargetRelative = new BlockPos(3, 2, 4);
+        helper.setBlock(waterRelative, Blocks.WATER);
+        helper.setBlock(chestRelative, Blocks.CHEST);
+        helper.setBlock(waterTargetRelative, Blocks.DIRT);
+        helper.setBlock(chestTargetRelative, Blocks.DIRT);
+        helper.assertTrue(helper.getBlockEntity(chestRelative) != null, "test chest should have a block entity");
+
+        PlacementOperationId waterSourceId = operationId(30);
+        commitSingle(
+                helper,
+                world,
+                ledger,
+                waterSourceId,
+                helper.absolutePos(waterRelative),
+                Blocks.STONE.defaultBlockState()
+        );
+        assertCommitFailure(
+                helper,
+                world,
+                ledger,
+                operationId(31),
+                helper.absolutePos(chestRelative),
+                Blocks.STONE.defaultBlockState(),
+                PlacementCommitFailureCode.CURRENT_BLOCK_ENTITY_UNSUPPORTED
+        );
+        PlacementOperationId waterTargetId = operationId(32);
+        commitSingle(
+                helper,
+                world,
+                ledger,
+                waterTargetId,
+                helper.absolutePos(waterTargetRelative),
+                Blocks.WATER.defaultBlockState()
+        );
+        assertCommitFailure(
+                helper,
+                world,
+                ledger,
+                operationId(33),
+                helper.absolutePos(chestTargetRelative),
+                Blocks.CHEST.defaultBlockState(),
+                PlacementCommitFailureCode.TARGET_BLOCK_ENTITY_UNSUPPORTED
+        );
+
+        helper.assertBlockPresent(Blocks.STONE, waterRelative);
+        helper.assertBlockPresent(Blocks.CHEST, chestRelative);
+        helper.assertBlockPresent(Blocks.WATER, waterTargetRelative);
+        helper.assertBlockPresent(Blocks.DIRT, chestTargetRelative);
+        PlacementRemovalService removalService = new PlacementRemovalService();
+        requireType(
+                helper,
+                removalService.remove(
+                        waterSourceId,
+                        RemovalMode.SAFE,
+                        world,
+                        ledger
+                ),
+                PlacementRemovalResult.Success.class,
+                "water source should restore"
+        );
+        requireType(
+                helper,
+                removalService.remove(
+                        waterTargetId,
+                        RemovalMode.SAFE,
+                        world,
+                        ledger
+                ),
+                PlacementRemovalResult.Success.class,
+                "water target should restore"
+        );
+        helper.assertBlockPresent(Blocks.WATER, waterRelative);
+        helper.assertBlockPresent(Blocks.DIRT, waterTargetRelative);
+        helper.assertTrue(ledger.operations().isEmpty(), "unsupported transitions must publish no ownership");
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void safePreservesAndForceRejectsExternalFluidOrBlockEntity(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(level);
+        PlacementRemovalService removalService = new PlacementRemovalService();
+        BlockPos safeChestRelative = new BlockPos(1, 2, 2);
+        BlockPos forceWaterRelative = new BlockPos(3, 2, 2);
+        BlockPos forceChestRelative = new BlockPos(5, 2, 2);
+        helper.setBlock(safeChestRelative, Blocks.DIRT);
+        helper.setBlock(forceWaterRelative, Blocks.DIRT);
+        helper.setBlock(forceChestRelative, Blocks.DIRT);
+
+        PlacementOwnershipLedger safeLedger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId safeId = operationId(40);
+        commitSingle(
+                helper, world, safeLedger, safeId,
+                helper.absolutePos(safeChestRelative), Blocks.STONE.defaultBlockState()
+        );
+        helper.setBlock(safeChestRelative, Blocks.CHEST);
+        PlacementRemovalResult.Success safe = requireType(
+                helper,
+                removalService.remove(safeId, RemovalMode.SAFE, world, safeLedger),
+                PlacementRemovalResult.Success.class,
+                "safe removal should preserve an external chest"
+        );
+        helper.assertTrue(safe.summary().conflictCount() == 1, "chest should be a safe conflict");
+        helper.assertBlockPresent(Blocks.CHEST, safeChestRelative);
+        helper.assertTrue(helper.getBlockEntity(safeChestRelative) != null, "chest block entity should remain");
+
+        PlacementOwnershipLedger waterLedger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId waterId = operationId(41);
+        commitSingle(
+                helper, world, waterLedger, waterId,
+                helper.absolutePos(forceWaterRelative), Blocks.STONE.defaultBlockState()
+        );
+        helper.setBlock(forceWaterRelative, Blocks.WATER);
+        PlacementRemovalResult.Failure waterFailure = requireType(
+                helper,
+                removalService.remove(waterId, RemovalMode.FORCE, world, waterLedger),
+                PlacementRemovalResult.Failure.class,
+                "force should reject an external fluid"
+        );
+        helper.assertTrue(
+                waterFailure.code() == PlacementRemovalFailureCode.FORCE_CURRENT_FLUID_UNSUPPORTED,
+                "force fluid failure should be explicit"
+        );
+        helper.assertBlockPresent(Blocks.WATER, forceWaterRelative);
+        helper.assertTrue(waterLedger.operation(waterId).isPresent(), "failed force must retain ownership");
+
+        PlacementOwnershipLedger chestLedger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId chestId = operationId(42);
+        commitSingle(
+                helper, world, chestLedger, chestId,
+                helper.absolutePos(forceChestRelative), Blocks.STONE.defaultBlockState()
+        );
+        helper.setBlock(forceChestRelative, Blocks.CHEST);
+        PlacementRemovalResult.Failure chestFailure = requireType(
+                helper,
+                removalService.remove(chestId, RemovalMode.FORCE, world, chestLedger),
+                PlacementRemovalResult.Failure.class,
+                "force should reject an external block entity"
+        );
+        helper.assertTrue(
+                chestFailure.code() == PlacementRemovalFailureCode.FORCE_CURRENT_BLOCK_ENTITY_UNSUPPORTED,
+                "force block-entity failure should be explicit"
+        );
+        helper.assertBlockPresent(Blocks.CHEST, forceChestRelative);
+        helper.assertTrue(chestLedger.operation(chestId).isPresent(), "failed force must retain ownership");
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void authorizerUsesRealDimensionBoundsDistanceAndPermissionContext(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos position = helper.absolutePos(new BlockPos(3, 2, 3));
+        BlockPlacementPlan plan = plan(
+                level,
+                new PlannedBlock(position, Blocks.STONE.defaultBlockState())
+        );
+        ServerPlayer creative = testPlayer(level, true);
+        creative.setPos(position.getX() + 0.5, position.getY() + 1.0, position.getZ() + 0.5);
+        ServerPlayer survival = testPlayer(level, false);
+        survival.setPos(creative.getX(), creative.getY(), creative.getZ());
+        ConstructionLimits limits = new ConstructionLimits(16.0, 16, 4, 128);
+
+        assertValidation(
+                helper,
+                ConstructionAuthorizer.creativeOnly().validate(creative, plan, limits),
+                ConstructionValidationCode.ALLOWED
+        );
+        assertValidation(
+                helper,
+                ConstructionAuthorizer.creativeOnly().validate(survival, plan, limits),
+                ConstructionValidationCode.NOT_CREATIVE
+        );
+        assertValidation(
+                helper,
+                new ConstructionAuthorizer(player -> false).validate(creative, plan, limits),
+                ConstructionValidationCode.NO_PERMISSION
+        );
+        assertValidation(
+                helper,
+                new ConstructionAuthorizer(player -> true, (player, serverLevel, candidate) -> false)
+                        .validate(creative, plan, limits),
+                ConstructionValidationCode.NO_PERMISSION
+        );
+
+        BlockPlacementPlan wrongDimension = BlockPlacementPlan.create(
+                Level.NETHER,
+                List.of(new PlannedBlock(position, Blocks.STONE.defaultBlockState()))
+        );
+        assertValidation(
+                helper,
+                ConstructionAuthorizer.creativeOnly().validate(creative, wrongDimension, limits),
+                ConstructionValidationCode.WRONG_DIMENSION
+        );
+
+        BlockPos aboveBuildHeight = new BlockPos(
+                position.getX(),
+                level.getMaxBuildHeight(),
+                position.getZ()
+        );
+        BlockPlacementPlan outsideWorld = plan(
+                level,
+                new PlannedBlock(aboveBuildHeight, Blocks.STONE.defaultBlockState())
+        );
+        assertValidation(
+                helper,
+                ConstructionAuthorizer.creativeOnly().validate(creative, outsideWorld, limits),
+                ConstructionValidationCode.OUTSIDE_WORLD
+        );
+
+        creative.setPos(position.getX() + 100.0, position.getY(), position.getZ());
+        assertValidation(
+                helper,
+                ConstructionAuthorizer.creativeOnly().validate(
+                        creative,
+                        plan,
+                        new ConstructionLimits(2.0, 16, 4, 128)
+                ),
+                ConstructionValidationCode.ALLOWED
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void existingRoadAuthorizationUsesTheNearbyPartOfALongFootprint(
+            GameTestHelper helper
+    ) {
+        ServerLevel level = helper.getLevel();
+        BlockPos nearby = helper.absolutePos(new BlockPos(3, 2, 3));
+        BlockPos distant = nearby.offset(32, 0, 0);
+        BlockPlacementPlan footprint = BlockPlacementPlan.create(
+                level.dimension(),
+                List.of(
+                        new PlannedBlock(
+                                nearby,
+                                Blocks.STONE.defaultBlockState()
+                        ),
+                        new PlannedBlock(
+                                distant,
+                                Blocks.STONE.defaultBlockState()
+                        )
+                )
+        );
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(
+                nearby.getX() + 0.5,
+                nearby.getY() + 1.0,
+                nearby.getZ() + 0.5
+        );
+        ConstructionLimits limits = new ConstructionLimits(8.0, 16, 4, 128);
+        ConstructionAuthorizer authorizer = ConstructionAuthorizer.creativeOnly();
+
+        assertValidation(
+                helper,
+                authorizer.validate(player, footprint, limits),
+                ConstructionValidationCode.ALLOWED
+        );
+        assertValidation(
+                helper,
+                authorizer.validateExistingFootprint(
+                        player,
+                        footprint,
+                        limits
+                ),
+                ConstructionValidationCode.ALLOWED
+        );
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void removalEndpointPreviewsAndReauthorizesSavedFootprint(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos relative = new BlockPos(3, 2, 3);
+        BlockPos position = helper.absolutePos(relative);
+        helper.setBlock(relative, Blocks.DIRT);
+
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId operationId = operationId(50);
+        ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(level);
+        commitSingle(helper, world, ledger, operationId, position, Blocks.STONE.defaultBlockState());
+
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(position.getX() + 0.5, position.getY() + 1.0, position.getZ() + 0.5);
+        ConstructionLimits limits = new ConstructionLimits(16.0, 16, 4, 128);
+        PlacementRemovalService removalService = new PlacementRemovalService();
+
+        PlacementRemovalEndpoint footprintDenied = new PlacementRemovalEndpoint(
+                new ConstructionAuthorizer(
+                        candidate -> true,
+                        (candidate, serverLevel, footprint) ->
+                                !footprint.positions().equals(List.of(position))
+                ),
+                limits,
+                removalService
+        );
+        RemovalResultS2CPacket denied = footprintDenied.handle(
+                removalPacket(level, operationId, RemovalRequestAction.PREVIEW, RemovalMode.SAFE),
+                player,
+                ledger
+        );
+        helper.assertTrue(
+                denied.resultCode() == RemovalResultCode.NOT_AUTHORIZED,
+                "saved-footprint permission denial should reject preview"
+        );
+        helper.assertBlockPresent(Blocks.STONE, relative);
+        helper.assertTrue(ledger.operation(operationId).isPresent(), "denied preview must retain ownership");
+
+        PlacementRemovalEndpoint endpoint = new PlacementRemovalEndpoint(
+                ConstructionAuthorizer.creativeOnly(),
+                limits,
+                removalService
+        );
+        helper.setBlock(relative, Blocks.GOLD_BLOCK);
+        RemovalResultS2CPacket forcePreview = endpoint.handle(
+                removalPacket(level, operationId, RemovalRequestAction.PREVIEW, RemovalMode.FORCE),
+                player,
+                ledger
+        );
+        helper.assertTrue(
+                forcePreview.resultCode() == RemovalResultCode.SUCCESS,
+                "force preview should be available to an authorized builder"
+        );
+        helper.assertTrue(
+                forcePreview.summary().orElseThrow().forcedConflictCount() == 1,
+                "force preview should report the overwritten edit"
+        );
+        helper.assertBlockPresent(Blocks.GOLD_BLOCK, relative);
+        helper.assertTrue(ledger.operation(operationId).isPresent(), "force preview must be read-only");
+
+        RemovalResultS2CPacket preview = endpoint.handle(
+                removalPacket(level, operationId, RemovalRequestAction.PREVIEW, RemovalMode.SAFE),
+                player,
+                ledger
+        );
+        helper.assertTrue(preview.resultCode() == RemovalResultCode.SUCCESS, "safe preview should succeed");
+        helper.assertTrue(
+                preview.summary().orElseThrow().conflictCount() == 1,
+                "safe preview should report the external edit"
+        );
+        helper.assertBlockPresent(Blocks.GOLD_BLOCK, relative);
+        helper.assertTrue(ledger.operation(operationId).isPresent(), "preview must be read-only");
+
+        player.setPos(position.getX() + 100.0, position.getY(), position.getZ());
+        RemovalResultS2CPacket distantExecute = endpoint.handle(
+                removalPacket(level, operationId, RemovalRequestAction.EXECUTE, RemovalMode.SAFE),
+                player,
+                ledger
+        );
+        helper.assertTrue(
+                distantExecute.resultCode() == RemovalResultCode.SUCCESS,
+                "authorized builders must be able to remove saved roads remotely"
+        );
+        helper.assertBlockPresent(Blocks.GOLD_BLOCK, relative);
+        helper.assertTrue(
+                distantExecute.summary().orElseThrow().conflictCount() == 1,
+                "safe execute should report the external edit"
+        );
+        helper.assertTrue(ledger.operation(operationId).isEmpty(), "safe execute should release ownership");
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void realCommitAndRemovalCrossAChunkBoundary(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos anchor = helper.absolutePos(new BlockPos(4, 2, 4));
+        int boundaryX = Math.floorDiv(anchor.getX(), 16) * 16 + 15;
+        BlockPos left = new BlockPos(boundaryX, anchor.getY(), anchor.getZ());
+        BlockPos right = left.east();
+        level.getChunkAt(left);
+        level.getChunkAt(right);
+        BlockState originalLeft = level.getBlockState(left);
+        BlockState originalRight = level.getBlockState(right);
+
+        try {
+            level.setBlock(left, Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+            level.setBlock(right, Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+            BlockPlacementPlan plan = plan(
+                    level,
+                    new PlannedBlock(left, Blocks.STONE.defaultBlockState()),
+                    new PlannedBlock(right, Blocks.STONE.defaultBlockState())
+            );
+            helper.assertTrue(plan.touchedChunks().size() == 2, "fixture should cross exactly two chunks");
+            PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+            PlacementOperationId operationId = operationId(50);
+            ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(level);
+
+            requireType(
+                    helper,
+                    new BlockPlanCommitter().commit(operationId, plan, world, ledger),
+                    PlacementCommitResult.Success.class,
+                    "cross-chunk commit should succeed"
+            );
+            helper.assertTrue(level.getBlockState(left).is(Blocks.STONE), "left chunk target should change");
+            helper.assertTrue(level.getBlockState(right).is(Blocks.STONE), "right chunk target should change");
+            requireType(
+                    helper,
+                    new PlacementRemovalService().remove(operationId, RemovalMode.SAFE, world, ledger),
+                    PlacementRemovalResult.Success.class,
+                    "cross-chunk operation should remove"
+            );
+            helper.assertTrue(level.getBlockState(left).is(Blocks.DIRT), "left terrain should restore");
+            helper.assertTrue(level.getBlockState(right).is(Blocks.DIRT), "right terrain should restore");
+        } finally {
+            level.setBlock(left, originalLeft, UPDATE_FLAGS);
+            level.setBlock(right, originalRight, UPDATE_FLAGS);
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 300)
+    public void placementSurvivesActualChunkUnloadAndReload(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        PlacementOperationId operationId = operationId(70);
+        BlockPos anchor = helper.absolutePos(new BlockPos(4, 2, 4));
+        BlockPos position = anchor.offset(48 * 16, 0, 48 * 16);
+        ChunkPos chunkPosition = new ChunkPos(position);
+        AtomicBoolean unloaded = new AtomicBoolean();
+        AtomicBoolean loadedAgain = new AtomicBoolean();
+
+        ServerChunkEvents.CHUNK_UNLOAD.register((eventLevel, chunk) -> {
+            if (eventLevel == level && chunk.getPos().equals(chunkPosition)) {
+                unloaded.set(true);
+            }
+        });
+
+        LevelChunk initiallyLoaded = level.getChunkAt(position);
+        RoadBuilderPlacementSavedData savedData = RoadBuilderPlacementSavedData.get(level);
+        ServerLevelPlacementBlockWorld initialWorld = new ServerLevelPlacementBlockWorld(level);
+        if (savedData.ledger().operation(operationId).isPresent()) {
+            requireType(
+                    helper,
+                    new PlacementRemovalService().remove(
+                            operationId,
+                            RemovalMode.FORCE,
+                            initialWorld,
+                            savedData.ledger()
+                    ),
+                    PlacementRemovalResult.Success.class,
+                    "stale durability fixture should clean up before rerun"
+            );
+        }
+        BlockState originalState = level.getBlockState(position);
+        ServerChunkEvents.CHUNK_LOAD.register((eventLevel, chunk) -> {
+            if (eventLevel == level && chunk.getPos().equals(chunkPosition)) {
+                loadedAgain.set(true);
+            }
+        });
+
+        level.setBlock(position, Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+        requireType(
+                helper,
+                new BlockPlanCommitter().commit(
+                        operationId,
+                        plan(level, new PlannedBlock(position, Blocks.STONE.defaultBlockState())),
+                        initialWorld,
+                        savedData.ledger()
+                ),
+                PlacementCommitResult.Success.class,
+                "distant chunk placement should commit"
+        );
+        helper.assertTrue(level.getBlockState(position).is(Blocks.STONE), "fixture block should be stone");
+
+        // Persist both stores before releasing the one-tick UNKNOWN load ticket.
+        level.getChunkSource().save(true);
+        level.getDataStorage().save();
+
+        helper.startSequence()
+                .thenWaitUntil(() -> helper.assertTrue(
+                        unloaded.get(),
+                        "target chunk has not emitted a real unload event yet"
+                ))
+                .thenExecute(() -> {
+                    ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(level);
+                    try {
+                        LevelChunk reloaded = level.getChunkAt(position);
+                        helper.assertTrue(loadedAgain.get(), "target chunk should emit a reload event");
+                        helper.assertTrue(
+                                reloaded != initiallyLoaded,
+                                "reloaded chunk must not reuse the unloaded LevelChunk instance"
+                        );
+                        helper.assertTrue(
+                                level.getBlockState(position).is(Blocks.STONE),
+                                "placed block should survive chunk unload/reload"
+                        );
+                        helper.assertTrue(
+                                savedData.ledger().operation(operationId).isPresent(),
+                                "ownership should remain available after chunk reload"
+                        );
+                        requireType(
+                                helper,
+                                new PlacementRemovalService().remove(
+                                        operationId,
+                                        RemovalMode.SAFE,
+                                        world,
+                                        savedData.ledger()
+                                ),
+                                PlacementRemovalResult.Success.class,
+                                "reloaded operation should remove safely"
+                        );
+                        helper.assertTrue(
+                                level.getBlockState(position).is(Blocks.DIRT),
+                                "reloaded operation should restore its original terrain"
+                        );
+                    } finally {
+                        if (savedData.ledger().operation(operationId).isPresent()) {
+                            new PlacementRemovalService().remove(
+                                    operationId,
+                                    RemovalMode.FORCE,
+                                    world,
+                                    savedData.ledger()
+                            );
+                        }
+                        level.setBlock(position, originalState, UPDATE_FLAGS);
+                    }
+                })
+                .thenSucceed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void injectedSecondWriteFailureRollsBackRealFirstWrite(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos firstRelative = new BlockPos(2, 2, 2);
+        BlockPos secondRelative = new BlockPos(3, 2, 2);
+        BlockPos first = helper.absolutePos(firstRelative);
+        BlockPos second = helper.absolutePos(secondRelative);
+        helper.setBlock(firstRelative, Blocks.DIRT);
+        helper.setBlock(secondRelative, Blocks.DIRT);
+        ServerLevelPlacementBlockWorld realWorld = new ServerLevelPlacementBlockWorld(level);
+        PlacementBlockWorld rejectingWorld = new RejectingPlacementBlockWorld(realWorld, second);
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(level.dimension());
+        PlacementOperationId operationId = operationId(60);
+        BlockPlacementPlan plan = plan(
+                level,
+                new PlannedBlock(first, Blocks.STONE.defaultBlockState()),
+                new PlannedBlock(second, Blocks.STONE.defaultBlockState())
+        );
+
+        PlacementCommitResult.Failure failure = requireType(
+                helper,
+                new BlockPlanCommitter().commit(operationId, plan, rejectingWorld, ledger),
+                PlacementCommitResult.Failure.class,
+                "injected second write should reject the commit"
+        );
+
+        helper.assertTrue(
+                failure.code() == PlacementCommitFailureCode.WORLD_WRITE_REJECTED,
+                "write rejection should survive successful rollback"
+        );
+        helper.assertBlockPresent(Blocks.DIRT, firstRelative);
+        helper.assertBlockPresent(Blocks.DIRT, secondRelative);
+        helper.assertTrue(ledger.operation(operationId).isEmpty(), "failed commit must publish no operation");
+        helper.succeed();
+    }
+
+    private static void commitSingle(
+            GameTestHelper helper,
+            PlacementBlockWorld world,
+            PlacementOwnershipLedger ledger,
+            PlacementOperationId operationId,
+            BlockPos position,
+            BlockState targetState
+    ) {
+        requireType(
+                helper,
+                new BlockPlanCommitter().commit(
+                        operationId,
+                        plan(helper.getLevel(), new PlannedBlock(position, targetState)),
+                        world,
+                        ledger
+                ),
+                PlacementCommitResult.Success.class,
+                "single-block commit should succeed"
+        );
+    }
+
+    private static void assertCommitFailure(
+            GameTestHelper helper,
+            PlacementBlockWorld world,
+            PlacementOwnershipLedger ledger,
+            PlacementOperationId operationId,
+            BlockPos position,
+            BlockState targetState,
+            PlacementCommitFailureCode expectedCode
+    ) {
+        PlacementCommitResult.Failure failure = requireType(
+                helper,
+                new BlockPlanCommitter().commit(
+                        operationId,
+                        plan(helper.getLevel(), new PlannedBlock(position, targetState)),
+                        world,
+                        ledger
+                ),
+                PlacementCommitResult.Failure.class,
+                "unsupported transition should fail"
+        );
+        helper.assertTrue(failure.code() == expectedCode, "expected failure code " + expectedCode);
+    }
+
+    private static void assertValidation(
+            GameTestHelper helper,
+            ConstructionValidationResult result,
+            ConstructionValidationCode expectedCode
+    ) {
+        helper.assertTrue(
+                result.code() == expectedCode,
+                "expected validation " + expectedCode + " but got " + result.code()
+        );
+    }
+
+    private static BlockPlacementPlan plan(ServerLevel level, PlannedBlock... blocks) {
+        return BlockPlacementPlan.create(level.dimension(), List.of(blocks));
+    }
+
+    private static RoadPoint pointAtBlockCenter(BlockPos position) {
+        return new RoadPoint(position.getX() + 0.5, position.getY(), position.getZ() + 0.5);
+    }
+
+    private static PlacementOperationId operationId(long lowBits) {
+        return new PlacementOperationId(new UUID(0L, lowBits));
+    }
+
+    private static RemovalIntentC2SPacket removalPacket(
+            ServerLevel level,
+            PlacementOperationId operationId,
+            RemovalRequestAction action,
+            RemovalMode mode
+    ) {
+        return RemovalIntentC2SPacket.current(
+                UUID.randomUUID(),
+                level.dimension().location(),
+                operationId.value(),
+                action,
+                mode
+        );
+    }
+
+    private static SegmentRemovalIntentC2SPacket segmentRemovalPacket(
+            ServerLevel level,
+            UUID segmentId,
+            long expectedGraphRevision,
+            RemovalRequestAction action,
+            RemovalMode mode
+    ) {
+        return SegmentRemovalIntentC2SPacket.current(
+                UUID.randomUUID(),
+                level.dimension().location(),
+                segmentId,
+                expectedGraphRevision,
+                action,
+                mode
+        );
+    }
+
+    private static StraightRoadIntentC2SPacket placementPacket(
+            ServerLevel level,
+            ResourceLocation presetId,
+            StraightRoadIntent intent
+    ) {
+        return StraightRoadIntentC2SPacket.current(
+                UUID.randomUUID(),
+                level.dimension().location(),
+                presetId,
+                intent.expectedPresetRevision(),
+                intent.start().x(),
+                intent.start().y(),
+                intent.start().z(),
+                intent.end().x(),
+                intent.end().y(),
+                intent.end().z()
+        );
+    }
+
+    private static int testPresetRevision(ResourceLocation presetId) {
+        return RoadPresetResources.repository().find(presetId).orElseThrow().revision();
+    }
+
+    private static ServerPlayer testPlayer(ServerLevel level, boolean creative) {
+        return new ServerPlayer(
+                level.getServer(),
+                level,
+                new GameProfile(UUID.randomUUID(), "roadbuilder-gametest")
+        ) {
+            @Override
+            public boolean isCreative() {
+                return creative;
+            }
+
+            @Override
+            public boolean isSpectator() {
+                return false;
+            }
+        };
+    }
+
+    private static <T> T requireType(
+            GameTestHelper helper,
+            Object value,
+            Class<T> expectedType,
+            String message
+    ) {
+        helper.assertTrue(
+                expectedType.isInstance(value),
+                message + "; got " + value.getClass().getSimpleName()
+        );
+        return expectedType.cast(value);
+    }
+
+    private static final class RejectingPlacementBlockWorld implements PlacementBlockWorld {
+        private final PlacementBlockWorld delegate;
+        private final BlockPos rejectedPosition;
+
+        private RejectingPlacementBlockWorld(PlacementBlockWorld delegate, BlockPos rejectedPosition) {
+            this.delegate = delegate;
+            this.rejectedPosition = rejectedPosition.immutable();
+        }
+
+        @Override
+        public net.minecraft.resources.ResourceKey<Level> dimension() {
+            return delegate.dimension();
+        }
+
+        @Override
+        public BlockState blockState(BlockPos position) {
+            return delegate.blockState(position);
+        }
+
+        @Override
+        public boolean hasBlockEntity(BlockPos position) {
+            return delegate.hasBlockEntity(position);
+        }
+
+        @Override
+        public boolean setBlockState(BlockPos position, BlockState state) {
+            return !rejectedPosition.equals(position) && delegate.setBlockState(position, state);
+        }
+    }
+}

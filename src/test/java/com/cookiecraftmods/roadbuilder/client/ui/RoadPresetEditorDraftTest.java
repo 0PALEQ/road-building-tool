@@ -1,0 +1,368 @@
+package com.cookiecraftmods.roadbuilder.client.ui;
+
+import com.cookiecraftmods.roadbuilder.preset.LaneComponent;
+import com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection;
+import com.cookiecraftmods.roadbuilder.preset.LaneType;
+import com.cookiecraftmods.roadbuilder.preset.RoadMarkingPattern;
+import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
+import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand;
+import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
+import net.minecraft.resources.ResourceLocation;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class RoadPresetEditorDraftTest {
+    private static final ResourceLocation ASPHALT =
+            new ResourceLocation("minecraft", "gray_concrete");
+    private static final ResourceLocation STONE =
+            new ResourceLocation("minecraft", "stone");
+    private static final ResourceLocation WHITE =
+            new ResourceLocation("minecraft", "white_concrete");
+
+    @Test
+    void projectsLegacyLanesAndBandsIntoOneOrderedCrossSection() {
+        RoadPresetEditorDraft draft = new RoadPresetEditorDraft(preset(
+                9,
+                List.of(
+                        lane(3, -2, LaneTravelDirection.FORWARD),
+                        lane(3, 2, LaneTravelDirection.BACKWARD)
+                ),
+                List.of(
+                        band(RoadSurfaceRole.SIDEWALK, 1, STONE),
+                        band(RoadSurfaceRole.PAVEMENT, 3, ASPHALT),
+                        band(RoadSurfaceRole.MARKING, 1, WHITE),
+                        band(RoadSurfaceRole.PAVEMENT, 3, ASPHALT),
+                        band(RoadSurfaceRole.SIDEWALK, 1, STONE)
+                )
+        ));
+
+        assertAll(
+                () -> assertEquals(9, draft.surfaceBlockWidth()),
+                () -> assertEquals(2, draft.laneCount()),
+                () -> assertEquals(
+                        List.of(
+                                RoadPresetEditorComponent.Kind.SIDEWALK,
+                                RoadPresetEditorComponent.Kind.VEHICLE_LANE,
+                                RoadPresetEditorComponent.Kind.SOLID_MARKING,
+                                RoadPresetEditorComponent.Kind.VEHICLE_LANE,
+                                RoadPresetEditorComponent.Kind.SIDEWALK
+                        ),
+                        draft.components().stream()
+                                .map(RoadPresetEditorComponent::kind)
+                                .toList()
+                ),
+                () -> assertEquals(
+                        List.of(1, 3, 1, 3, 1),
+                        draft.components().stream()
+                                .map(RoadPresetEditorComponent::width)
+                                .toList()
+                )
+        );
+    }
+
+    @Test
+    void insertionAndReorderingDeriveLaneOffsetsFromTheVisualOrder() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        int sidewalk = draft.insertComponent(
+                0,
+                RoadPresetEditorComponent.surface(
+                        RoadPresetEditorComponent.Kind.SIDEWALK,
+                        1,
+                        STONE
+                )
+        );
+        int backwardLane = draft.addComponent(
+                RoadPresetEditorComponent.vehicleLane(
+                        2,
+                        ASPHALT,
+                        LaneTravelDirection.BACKWARD
+                )
+        );
+        int moved = draft.moveComponent(backwardLane, sidewalk + 1);
+        RoadPreset built = draft.build(2);
+
+        assertAll(
+                () -> assertEquals(1, moved),
+                () -> assertEquals(6, built.surfaceBlockWidth()),
+                () -> assertEquals(2, built.lanes().size()),
+                () -> assertEquals(-1.0,
+                        built.lanes().get(0).lateralOffset()),
+                () -> assertEquals(1.5,
+                        built.lanes().get(1).lateralOffset()),
+                () -> assertEquals(
+                        LaneTravelDirection.BACKWARD,
+                        built.lanes().get(0).direction()
+                )
+        );
+    }
+
+    @Test
+    void laneOwnsItsWidthAndPlacedBlockMaterial() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        RoadPresetEditorComponent lane = draft.components().get(0);
+        draft.replaceComponent(
+                0,
+                lane.withWidth(5).withBlock(STONE)
+        );
+
+        RoadPreset built = draft.build(2);
+
+        assertAll(
+                () -> assertEquals(5, built.surfaceBlockWidth()),
+                () -> assertEquals(5.0, built.lanes().get(0).width()),
+                () -> assertEquals(5, built.surfaceBands().get(0).width()),
+                () -> assertEquals(STONE,
+                        built.surfaceBands().get(0).block())
+        );
+    }
+
+    @Test
+    void supportsDashedAndFixedThreeBlockDoubleMarkings() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        draft.addComponent(RoadPresetEditorComponent.surface(
+                RoadPresetEditorComponent.Kind.DASHED_MARKING,
+                1,
+                WHITE
+        ));
+        draft.addComponent(RoadPresetEditorComponent.surface(
+                RoadPresetEditorComponent.Kind.DOUBLE_CONTINUOUS_MARKING,
+                3,
+                WHITE
+        ));
+
+        RoadPreset built = draft.build(2);
+
+        assertAll(
+                () -> assertEquals(
+                        RoadMarkingPattern.DASHED,
+                        built.surfaceBands().get(1).pattern()
+                ),
+                () -> assertEquals(
+                        RoadMarkingPattern.DOUBLE_CONTINUOUS,
+                        built.surfaceBands().get(2).pattern()
+                ),
+                () -> assertEquals(3,
+                        built.surfaceBands().get(2).width()),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> draft.components().get(2).withWidth(2)
+                )
+        );
+    }
+
+    @Test
+    void maximumWidthAndFinalLaneGuardsAreTransactional() {
+        RoadPresetEditorDraft draft = oneLaneDraft(
+                RoadPreset.MAXIMUM_SURFACE_BLOCK_WIDTH
+        );
+        List<RoadPresetEditorComponent> before =
+                List.copyOf(draft.components());
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> draft.addComponent(RoadPresetEditorComponent.surface(
+                        RoadPresetEditorComponent.Kind.SIDEWALK,
+                        1,
+                        STONE
+                ))
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> draft.removeComponent(0)
+        );
+
+        assertAll(
+                () -> assertEquals(before, draft.components()),
+                () -> assertEquals(
+                        RoadPreset.MAXIMUM_SURFACE_BLOCK_WIDTH,
+                        draft.surfaceBlockWidth()
+                )
+        );
+    }
+
+    @Test
+    void mirrorReversesTheExactRenderedSequence() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        draft.addComponent(RoadPresetEditorComponent.surface(
+                RoadPresetEditorComponent.Kind.SIDEWALK,
+                1,
+                STONE
+        ));
+
+        draft.mirror();
+
+        assertEquals(
+                List.of(
+                        RoadPresetEditorComponent.Kind.SIDEWALK,
+                        RoadPresetEditorComponent.Kind.VEHICLE_LANE
+                ),
+                draft.components().stream()
+                        .map(RoadPresetEditorComponent::kind)
+                        .toList()
+        );
+    }
+
+    @Test
+    void validatesRawBlankDisplayNameWithoutMutatingTheDraft() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        String originalName = draft.display().fallbackName();
+
+        String error = draft.validationError(2, "   ", "roads")
+                .orElseThrow();
+
+        assertAll(
+                () -> assertTrue(error.contains("fallbackName")),
+                () -> assertThrows(
+                        IllegalArgumentException.class,
+                        () -> draft.build(2, "   ", "roads")
+                ),
+                () -> assertEquals(originalName,
+                        draft.display().fallbackName()),
+                () -> assertTrue(draft.validationError(2).isEmpty())
+        );
+    }
+
+    @Test
+    void roadMaterialsFlowToInheritedComponentsAndKeepBusOverrides() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        assertTrue(draft.components().get(0).inheritsRoadMaterial());
+        draft.setRoadMaterial(RoadSurfaceRole.PAVEMENT, STONE);
+        draft.addComponent(RoadPresetEditorComponent.inheritedBusLane(
+                3,
+                STONE,
+                LaneTravelDirection.FORWARD
+        ));
+        draft.setComponentMaterialOverride(1, WHITE);
+        draft.setRoadMaterial(RoadSurfaceRole.PAVEMENT, ASPHALT);
+
+        RoadPreset built = draft.build(2);
+
+        assertAll(
+                () -> assertEquals(ASPHALT,
+                        built.surfaceBands().get(0).block()),
+                () -> assertEquals(WHITE,
+                        built.surfaceBands().get(1).block()),
+                () -> assertEquals(LaneType.BUS,
+                        built.lanes().get(1).type()),
+                () -> assertEquals(ASPHALT,
+                        built.materialPalette().pavementBlock())
+        );
+    }
+
+    @Test
+    void savedRoadsEnableCrosswalksWithTheRoadMarkingMaterial() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        draft.setRoadMaterial(RoadSurfaceRole.MARKING, STONE);
+
+        RoadPreset built = draft.build(2);
+
+        assertAll(
+                () -> assertTrue(
+                        built.intersectionStyle().defaultCrosswalks()
+                ),
+                () -> assertEquals(
+                        STONE,
+                        built.intersectionStyle().crosswalkBlock()
+                                .orElseThrow()
+                )
+        );
+    }
+
+    @Test
+    void supportsGrassAndConcreteMedianComponents() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        draft.addComponent(RoadPresetEditorComponent.inheritedSurface(
+                RoadPresetEditorComponent.Kind.GRASS_MEDIAN,
+                2,
+                draft.materialPalette().grassMedianBlock()
+        ));
+        draft.addComponent(RoadPresetEditorComponent.inheritedSurface(
+                RoadPresetEditorComponent.Kind.CONCRETE_MEDIAN,
+                1,
+                draft.materialPalette().concreteMedianBlock()
+        ));
+
+        RoadPreset built = draft.build(2);
+
+        assertEquals(
+                List.of(
+                        RoadSurfaceRole.PAVEMENT,
+                        RoadSurfaceRole.GRASS_MEDIAN,
+                        RoadSurfaceRole.CONCRETE_MEDIAN
+                ),
+                built.surfaceBands().stream()
+                        .map(RoadSurfaceBand::role)
+                        .toList()
+        );
+    }
+
+    @Test
+    void globalMaterialSetsPropagateToInheritedRoadParts() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        List<ResourceLocation> blocks = List.of(
+                new ResourceLocation("minecraft", "cobblestone"),
+                new ResourceLocation("minecraft", "andesite")
+        );
+
+        draft.setRoadMaterialSet(RoadSurfaceRole.PAVEMENT, blocks);
+        RoadPreset built = draft.build(2);
+
+        assertEquals(
+                blocks,
+                built.materialPalette().blockSetFor(RoadSurfaceRole.PAVEMENT)
+        );
+        assertTrue(built.surfaceBands().stream()
+                .filter(band -> band.role() == RoadSurfaceRole.PAVEMENT)
+                .allMatch(band -> band.blockSet().equals(blocks)));
+    }
+
+    private static RoadPresetEditorDraft oneLaneDraft(int width) {
+        return new RoadPresetEditorDraft(preset(
+                width,
+                List.of(lane(width, 0, LaneTravelDirection.FORWARD)),
+                List.of(band(RoadSurfaceRole.PAVEMENT, width, ASPHALT))
+        ));
+    }
+
+    private static RoadPreset preset(
+            int surfaceWidth,
+            List<LaneComponent> lanes,
+            List<RoadSurfaceBand> bands
+    ) {
+        return new RoadPreset(
+                RoadPreset.CURRENT_SCHEMA_VERSION,
+                1,
+                surfaceWidth,
+                ASPHALT,
+                lanes,
+                bands
+        );
+    }
+
+    private static LaneComponent lane(
+            double width,
+            double offset,
+            LaneTravelDirection direction
+    ) {
+        return new LaneComponent(
+                LaneType.VEHICLE,
+                width,
+                offset,
+                direction
+        );
+    }
+
+    private static RoadSurfaceBand band(
+            RoadSurfaceRole role,
+            int width,
+            ResourceLocation block
+    ) {
+        return new RoadSurfaceBand(role, width, block);
+    }
+}

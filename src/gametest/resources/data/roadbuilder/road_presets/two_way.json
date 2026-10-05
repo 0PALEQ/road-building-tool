@@ -1,0 +1,27 @@
+{
+  "schema_version": 3,
+  "revision": 1,
+  "surface_width": 7,
+  "surface_block": "minecraft:gray_concrete",
+  "materials": {
+    "pavement": "minecraft:gray_concrete",
+    "marking": "minecraft:white_concrete",
+    "sidewalk": "minecraft:smooth_stone",
+    "grass_median": "minecraft:grass_block",
+    "concrete_median": "minecraft:light_gray_concrete"
+  },
+  "lanes": [
+    {
+      "type": "vehicle",
+      "width": 3,
+      "offset": -1.75,
+      "direction": "forward"
+    },
+    {
+      "type": "vehicle",
+      "width": 3,
+      "offset": 1.75,
+      "direction": "backward"
+    }
+  ]
+}

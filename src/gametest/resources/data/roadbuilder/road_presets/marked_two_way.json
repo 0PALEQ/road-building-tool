@@ -1,0 +1,62 @@
+{
+  "schema_version": 3,
+  "revision": 1,
+  "surface_width": 9,
+  "surface_block": "minecraft:gray_concrete",
+  "materials": {
+    "pavement": "minecraft:gray_concrete",
+    "marking": "minecraft:yellow_concrete",
+    "sidewalk": "minecraft:smooth_stone",
+    "grass_median": "minecraft:grass_block",
+    "concrete_median": "minecraft:light_gray_concrete"
+  },
+  "surface_bands": [
+    {
+      "role": "sidewalk",
+      "width": 1,
+      "block": "minecraft:smooth_stone"
+    },
+    {
+      "role": "pavement",
+      "width": 3,
+      "block": "minecraft:gray_concrete"
+    },
+    {
+      "role": "marking",
+      "width": 1,
+      "block": "minecraft:yellow_concrete"
+    },
+    {
+      "role": "pavement",
+      "width": 3,
+      "block": "minecraft:gray_concrete"
+    },
+    {
+      "role": "sidewalk",
+      "width": 1,
+      "block": "minecraft:smooth_stone"
+    }
+  ],
+  "intersection_style": {
+    "pavement_block": "minecraft:gray_concrete",
+    "marking_block": "minecraft:yellow_concrete",
+    "crosswalk_block": "minecraft:white_concrete",
+    "stop_line_block": "minecraft:white_concrete",
+    "default_crosswalks": true,
+    "default_control": "yield"
+  },
+  "lanes": [
+    {
+      "type": "vehicle",
+      "width": 3,
+      "offset": -2,
+      "direction": "forward"
+    },
+    {
+      "type": "vehicle",
+      "width": 3,
+      "offset": 2,
+      "direction": "backward"
+    }
+  ]
+}

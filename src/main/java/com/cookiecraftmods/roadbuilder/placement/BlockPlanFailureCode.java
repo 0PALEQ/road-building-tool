@@ -1,0 +1,13 @@
+package com.cookiecraftmods.roadbuilder.placement;
+
+public enum BlockPlanFailureCode {
+    UNKNOWN_PRESET,
+    PRESET_REVISION_MISMATCH,
+    INVALID_GEOMETRY,
+    BLOCK_LIMIT_EXCEEDED,
+    RASTERIZATION_WORK_LIMIT_EXCEEDED,
+    UNKNOWN_SURFACE_BLOCK,
+    AIR_SURFACE_BLOCK,
+    GRADE_LIMIT_EXCEEDED,
+    COORDINATE_OUT_OF_RANGE
+}
