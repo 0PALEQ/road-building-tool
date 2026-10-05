@@ -78,6 +78,29 @@ class RoadGraphTest {
     }
 
     @Test
+    void manualUturnsUseTheIncomingLaneEndpointAtBothEnds() {
+        RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+        graph.applyAddition(graph.prepareStraightRoad(
+                EASTBOUND, PRESET_ID, PRESET, TrafficHandedness.RHT
+        ));
+        RoadSegment segment = graph.snapshot().segments().values().iterator().next();
+        RoadLane forward = segment.lanes().stream().filter(lane ->
+                lane.component().direction() == LaneTravelDirection.FORWARD
+        ).findFirst().orElseThrow();
+        RoadLane backward = segment.lanes().stream().filter(lane ->
+                lane.component().direction() == LaneTravelDirection.BACKWARD
+        ).findFirst().orElseThrow();
+        assertDoesNotThrow(() -> graph.putManualConnector(
+                forward.id(), backward.id(), graph.snapshot().revision(),
+                LaneConnectorMovement.AUTOMATIC
+        ));
+        assertDoesNotThrow(() -> graph.putManualConnector(
+                backward.id(), forward.id(), graph.snapshot().revision(),
+                LaneConnectorMovement.AUTOMATIC
+        ));
+    }
+
+    @Test
     void preparesAndPublishesAPathFirstStraightRoadAtomically() {
         AtomicLong ids = new AtomicLong(1);
         AtomicLong changes = new AtomicLong();
@@ -1125,7 +1148,7 @@ class RoadGraphTest {
     }
 
     @Test
-    void manualConnectorThatCrossesAMedianIsRejected() {
+    void manualUturnAroundAMedianEndIsAllowed() {
         AtomicLong ids = new AtomicLong(500);
         RoadGraph graph = new RoadGraph(
                 Level.OVERWORLD,
@@ -1200,8 +1223,7 @@ class RoadGraphTest {
                 .findFirst()
                 .orElseThrow();
 
-        assertThrows(
-                IllegalArgumentException.class,
+        assertDoesNotThrow(
                 () -> graph.putManualConnector(
                         forward.id(),
                         backward.id(),

@@ -585,7 +585,7 @@ public final class RoadGraph {
             );
             RoadSegment fromSegment = segments.get(from.segmentId());
             RoadSegment toSegment = segments.get(to.segmentId());
-            RoadNodeId nodeId = sharedConnectorNode(fromSegment, toSegment);
+            RoadNodeId nodeId = sharedConnectorNode(fromSegment, toSegment, from);
             if (MedianCrossingValidator.crossesMedian(
                     fromSegment,
                     from,
@@ -661,7 +661,7 @@ public final class RoadGraph {
         }
         RoadSegment fromSegment = segments.get(from.segmentId());
         RoadSegment toSegment = segments.get(to.segmentId());
-        RoadNodeId nodeId = sharedConnectorNode(fromSegment, toSegment);
+        RoadNodeId nodeId = sharedConnectorNode(fromSegment, toSegment, from);
         if (leavesConnectorNode(fromSegment, from, nodeId)
                 || !leavesConnectorNode(toSegment, to, nodeId)) {
             throw new IllegalArgumentException(
@@ -724,17 +724,16 @@ public final class RoadGraph {
 
     private static RoadNodeId sharedConnectorNode(
             RoadSegment first,
-            RoadSegment second
+            RoadSegment second,
+            RoadLane from
     ) {
         Objects.requireNonNull(first, "manual connector source segment is missing");
         Objects.requireNonNull(second, "manual connector target segment is missing");
-        if (first.startNodeId().equals(second.startNodeId())
-                || first.startNodeId().equals(second.endNodeId())) {
-            return first.startNodeId();
-        }
-        if (first.endNodeId().equals(second.startNodeId())
-                || first.endNodeId().equals(second.endNodeId())) {
-            return first.endNodeId();
+        RoadNodeId nodeId = from.component().direction().followsReferenceDirection()
+                ? first.endNodeId() : first.startNodeId();
+        if (nodeId.equals(second.startNodeId())
+                || nodeId.equals(second.endNodeId())) {
+            return nodeId;
         }
         throw new IllegalArgumentException(
                 "manual connector lanes must share a junction node"

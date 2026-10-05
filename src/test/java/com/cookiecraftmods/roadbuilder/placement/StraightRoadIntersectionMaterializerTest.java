@@ -277,7 +277,7 @@ class StraightRoadIntersectionMaterializerTest {
     }
 
     @Test
-    void disabledManualConnectorStopsPavingItsPath() {
+    void disabledManualConnectorDoesNotMarkActiveConnectorPaths() {
         RoadPreset styledPreset = styledPreset();
         RoadGraph graph = new RoadGraph(Level.OVERWORLD);
         graph.applyAddition(graph.prepareStraightRoad(
@@ -334,7 +334,17 @@ class StraightRoadIntersectionMaterializerTest {
                 )
         ).plan();
 
-        assertConnectorPathNotFullyPaved(node, incident, disabled, plan);
+        var connectors = new JunctionConnectorPlanner().plan(
+                node.id(), incident, List.of(disabled),
+                () -> new LaneConnectorId(UUID.randomUUID())
+        );
+        assertTrue(connectors.stream().anyMatch(connector ->
+                !connector.movement().allowed()));
+        for (LaneConnector connector : connectors) {
+            if (connector.movement().allowed()) {
+                assertConnectorPathIsPaved(node, incident, connector, plan);
+            }
+        }
     }
 
     @Test
@@ -911,36 +921,6 @@ class StraightRoadIntersectionMaterializerTest {
                     () -> "connector crosses unpaved cell " + position
             );
         }
-    }
-
-    private static void assertConnectorPathNotFullyPaved(
-            RoadNode node,
-            List<RoadSegment> incident,
-            LaneConnector connector,
-            BlockPlacementPlan plan
-    ) {
-        var blocks = plan.blocks().stream().collect(Collectors.toMap(
-                PlannedBlock::position,
-                PlannedBlock::targetState
-        ));
-        var geometry = connectorGeometry(node, incident, connector);
-        for (double distance = 0;
-                distance <= geometry.length();
-                distance += 0.1) {
-            var point = geometry.sample(distance).position();
-            BlockPos position = BlockPos.containing(
-                    point.x(),
-                    node.position().y(),
-                    point.z()
-            );
-            if (blocks.containsKey(position)
-                    && !blocks.get(position).is(Blocks.GRAY_CONCRETE)) {
-                return;
-            }
-        }
-        throw new AssertionError(
-                "disabled connector path is still fully paved"
-        );
     }
 
     private static com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometry

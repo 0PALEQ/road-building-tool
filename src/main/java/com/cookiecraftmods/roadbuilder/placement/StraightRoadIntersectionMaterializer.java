@@ -203,11 +203,11 @@ public final class StraightRoadIntersectionMaterializer {
                 double offsetZ = z + 0.5 - node.position().z();
                 BlockPos position = new BlockPos(x, blockY, z);
                 BlockState targetState;
-                if (lanePavement.disabled().contains(position)
+                if (lanePavement.drivable().contains(position)) {
+                    targetState = pavement;
+                } else if (lanePavement.disabled().contains(position)
                         && marking.isPresent()) {
                     targetState = marking.orElseThrow();
-                } else if (lanePavement.drivable().contains(position)) {
-                    targetState = pavement;
                 } else {
                     targetState = intersectionState(
                             offsetX,

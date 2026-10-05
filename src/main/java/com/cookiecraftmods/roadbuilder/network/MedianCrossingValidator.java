@@ -17,7 +17,9 @@ import java.util.Objects;
  * straight through the median, which is unrealistic. The check is purely
  * lateral: for each of the two segments, the lateral position of both lanes
  * is measured against that segment's median bands, and the connection is
- * rejected when the lanes sit on opposite sides of any median band.</p>
+ * rejected when the lanes sit on opposite sides of any median band.
+ * Turns between non-aligned arms and U-turns are exempt: they go around
+ * the median ends inside the junction's trimmed area.</p>
  */
 public final class MedianCrossingValidator {
     private static final double LATERAL_TOLERANCE = 0.5;
@@ -37,6 +39,16 @@ public final class MedianCrossingValidator {
         Objects.requireNonNull(toSegment, "toSegment");
         Objects.requireNonNull(toLane, "toLane");
         Objects.requireNonNull(nodeId, "nodeId");
+        // Medians end at the junction mouth. Turning around their ends is
+        // legal; the lateral-only check applies only to aligned road arms.
+        RoadVector fromLeft = leftUnit(fromSegment, nodeId);
+        RoadVector toLeft = leftUnit(toSegment, nodeId);
+        double alignment = Math.abs(fromLeft.x() * toLeft.x()
+                + fromLeft.z() * toLeft.z());
+        if (fromSegment.id().equals(toSegment.id())
+                || alignment < Math.cos(Math.toRadians(20.0))) {
+            return false;
+        }
         return crossesMedianOf(
                 fromSegment,
                 fromSegment,

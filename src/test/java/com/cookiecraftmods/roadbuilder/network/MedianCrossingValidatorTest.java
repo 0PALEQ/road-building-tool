@@ -26,7 +26,7 @@ class MedianCrossingValidatorTest {
     private static final RoadId ROAD_ID = id(RoadId::new, 2);
 
     @Test
-    void uturnAcrossTheSameMedianIsRejected() {
+    void uturnAroundTheEndOfAMedianIsAllowed() {
         RoadSegment divided = dividedSegment(
                 10,
                 point(0, 0),
@@ -36,12 +36,40 @@ class MedianCrossingValidatorTest {
         RoadLane forward = lane(divided, LaneTravelDirection.FORWARD);
         RoadLane backward = lane(divided, LaneTravelDirection.BACKWARD);
 
-        assertTrue(MedianCrossingValidator.crossesMedian(
+        assertFalse(MedianCrossingValidator.crossesMedian(
                 divided,
                 forward,
                 divided,
                 backward,
                 NODE_ID
+        ));
+    }
+
+    @Test
+    void turnBetweenAngledDividedRoadsGoesAroundMedianEnds() {
+        RoadSegment first = dividedSegment(
+                80, point(-10, 0), point(0, 0), false
+        );
+        RoadSegment second = dividedSegment(
+                90, point(-8, -6), point(0, 0), false
+        );
+        assertFalse(MedianCrossingValidator.crossesMedian(
+                first, lane(first, LaneTravelDirection.FORWARD),
+                second, lane(second, LaneTravelDirection.BACKWARD), NODE_ID
+        ));
+    }
+
+    @Test
+    void lateralCrossingBetweenAlignedMediansIsStillRejected() {
+        RoadSegment first = dividedSegment(
+                100, point(-10, 0), point(0, 0), false
+        );
+        RoadSegment second = dividedSegment(
+                110, point(0, 0), point(10, 0), true
+        );
+        assertTrue(MedianCrossingValidator.crossesMedian(
+                first, lane(first, LaneTravelDirection.FORWARD),
+                second, lane(second, LaneTravelDirection.BACKWARD), NODE_ID
         ));
     }
 
