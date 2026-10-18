@@ -71,7 +71,7 @@ public final class RoadPackScreen extends Screen {
                 minecraft,
                 width,
                 height,
-                panelY + 54,
+                panelY + 68,
                 panelY + panelHeight - 34,
                 ROW_HEIGHT,
                 panelWidth - 16
@@ -143,8 +143,7 @@ public final class RoadPackScreen extends Screen {
         try {
             Path destination = RoadPackExporter.export(
                     minecraft.gameDirectory.toPath()
-                            .resolve("roadbuilder")
-                            .resolve("road-packs"),
+                            .resolve("resourcepacks"),
                     nameBox.getValue(),
                     roads
             );
@@ -187,6 +186,8 @@ public final class RoadPackScreen extends Screen {
                 BORDER_PANEL);
         graphics.drawCenteredString(font, title,
                 panelX + panelWidth / 2, panelY + 9, TEXT_PRIMARY);
+        graphics.drawString(font, Component.translatable(KEY + "install_hint"),
+                panelX + 8, panelY + 54, TEXT_SECONDARY, false);
         super.render(graphics, mouseX, mouseY, partialTick);
         if (!status.getString().isEmpty()) {
             graphics.drawString(

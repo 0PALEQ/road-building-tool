@@ -34,6 +34,72 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadGraphSnapshotS2CPacketTest {
+    @Test
+    void largeGraphRoundTripsThroughChunksAndAcceptsFurtherDeltas() {
+        RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+        RoadPreset preset = new RoadPreset(
+                RoadPreset.CURRENT_SCHEMA_VERSION, 3, 3.0,
+                new ResourceLocation("minecraft", "gray_concrete"),
+                List.of(new LaneComponent(LaneType.VEHICLE, 3.0, 0.0,
+                        LaneTravelDirection.FORWARD))
+        );
+        for (int index = 0; index < 3000; index++) {
+            graph.applyAddition(graph.prepareStraightRoad(
+                    new StraightGeometry(new RoadPoint(index * 30.0, 64, 0),
+                            new RoadPoint(index * 30.0 + 20, 64, 0)),
+                    new ResourceLocation("roadbuilder", "large_graph"),
+                    preset, TrafficHandedness.RHT));
+        }
+        RoadGraphSnapshot snapshot = graph.snapshot();
+        byte[] encoded = RoadGraphSnapshotS2CPacket.current(snapshot).encode();
+        assertTrue(encoded.length > RoadGraphSnapshotS2CPacket.MAX_PAYLOAD_BYTES);
+        assertChunkRoundTrip(snapshot, encoded);
+        FriendlyByteBuf direct = new FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(encoded));
+        try {
+            assertThrows(RuntimeException.class,
+                    () -> RoadGraphSnapshotS2CPacket.TYPE.read(direct));
+        } finally {
+            direct.release();
+        }
+        graph.applyAddition(graph.prepareStraightRoad(
+                new StraightGeometry(new RoadPoint(-30, 64, 0), new RoadPoint(-10, 64, 0)),
+                new ResourceLocation("roadbuilder", "large_graph"), preset, TrafficHandedness.RHT));
+        var delta = com.cookiecraftmods.roadbuilder.network.RoadGraphDelta.between(snapshot, graph.snapshot());
+        assertEquals(delta, RoadGraphPacketCodecs.decodeDelta(RoadGraphPacketCodecs.encodeDelta(delta)));
+    }
+
+    @Test
+    void suppliedSavedGraphCanSynchronize() throws Exception {
+        String file = System.getenv("ROADBUILDER_VERIFY_GRAPH");
+        org.junit.jupiter.api.Assumptions.assumeTrue(file != null);
+        var data = com.cookiecraftmods.roadbuilder.persistence.RoadBuilderNetworkSavedData.load(
+                Level.OVERWORLD, net.minecraft.nbt.NbtIo.readCompressed(new java.io.File(file)).getCompound("data"));
+        assertTrue(data.isCompatible());
+        RoadGraphSnapshot snapshot = data.graph().snapshot();
+        byte[] encoded = RoadGraphSnapshotS2CPacket.current(snapshot).encode();
+        assertChunkRoundTrip(snapshot, encoded);
+        System.out.println("Verified saved graph: " + snapshot.segments().size()
+                + " segments, " + encoded.length + " encoded bytes");
+    }
+
+    private static void assertChunkRoundTrip(RoadGraphSnapshot snapshot, byte[] encoded) {
+        var assembler = new com.cookiecraftmods.roadbuilder.client.networking.RoadGraphSnapshotChunkAssembler();
+        var checksum = new java.util.zip.CRC32();
+        checksum.update(encoded);
+        int size = RoadGraphSnapshotChunkS2CPacket.MAXIMUM_CHUNK_BYTES;
+        int count = (encoded.length + size - 1) / size;
+        UUID transfer = UUID.randomUUID();
+        java.util.Optional<RoadGraphSnapshot> result = java.util.Optional.empty();
+        for (int index = count - 1; index >= 0; index--) {
+            result = assembler.accept(RoadGraphSnapshotChunkS2CPacket.current(
+                    transfer, snapshot.dimension().location(), snapshot.revision(),
+                    index, count, encoded.length, checksum.getValue(),
+                    java.util.Arrays.copyOfRange(encoded, index * size,
+                            Math.min(encoded.length, (index + 1) * size))));
+        }
+        assertEquals(snapshot, result.orElseThrow());
+    }
+
     @BeforeAll
     static void bootstrapMinecraftRegistries() {
         MinecraftBootstrap.bootstrap();

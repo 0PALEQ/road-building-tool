@@ -7,10 +7,15 @@ import com.cookiecraftmods.roadbuilder.preset.RoadMarkingPattern;
 import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
+import com.cookiecraftmods.roadbuilder.preset.RoadClassification;
+import com.cookiecraftmods.roadbuilder.preset.RoadClass;
+import com.cookiecraftmods.roadbuilder.preset.RoadIntersectionStyle;
+import com.cookiecraftmods.roadbuilder.preset.IntersectionControl;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -256,22 +261,40 @@ class RoadPresetEditorDraftTest {
     }
 
     @Test
-    void savedRoadsEnableCrosswalksWithTheRoadMarkingMaterial() {
+    void layoutAndPaletteEditsPreserveExplicitJunctionSettings() {
         RoadPresetEditorDraft draft = oneLaneDraft(3);
+        RoadIntersectionStyle junction = new RoadIntersectionStyle(STONE, Optional.of(WHITE),
+                Optional.empty(), Optional.of(ASPHALT), false, IntersectionControl.STOP);
+        draft.setIntersectionStyle(junction);
         draft.setRoadMaterial(RoadSurfaceRole.MARKING, STONE);
-
+        draft.setRoadMaterial(RoadSurfaceRole.PAVEMENT, WHITE);
+        draft.replaceComponent(0, draft.components().get(0).withWidth(5));
         RoadPreset built = draft.build(2);
+        assertEquals(junction, built.intersectionStyle());
+        assertEquals(junction, new RoadPresetEditorDraft(built).build(3).intersectionStyle());
+    }
 
-        assertAll(
-                () -> assertTrue(
-                        built.intersectionStyle().defaultCrosswalks()
-                ),
-                () -> assertEquals(
-                        STONE,
-                        built.intersectionStyle().crosswalkBlock()
-                                .orElseThrow()
-                )
-        );
+    @Test
+    void classificationAndEveryJunctionMaterialRoundTripIndependently() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        RoadClassification classification = new RoadClassification(RoadClass.ARTERIAL, 12, 72.5);
+        draft.setClassification(classification);
+        for (RoadPresetEditorJunctionMaterial field : RoadPresetEditorJunctionMaterial.values()) {
+            RoadIntersectionStyle before = draft.intersectionStyle();
+            draft.setIntersectionStyle(field.replace(before, Optional.of(STONE)));
+            RoadIntersectionStyle after = draft.build(2).intersectionStyle();
+            assertEquals(Optional.of(STONE), field.block(after));
+            for (RoadPresetEditorJunctionMaterial other : RoadPresetEditorJunctionMaterial.values()) {
+                if (other != field) {
+                    assertEquals(other.block(before), other.block(after));
+                }
+            }
+            if (field.optional()) {
+                draft.setIntersectionStyle(field.replace(after, Optional.empty()));
+                assertTrue(field.block(draft.build(2).intersectionStyle()).isEmpty());
+            }
+        }
+        assertEquals(classification, new RoadPresetEditorDraft(draft.build(2)).build(3).classification());
     }
 
     @Test

@@ -37,7 +37,7 @@ import com.cookiecraftmods.roadbuilder.placement.StraightRoadIntersectionMateria
 import com.cookiecraftmods.roadbuilder.placement.SmoothRoadTransitionMaterializer;
 import com.cookiecraftmods.roadbuilder.placement.RoadTransitionPlanPreparer;
 import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
-import com.cookiecraftmods.roadbuilder.preset.RoadPresetRepository;
+import com.cookiecraftmods.roadbuilder.preset.RoadPresetLookup;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
@@ -53,13 +53,13 @@ import java.util.Objects;
 import java.util.Set;
 
 public final class SegmentReplacementEndpoint {
-    private final RoadPresetRepository presets;
+    private final RoadPresetLookup presets;
     private final ConstructionAuthorizer authorizer;
     private final ConstructionLimits limits;
     private final BlockPlanCommitter committer;
 
     public SegmentReplacementEndpoint(
-            RoadPresetRepository presets,
+            RoadPresetLookup presets,
             ConstructionAuthorizer authorizer,
             ConstructionLimits limits,
             BlockPlanCommitter committer

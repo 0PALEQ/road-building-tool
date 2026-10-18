@@ -29,6 +29,7 @@ public final class RoadBuilderClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         RoadBuilderClientNetworking.register();
+        com.cookiecraftmods.roadbuilder.client.preset.ClientRoadPacks.register();
         RoadBuilderKeyBindings.register();
         RoadBuilderLiveMatrixClient.registerIfEnabled();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {

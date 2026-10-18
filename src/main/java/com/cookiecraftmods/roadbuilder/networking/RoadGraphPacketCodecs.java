@@ -57,11 +57,12 @@ import java.util.Map;
 import java.util.Objects;
 
 public final class RoadGraphPacketCodecs {
-    static final int MAXIMUM_ROAD_COUNT = 512;
-    static final int MAXIMUM_NODE_COUNT = 1_024;
-    static final int MAXIMUM_SEGMENT_COUNT = 512;
-    static final int MAXIMUM_LANE_COUNT = 2_048;
-    static final int MAXIMUM_CONNECTOR_COUNT = 2_048;
+    // Synchronization must accept the same graph sizes as persistence.
+    static final int MAXIMUM_ROAD_COUNT = RoadGraphLimits.DEFAULT_MAXIMUM_ROAD_COUNT;
+    static final int MAXIMUM_NODE_COUNT = RoadGraphLimits.DEFAULT_MAXIMUM_NODE_COUNT;
+    static final int MAXIMUM_SEGMENT_COUNT = RoadGraphLimits.DEFAULT_MAXIMUM_SEGMENT_COUNT;
+    static final int MAXIMUM_LANE_COUNT = RoadGraphLimits.DEFAULT_MAXIMUM_LANE_COUNT;
+    static final int MAXIMUM_CONNECTOR_COUNT = RoadGraphLimits.DEFAULT_MAXIMUM_CONNECTOR_COUNT;
     static final int MAXIMUM_LANES_PER_SEGMENT = 64;
     private static final int FORMAT_V2_MARKER = 0x52424702;
     private static final int FORMAT_V3_MARKER = 0x52424703;

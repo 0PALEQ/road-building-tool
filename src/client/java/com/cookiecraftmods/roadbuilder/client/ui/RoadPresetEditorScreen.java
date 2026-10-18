@@ -6,6 +6,10 @@ import com.cookiecraftmods.roadbuilder.networking.PresetSaveIntentC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetSaveResultCode;
 import com.cookiecraftmods.roadbuilder.networking.PresetSaveResultS2CPacket;
 import com.cookiecraftmods.roadbuilder.preset.RoadCategory;
+import com.cookiecraftmods.roadbuilder.preset.RoadClass;
+import com.cookiecraftmods.roadbuilder.preset.RoadClassification;
+import com.cookiecraftmods.roadbuilder.preset.RoadIntersectionStyle;
+import com.cookiecraftmods.roadbuilder.preset.IntersectionControl;
 import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetCatalogEntry;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetTemplates;
@@ -25,7 +29,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 import static com.cookiecraftmods.roadbuilder.client.ui.RoadPresetEditorUi.*;
 
@@ -52,19 +57,31 @@ public final class RoadPresetEditorScreen extends Screen {
             new RoadPresetEditorSelection();
     private final RoadPresetEditorConfirmations confirmations =
             new RoadPresetEditorConfirmations();
-    private int catalogScroll;
     private long observedCatalogRevision = -1;
     private String nameValue = "";
     private String category = "medium";
     private String searchQuery = "";
     private Component status = Component.translatable(KEY + "loading");
-    private LibraryTab libraryTab = LibraryTab.COMPONENTS;
+    private RoadPresetEditorTab tab = RoadPresetEditorTab.LAYOUT;
+    private boolean inspectSelection;
+    private RoadSurfaceRole editingMaterialRole;
+    private boolean editingComponentMaterials;
+    private final RoadPresetEditorScroll panelScroll = new RoadPresetEditorScroll();
+    private final List<PanelWidget> panelWidgets = new ArrayList<>();
+    private UiRectangle activeViewport;
+    private boolean buildingPanel;
+    private int panelBottom;
+    private RoadPresetEditorButton scrollUp;
+    private RoadPresetEditorButton scrollDown;
     private EditBox nameBox;
     private EditBox searchBox;
+    private EditBox speedBox;
+    private String speedValue;
+    private boolean invalidSpeed;
     private RoadPresetEditorButton saveButton;
     private final List<PaletteCardHit> paletteCardHits = new ArrayList<>();
-    private final List<AbstractWidget> catalogWidgets = new ArrayList<>();
     private RoadPresetEditorDragState dragState;
+    private boolean draggingScrollbar;
 
     public RoadPresetEditorScreen(ResourceLocation presetId) {
         this(presetId, RoadPresetEditorGateway.production());
@@ -93,6 +110,12 @@ public final class RoadPresetEditorScreen extends Screen {
         );
         screen.source = RoadPresetTemplates.blank();
         screen.draft = new RoadPresetEditorDraft(screen.source);
+        screen.draft.setIntersectionStyle(new RoadIntersectionStyle(
+                screen.draft.materialPalette().pavementBlock(),
+                Optional.of(screen.draft.materialPalette().markingBlock()),
+                Optional.of(screen.draft.materialPalette().markingBlock()),
+                Optional.empty(), true, IntersectionControl.FREE));
+        screen.source = screen.draft.build(1);
         screen.expectedRevision = 0;
         screen.editable = true;
         screen.dirty = true;
@@ -104,8 +127,10 @@ public final class RoadPresetEditorScreen extends Screen {
 
     @Override
     protected void init() {
+        dragState = null;
+        draggingScrollbar = false;
         captureInputs();
-        focus.capture(nameBox, searchBox);
+        focus.capture(nameBox, searchBox, speedBox);
         layout = RoadPresetEditorLayout.create(width, height);
         if (draft == null && !requests.contentPending()) {
             requestContent();
@@ -118,9 +143,12 @@ public final class RoadPresetEditorScreen extends Screen {
         layout = RoadPresetEditorLayout.create(width, height);
         nameBox = null;
         searchBox = null;
+        speedBox = null;
         saveButton = null;
         paletteCardHits.clear();
-        catalogWidgets.clear();
+        panelWidgets.clear();
+        scrollUp = null;
+        scrollDown = null;
         catalogRefreshPending = false;
 
         addCloseButton();
@@ -130,10 +158,24 @@ public final class RoadPresetEditorScreen extends Screen {
             return;
         }
 
+        addNavigation();
         addPropertiesControls();
-        addLibraryControls();
+        addWorkspaceControls();
         addFooterControls();
-        focus.restore(nameBox, searchBox);
+        EditBox focusedBox = focus.targetBox(nameBox, searchBox, speedBox);
+        if (focusedBox != null) {
+            panelWidgets.stream().filter(entry -> entry.widget() == focusedBox).findFirst()
+                    .ifPresent(entry -> panelScroll.reveal(entry.top(), focusedBox.getHeight(), activeViewport.height()));
+            positionPanelWidgets();
+        }
+        focus.restore(nameBox, searchBox, speedBox);
+        if (nameBox != null && nameBox.visible && nameBox.isFocused()) {
+            setFocused(nameBox);
+        } else if (searchBox != null && searchBox.isFocused()) {
+            setFocused(searchBox);
+        } else if (speedBox != null && speedBox.visible && speedBox.isFocused()) {
+            setFocused(speedBox);
+        }
         refreshSaveState();
         rebuildPending = false;
     }
@@ -163,7 +205,7 @@ public final class RoadPresetEditorScreen extends Screen {
         }
         UiRectangle body = union(
                 layout.propertiesPanel(),
-                layout.libraryPanel()
+                layout.workspacePanel()
         );
         int buttonWidth = Math.min(100, Math.max(1, body.width() - 12));
         int buttonHeight = Math.min(20, Math.max(1, body.height()));
@@ -181,617 +223,568 @@ public final class RoadPresetEditorScreen extends Screen {
         );
     }
 
-    private void addPropertiesControls() {
-        UiRectangle content = inset(layout.propertiesPanel(), 6);
-        boolean compactInspector = content.height() < 100
-                && hasSelectedComponent();
-        if (!compactInspector && content.height() >= 38) {
-            int fieldY = content.y() + 18;
-            nameBox = new EditBox(
-                    font,
-                    content.x(),
-                    fieldY,
-                    content.width(),
-                    18,
-                    Component.translatable(KEY + "name")
-            );
-            nameBox.setMaxLength(64);
-            nameBox.setValue(nameValue);
-            nameBox.setEditable(canMutate());
-            nameBox.setResponder(this::onNameChanged);
-            addRenderableWidget(nameBox);
+    private void addNavigation() {
+        UiRectangle bounds = layout.navigation();
+        RoadPresetEditorTab[] tabs = RoadPresetEditorTab.values();
+        List<UiRectangle> cells = columns(bounds.x(), bounds.y(),
+                bounds.width(), bounds.height(), tabs.length, 3);
+        for (int index = 0; index < tabs.length; index++) {
+            RoadPresetEditorTab target = tabs[index];
+            String labelKey = target.key() + (target == RoadPresetEditorTab.SAVED_ROADS
+                    && !layout.wide() ? ".compact" : "");
+            addButton(cells.get(index), Component.translatable(labelKey),
+                    tab == target ? RoadPresetEditorButton.Style.SELECTED
+                            : RoadPresetEditorButton.Style.GHOST,
+                    true, () -> selectTab(target));
         }
-        if (!compactInspector && content.height() >= 59) {
-            int categoryY = content.y() + 39;
-            RoadPresetEditorButton categoryButton = addButton(
-                    new UiRectangle(
-                            content.x(),
-                            categoryY,
-                            content.width(),
-                            18
-                    ),
-                    Component.translatable(
-                            KEY + "category"
-                    ).append(" / ").append(Component.translatable(
-                            KEY + "category." + normalizedCategory()
-                    )),
-                    RoadPresetEditorButton.Style.NORMAL,
-                    canMutate(),
-                    this::cycleCategory
-            );
-            categoryButton.active = canMutate();
-        }
+    }
 
-        int inspectorY = compactInspector
-                ? content.y() + 15
-                : content.y() + 83;
-        if (selection.primary() >= 0
-                && selection.primary() < draft.components().size()) {
-            addComponentInspector(content, inspectorY);
-        } else {
-            addRoadMaterialControls(content, inspectorY);
+    private void selectTab(RoadPresetEditorTab target) {
+        captureInputs();
+        tab = target;
+        editingMaterialRole = null;
+        editingComponentMaterials = false;
+        panelScroll.reset();
+        searchQuery = "";
+        if (searchBox != null) {
+            searchBox.setValue("");
         }
+        requestRebuild();
+    }
+
+    private boolean showingCatalog() {
+        return tab == RoadPresetEditorTab.SAVED_ROADS
+                || tab == RoadPresetEditorTab.LAYOUT && !inspectSelection;
+    }
+
+    private void addPropertiesControls() {
+        UiRectangle heading = layout.panelHeading();
+        if (tab == RoadPresetEditorTab.LAYOUT) {
+            List<UiRectangle> tabs = columns(heading.x(), heading.y(),
+                    heading.width(), heading.height(), 2, 3);
+            addButton(tabs.get(0), Component.translatable(KEY + "add_components"),
+                    !inspectSelection ? RoadPresetEditorButton.Style.SELECTED
+                            : RoadPresetEditorButton.Style.NORMAL,
+                    true, () -> {
+                        inspectSelection = false;
+                        editingComponentMaterials = false;
+                        panelScroll.reset();
+                        requestRebuild();
+                    });
+            addButton(tabs.get(1), Component.translatable(KEY + "selection"),
+                    inspectSelection ? RoadPresetEditorButton.Style.SELECTED
+                            : RoadPresetEditorButton.Style.NORMAL,
+                    hasSelectedComponent(), () -> {
+                        inspectSelection = true;
+                        panelScroll.reset();
+                        requestRebuild();
+                    });
+        } else if (tab == RoadPresetEditorTab.SAVED_ROADS) {
+            addButton(heading, Component.translatable(KEY + "create_road_pack"),
+                    RoadPresetEditorButton.Style.NORMAL,
+                    !gateway.catalog().entries().isEmpty(),
+                    () -> minecraft.setScreen(new RoadPackScreen(this)));
+        } else if (tab == RoadPresetEditorTab.MATERIALS && editingMaterialRole != null) {
+            addButton(heading, Component.translatable(KEY + "back_materials"),
+                    RoadPresetEditorButton.Style.GHOST, true, () -> {
+                        editingMaterialRole = null;
+                        panelScroll.reset();
+                        requestRebuild();
+                    });
+        }
+        activeViewport = showingCatalog()
+                ? layout.catalogViewport() : layout.propertiesViewport();
+        panelBottom = activeViewport.y();
+        buildingPanel = true;
+        // Lay out the complete form before applying the viewport's scroll offset.
+        UiRectangle content = new UiRectangle(activeViewport.x(), activeViewport.y(),
+                activeViewport.width(), 10000);
+        if (showingCatalog()) {
+            buildingPanel = false;
+            addLibraryControls();
+            buildingPanel = true;
+            addCatalogCards();
+        } else {
+            switch (tab) {
+                case LAYOUT -> addComponentInspector(content, content.y());
+                case MATERIALS -> {
+                    if (editingMaterialRole == null) {
+                        addRoadMaterialControls(content, content.y());
+                    } else {
+                        RoadSurfaceRole role = editingMaterialRole;
+                        addMaterialSetControls(content, content.y(),
+                                Component.translatable(materialKey(role)),
+                                draft.materialPalette().blockSetFor(role),
+                                blocks -> draft.setRoadMaterialSet(role, blocks));
+                    }
+                }
+                case JUNCTIONS -> addJunctionControls(content);
+                case DETAILS -> addDetailsControls(content);
+                case SAVED_ROADS -> { }
+            }
+        }
+        buildingPanel = false;
+        panelScroll.resize(panelBottom - activeViewport.y(), activeViewport.height());
+        addScrollControls();
+        positionPanelWidgets();
     }
 
     private void addRoadMaterialControls(UiRectangle content, int y) {
-        addRoadMaterialControl(content, y, RoadSurfaceRole.PAVEMENT,
-                KEY + "material.pavement");
-        addRoadMaterialControl(content, y + 21, RoadSurfaceRole.MARKING,
-                KEY + "material.marking");
-        addRoadMaterialControl(content, y + 42, RoadSurfaceRole.SIDEWALK,
-                KEY + "material.sidewalk");
-        addRoadMaterialControl(content, y + 63, RoadSurfaceRole.GRASS_MEDIAN,
-                KEY + "material.grass_median");
-        addRoadMaterialControl(content, y + 84, RoadSurfaceRole.CONCRETE_MEDIAN,
-                KEY + "material.concrete_median");
+        y = addHelp(content, y, "materials_hint") + 8;
+        for (RoadSurfaceRole role : RoadSurfaceRole.values()) {
+            List<ResourceLocation> blocks = draft.materialPalette().blockSetFor(role);
+            RoadPresetEditorButton button = new RoadPresetEditorButton(
+                    new UiRectangle(content.x(), y, content.width(), 34),
+                    Component.translatable(materialKey(role)),
+                    paletteSummary(blocks.size()),
+                    RoadPresetEditorButton.Style.NORMAL, () -> {
+                        editingMaterialRole = role;
+                        panelScroll.reset();
+                        requestRebuild();
+                    });
+            button.setTooltip(Tooltip.create(Component.literal(blocks.toString())));
+            addPanelWidget(button);
+            y += 39;
+        }
     }
 
-    private void addRoadMaterialControl(
-            UiRectangle content,
-            int y,
-            RoadSurfaceRole role,
-            String labelKey
+    private static String materialKey(RoadSurfaceRole role) {
+        return KEY + "material." + switch (role) {
+            case PAVEMENT -> "pavement";
+            case MARKING -> "marking";
+            case SIDEWALK -> "sidewalk";
+            case GRASS_MEDIAN -> "grass_median";
+            case CONCRETE_MEDIAN -> "concrete_median";
+        };
+    }
+
+    private static Component paletteSummary(int size) {
+        return Component.translatable(KEY + (size == 1 ? "material_set_single" : "material_set_count"), size);
+    }
+
+    private void addMaterialSetControls(
+            UiRectangle content, int y, Component title,
+            List<ResourceLocation> blocks, Consumer<List<ResourceLocation>> update
     ) {
-        int labelWidth = Math.min(68, Math.max(38, content.width() * 42 / 100));
-        UiRectangle labelBounds = new UiRectangle(
-                content.x(), y, labelWidth, 18
-        );
-        int setButtonWidth = Math.min(18, Math.max(14, content.width() / 10));
-        int gap = 2;
-        UiRectangle fieldBounds = new UiRectangle(
-                labelBounds.right() + 3,
-                y,
-                Math.max(
-                        0,
-                        content.right() - labelBounds.right() - 3
-                                - setButtonWidth * 2 - gap * 2
-                ),
-                18
-        );
-        addFittingLabel(
-                content,
-                labelBounds,
-                Component.translatable(labelKey),
-                false
-        );
-        if (!containedBy(content, fieldBounds)) {
-            return;
-        }
-        RoadPresetBlockField field = new RoadPresetBlockField(
-                fieldBounds,
-                this,
-                draft.materialPalette().blockFor(role),
-                draft.materialPalette().blockSetFor(role).size(),
-                replacement -> mutate(() -> {
-                    List<ResourceLocation> blocks = new ArrayList<>(
-                            draft.materialPalette().blockSetFor(role)
-                    );
-                    blocks.set(0, replacement);
-                    draft.setRoadMaterialSet(role, blocks);
-                })
-        );
-        field.active = canMutate();
-        addRenderableWidget(field);
-        int addX = fieldBounds.right() + gap;
-        addFittingButton(
-                content,
-                new UiRectangle(addX, y, setButtonWidth, 18),
-                Component.literal("+"),
+        y = addText(content, y, title, true) + 5;
+        y = addHelp(content, y, "variations_hint") + 7;
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "add_variation", blocks.size()),
                 RoadPresetEditorButton.Style.NORMAL,
-                canMutate()
-                        && draft.materialPalette().blockSetFor(role).size() < 16,
-                () -> RoadPresetBlockSelectorScreen.open(
-                        this,
-                        draft.materialPalette().blockFor(role),
+                canMutate() && blocks.size() < 16,
+                () -> RoadPresetBlockSelectorScreen.open(this, blocks.get(0),
                         replacement -> mutate(() -> {
-                            List<ResourceLocation> blocks = new ArrayList<>(
-                                    draft.materialPalette().blockSetFor(role)
-                            );
-                            if (!blocks.contains(replacement)) {
-                                blocks.add(replacement);
-                                draft.setRoadMaterialSet(role, blocks);
+                            List<ResourceLocation> changed = new ArrayList<>(blocks);
+                            if (!changed.contains(replacement)) {
+                                changed.add(replacement);
+                                update.accept(changed);
                             }
-                        })
-                )
-        );
-        addFittingButton(
-                content,
-                new UiRectangle(
-                        addX + setButtonWidth + gap,
-                        y,
-                        setButtonWidth,
-                        18
-                ),
-                Component.literal("−"),
-                RoadPresetEditorButton.Style.NORMAL,
-                canMutate()
-                        && draft.materialPalette().blockSetFor(role).size() > 1,
-                () -> mutate(() -> {
-                    List<ResourceLocation> blocks = new ArrayList<>(
-                            draft.materialPalette().blockSetFor(role)
-                    );
-                    blocks.remove(blocks.size() - 1);
-                    draft.setRoadMaterialSet(role, blocks);
-                })
-        );
+                        })));
+        y += 26;
+        for (int index = 0; index < blocks.size(); index++) {
+            final int blockIndex = index;
+            y = addText(content, y, Component.translatable(
+                    KEY + (index == 0 ? "base_block" : "variation"), index), false) + 3;
+            RoadPresetBlockField field = new RoadPresetBlockField(
+                    new UiRectangle(content.x(), y, content.width() - 24, 24),
+                    this, blocks.get(index), replacement -> mutate(() -> {
+                        List<ResourceLocation> changed = new ArrayList<>(blocks);
+                        changed.set(blockIndex, replacement);
+                        update.accept(changed);
+                    }));
+            field.active = canMutate();
+            field.setTooltip(Tooltip.create(Component.literal(blocks.get(index).toString())));
+            addPanelWidget(field);
+            RoadPresetEditorButton remove = addButton(
+                    new UiRectangle(content.right() - 20, y, 20, 24),
+                    Component.literal("×"), RoadPresetEditorButton.Style.GHOST,
+                    canMutate() && blocks.size() > 1, () -> mutate(() -> {
+                        List<ResourceLocation> changed = new ArrayList<>(blocks);
+                        changed.remove(blockIndex);
+                        update.accept(changed);
+                    }));
+            remove.setTooltip(Tooltip.create(Component.translatable(KEY + "remove_variation")));
+            y += 31;
+        }
     }
 
     private void addComponentInspector(UiRectangle content, int y) {
-        RoadPresetEditorComponent selected =
-                draft.components().get(selection.primary());
-        int rowHeight = 18;
-        int gap = 3;
-
-        addFittingButton(
-                content,
-                new UiRectangle(content.x(), y, content.width(), rowHeight),
-                Component.translatable(KEY + "road_materials"),
-                RoadPresetEditorButton.Style.NORMAL,
-                true,
-                () -> {
-                    clearComponentSelection();
-                    requestRebuild();
-                }
-        );
-        y += rowHeight + gap;
-
-        addFittingLabel(
-                content,
-                new UiRectangle(content.x(), y, content.width(), rowHeight),
-                componentLabel(selected),
-                true
-        );
-
-        int widthY = y + rowHeight + gap;
-        List<UiRectangle> widthControls = columns(
-                content.x(), widthY, content.width(), rowHeight, 3, gap
-        );
-        addFittingButton(
-                content,
-                widthControls.get(0),
-                Component.literal("−"),
-                RoadPresetEditorButton.Style.NORMAL,
-                canMutate()
-                        && selection.isSingle()
-                        && selected.hasAdjustableWidth()
-                        && selected.width() > 1,
-                () -> replaceSelectedComponent(
-                        selected.withWidth(selected.width() - 1)
-                )
-        );
-        RoadPresetEditorLabel widthLabel = addFittingLabel(
-                content,
-                widthControls.get(1),
-                Component.translatable(KEY + "width"),
-                false
-        );
-        if (widthLabel != null) {
-            widthLabel.setTooltip(Tooltip.create(Component.translatable(
-                    KEY + "component_width",
-                    selected.width()
-            )));
+        if (!hasSelectedComponent()) {
+            addHelp(content, y, "click_render_hint");
+            return;
         }
-        addFittingButton(
-                content,
-                widthControls.get(2),
-                Component.literal("+"),
-                RoadPresetEditorButton.Style.NORMAL,
-                canMutate() && selection.isSingle()
-                        && selected.hasAdjustableWidth(),
-                () -> replaceSelectedComponent(
-                        selected.withWidth(selected.width() + 1)
-                )
-        );
-
-        int inheritanceY = widthY + rowHeight + gap;
-        addFittingButton(
-                content,
-                new UiRectangle(
-                        content.x(), inheritanceY, content.width(), rowHeight
-                ),
-                Component.translatable(selected.inheritsRoadMaterial()
-                        ? KEY + "material.inherited"
-                        : KEY + "material.override"),
-                selected.inheritsRoadMaterial()
-                        ? RoadPresetEditorButton.Style.SELECTED
-                        : RoadPresetEditorButton.Style.NORMAL,
-                canMutate() && selection.isSingle(),
-                () -> mutate(() -> {
-                    if (selected.inheritsRoadMaterial()) {
-                        draft.setComponentMaterialOverride(
-                                selection.primary(),
-                                selected.block()
-                        );
-                    } else {
-                        draft.clearComponentMaterialOverride(
-                                selection.primary()
-                        );
-                    }
-                })
-        );
-
-        int materialY = inheritanceY + rowHeight + gap;
-        int setButtonWidth = Math.min(22, Math.max(18, content.width() / 7));
-        UiRectangle materialBounds = new UiRectangle(
-                content.x(), materialY,
-                Math.max(0, content.width() - setButtonWidth * 2 - gap * 2),
-                rowHeight
-        );
-        if (containedBy(content, materialBounds)) {
-            RoadPresetBlockField materialField = new RoadPresetBlockField(
-                    materialBounds,
-                    this,
-                    selected.block(),
-                    selected.blockSet().size(),
-                    replacement -> {
-                        if (!replacement.equals(selected.block())) {
-                            List<net.minecraft.resources.ResourceLocation>
-                                    replacementSet = new ArrayList<>(
-                                            selected.blockSet()
-                                    );
-                            replacementSet.set(0, replacement);
-                            replaceSelectedComponent(
-                                    selected.withBlockSet(replacementSet)
-                            );
-                        }
-                    }
-            );
-            materialField.active = canMutate()
-                    && selection.isSingle();
-            addRenderableWidget(materialField);
+        if (!selection.isSingle()) {
+            y = addText(content, y, Component.translatable(
+                    KEY + "selection_count", selection.selected().size()), true) + 8;
+            y = addHelp(content, y, "multi_selection_hint") + 10;
+            addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                    Component.translatable(KEY + "remove_selected"),
+                    RoadPresetEditorButton.Style.DANGER, canRemoveSelectedComponent(),
+                    this::removeSelectedComponent);
+            return;
         }
-        int addX = materialBounds.right() + gap;
-        addFittingButton(
-                content,
-                new UiRectangle(addX, materialY, setButtonWidth, rowHeight),
-                Component.literal("+"),
-                RoadPresetEditorButton.Style.NORMAL,
-                canMutate() && selection.isSingle()
-                        && selected.blockSet().size() < 16,
-                () -> RoadPresetBlockSelectorScreen.open(
-                        this,
-                        selected.block(),
-                        replacement -> {
-                            if (!selected.blockSet().contains(replacement)) {
-                                List<net.minecraft.resources.ResourceLocation>
-                                        replacementSet = new ArrayList<>(
-                                                selected.blockSet()
-                                        );
-                                replacementSet.add(replacement);
-                                replaceSelectedComponent(
-                                        selected.withBlockSet(replacementSet)
-                                );
-                            }
-                        }
-                )
-        );
-        addFittingButton(
-                content,
-                new UiRectangle(
-                        addX + setButtonWidth + gap,
-                        materialY,
-                        setButtonWidth,
-                        rowHeight
-                ),
-                Component.literal("−"),
-                RoadPresetEditorButton.Style.NORMAL,
-                canMutate() && selection.isSingle()
-                        && selected.blockSet().size() > 1,
-                () -> {
-                    List<net.minecraft.resources.ResourceLocation>
-                            replacementSet = new ArrayList<>(
-                                    selected.blockSet()
-                            );
-                    replacementSet.remove(replacementSet.size() - 1);
-                    replaceSelectedComponent(
-                            selected.withBlockSet(replacementSet)
-                    );
-                }
-        );
-
-        int actionY = materialY + rowHeight + gap;
+        int componentIndex = selection.primary();
+        RoadPresetEditorComponent selected = draft.components().get(componentIndex);
+        if (editingComponentMaterials) {
+            addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                    Component.translatable(KEY + "back_component"),
+                    RoadPresetEditorButton.Style.GHOST, true, () -> {
+                        editingComponentMaterials = false;
+                        panelScroll.reset();
+                        requestRebuild();
+                    });
+            addMaterialSetControls(content, y + 28, componentLabel(selected),
+                    selected.blockSet(), blocks -> draft.replaceComponent(
+                            componentIndex, selected.withBlockSet(blocks)));
+            return;
+        }
+        y = addText(content, y, componentLabel(selected), true) + 8;
+        addStepper(content, y, Component.translatable(KEY + "width_value", selected.width()),
+                canMutate() && selected.hasAdjustableWidth() && selected.width() > 1,
+                canMutate() && selected.hasAdjustableWidth()
+                        && draft.surfaceBlockWidth() < RoadPreset.MAXIMUM_SURFACE_BLOCK_WIDTH,
+                () -> replaceSelectedComponent(selected.withWidth(selected.width() - 1)),
+                () -> replaceSelectedComponent(selected.withWidth(selected.width() + 1)));
+        y += 27;
+        if (!selected.hasAdjustableWidth()) {
+            y = addHelp(content, y, "three_blocks_wide") + 6;
+        }
         if (selected.isVehicleLane()) {
-            addFittingButton(
-                    content,
-                    new UiRectangle(
-                            content.x(), actionY, content.width(), rowHeight
-                    ),
+            y = addText(content, y, Component.translatable(KEY + "travel_direction"), false) + 3;
+            addButton(new UiRectangle(content.x(), y, content.width(), 20),
                     directionButtonLabel(selected.direction()),
-                    RoadPresetEditorButton.Style.NORMAL,
-                    canMutate() && selection.isSingle(),
-                    () -> replaceSelectedComponent(
-                            selected.withDirection(
-                                    opposite(selected.direction())
-                            )
-                    )
-            );
-            actionY += rowHeight + gap;
+                    RoadPresetEditorButton.Style.NORMAL, canMutate(),
+                    () -> replaceSelectedComponent(selected.withDirection(opposite(selected.direction()))));
+            y += 28;
         }
+        y = addText(content, y, Component.translatable(KEY + "material"), false) + 3;
+        RoadPresetEditorButton materials = new RoadPresetEditorButton(
+                new UiRectangle(content.x(), y, content.width(), 34),
+                Component.translatable(KEY + (selected.inheritsRoadMaterial()
+                        ? "material.inherited" : "material.override")),
+                paletteSummary(selected.blockSet().size()),
+                RoadPresetEditorButton.Style.NORMAL, () -> {
+                    editingComponentMaterials = true;
+                    panelScroll.reset();
+                    requestRebuild();
+                });
+        addPanelWidget(materials);
+        y += 39;
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "reset_material"),
+                RoadPresetEditorButton.Style.GHOST,
+                canMutate() && !selected.inheritsRoadMaterial(),
+                () -> mutate(() -> draft.clearComponentMaterialOverride(componentIndex)));
+        y += 28;
+        List<UiRectangle> moves = columns(content.x(), y, content.width(), 20, 2, 3);
+        addButton(moves.get(0), Component.translatable(KEY + "move_left"),
+                RoadPresetEditorButton.Style.NORMAL, canMutate() && componentIndex > 0,
+                () -> moveSelectedComponent(-1));
+        addButton(moves.get(1), Component.translatable(KEY + "move_right"),
+                RoadPresetEditorButton.Style.NORMAL,
+                canMutate() && componentIndex + 1 < draft.components().size(),
+                () -> moveSelectedComponent(1));
+        y += 27;
+        RoadPresetEditorButton remove = addButton(
+                new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "remove_component"),
+                RoadPresetEditorButton.Style.DANGER, canRemoveSelectedComponent(),
+                this::removeSelectedComponent);
+        if (!canRemoveSelectedComponent()) {
+            remove.setTooltip(Tooltip.create(Component.translatable(KEY + "keep_lane")));
+        }
+    }
 
-        List<UiRectangle> actions = columns(
-                content.x(), actionY, content.width(), rowHeight, 3, gap
-        );
-        addFittingButton(
-                content,
-                actions.get(0),
-                Component.literal("←"),
-                RoadPresetEditorButton.Style.NORMAL,
-                canMutate() && selection.isSingle()
-                        && selection.primary() > 0,
-                () -> moveSelectedComponent(-1)
-        );
-        addFittingButton(
-                content,
-                actions.get(1),
-                Component.literal("→"),
-                RoadPresetEditorButton.Style.NORMAL,
-                canMutate()
-                        && selection.isSingle()
-                        && selection.primary() + 1
-                                < draft.components().size(),
-                () -> moveSelectedComponent(1)
-        );
-        addFittingButton(
-                content,
-                actions.get(2),
-                Component.literal("×"),
-                RoadPresetEditorButton.Style.DANGER,
-                canRemoveSelectedComponent(),
-                this::removeSelectedComponent
-        );
+    private void addDetailsControls(UiRectangle content) {
+        int y = addText(content, content.y(), Component.translatable(KEY + "name"), false) + 3;
+        nameBox = new EditBox(font, content.x(), y, content.width(), 20,
+                Component.translatable(KEY + "name"));
+        nameBox.setMaxLength(64);
+        nameBox.setValue(nameValue);
+        nameBox.setEditable(canMutate());
+        nameBox.setResponder(this::onNameChanged);
+        addPanelWidget(nameBox);
+        y += 28;
+        y = addText(content, y, Component.translatable(KEY + "category"), false) + 3;
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "category." + normalizedCategory()),
+                RoadPresetEditorButton.Style.NORMAL, canMutate(), this::cycleCategory);
+        y += 28;
+        RoadClassification classification = draft.classification();
+        y = addText(content, y, Component.translatable(KEY + "road_class"), false) + 3;
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "class." + classification.roadClass().serializedName()),
+                RoadPresetEditorButton.Style.NORMAL, canMutate(), () -> mutate(() -> {
+                    RoadClass[] classes = RoadClass.values();
+                    draft.setClassification(new RoadClassification(
+                            classes[(classification.roadClass().ordinal() + 1) % classes.length],
+                            classification.priorityRank(), classification.nominalSpeed()));
+                }));
+        y += 28;
+        addStepper(content, y, Component.translatable(KEY + "priority_value", classification.priorityRank()),
+                canMutate() && classification.priorityRank() > 0,
+                canMutate() && classification.priorityRank() < 15,
+                () -> changePriority(-1), () -> changePriority(1));
+        y += 26;
+        y = addHelp(content, y, "priority_hint") + 7;
+        y = addText(content, y, Component.translatable(KEY + "nominal_speed"), false) + 3;
+        speedBox = new EditBox(font, content.x(), y, content.width(), 20,
+                Component.translatable(KEY + "nominal_speed"));
+        speedBox.setMaxLength(24);
+        speedBox.setValue(speedValue == null ? Double.toString(classification.nominalSpeed()) : speedValue);
+        speedBox.setEditable(canMutate());
+        speedBox.setTextColor(invalidSpeed ? 0xFFFF9999 : UIStyle.TEXT_PRIMARY);
+        speedBox.setResponder(this::onSpeedChanged);
+        addPanelWidget(speedBox);
+        y += 28;
+        y = addHelp(content, y, "details_hint") + 10;
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "reset"), RoadPresetEditorButton.Style.NORMAL,
+                dirty && !requests.savePending(), this::resetDraft);
+        y += 27;
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + (confirmations.deleteArmed() ? "confirm_delete" : "delete")),
+                RoadPresetEditorButton.Style.DANGER, canDelete(), this::deleteDraft);
+    }
+
+    private void changePriority(int amount) {
+        mutate(() -> {
+            RoadClassification value = draft.classification();
+            draft.setClassification(new RoadClassification(value.roadClass(),
+                    clamp(value.priorityRank() + amount, 0, 15), value.nominalSpeed()));
+        });
+    }
+
+    private void onSpeedChanged(String replacement) {
+        speedValue = replacement;
+        if (!canMutate()) {
+            return;
+        }
+        try {
+            double speed = Double.parseDouble(replacement);
+            RoadClassification value = draft.classification();
+            draft.setClassification(new RoadClassification(value.roadClass(), value.priorityRank(), speed));
+            invalidSpeed = false;
+        } catch (IllegalArgumentException invalid) {
+            invalidSpeed = true;
+        }
+        dirty = true;
+        clearConfirmations();
+        setStatus(Component.empty(), false);
+        speedBox.setTextColor(invalidSpeed ? 0xFFFF9999 : UIStyle.TEXT_PRIMARY);
+        refreshSaveState();
+    }
+
+    private void addJunctionControls(UiRectangle content) {
+        int y = addHelp(content, content.y(), "junctions_hint") + 8;
+        RoadIntersectionStyle style = draft.intersectionStyle();
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "crosswalks_value",
+                        Component.translatable(KEY + (style.defaultCrosswalks() ? "on" : "off"))),
+                style.defaultCrosswalks() ? RoadPresetEditorButton.Style.SELECTED
+                        : RoadPresetEditorButton.Style.NORMAL, canMutate(),
+                () -> updateJunction(old -> new RoadIntersectionStyle(old.pavementBlock(),
+                        old.markingBlock(), old.crosswalkBlock(), old.stopLineBlock(),
+                        !old.defaultCrosswalks(), old.defaultControl())));
+        y += 27;
+        y = addText(content, y, Component.translatable(KEY + "junction_control"), false) + 3;
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "control." + style.defaultControl().serializedName()),
+                RoadPresetEditorButton.Style.NORMAL, canMutate(), () -> updateJunction(old -> {
+                    IntersectionControl[] controls = IntersectionControl.values();
+                    return new RoadIntersectionStyle(old.pavementBlock(), old.markingBlock(),
+                            old.crosswalkBlock(), old.stopLineBlock(), old.defaultCrosswalks(),
+                            controls[(old.defaultControl().ordinal() + 1) % controls.length]);
+                }));
+        y += 28;
+        for (RoadPresetEditorJunctionMaterial material : RoadPresetEditorJunctionMaterial.values()) {
+            y = addText(content, y, Component.translatable(material.key()), false) + 3;
+            Optional<ResourceLocation> block = material.block(style);
+            int toggleWidth = material.optional() ? 24 : 0;
+            if (block.isPresent()) {
+                RoadPresetBlockField field = new RoadPresetBlockField(
+                        new UiRectangle(content.x(), y, content.width() - toggleWidth, 24),
+                        this, block.orElseThrow(), replacement -> updateJunction(
+                                old -> material.replace(old, Optional.of(replacement))));
+                field.active = canMutate();
+                addPanelWidget(field);
+            } else {
+                addButton(new UiRectangle(content.x(), y, content.width() - toggleWidth, 24),
+                        Component.translatable(KEY + "no_material"),
+                        RoadPresetEditorButton.Style.NORMAL, canMutate(),
+                        () -> RoadPresetBlockSelectorScreen.open(this, draft.materialPalette().markingBlock(),
+                                replacement -> updateJunction(old -> material.replace(old, Optional.of(replacement)))));
+            }
+            if (material.optional()) {
+                RoadPresetEditorButton toggle = addButton(
+                        new UiRectangle(content.right() - 20, y, 20, 24),
+                        Component.literal(block.isPresent() ? "×" : "+"),
+                        RoadPresetEditorButton.Style.GHOST, canMutate(),
+                        () -> updateJunction(old -> material.replace(old, block.isPresent()
+                                ? Optional.empty() : Optional.of(draft.materialPalette().markingBlock()))));
+                toggle.setTooltip(Tooltip.create(Component.translatable(KEY
+                        + (block.isPresent() ? "clear_junction_material" : "enable_junction_material"))));
+            }
+            y += 32;
+        }
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "match_road_materials"),
+                RoadPresetEditorButton.Style.NORMAL, canMutate(), () -> updateJunction(old ->
+                        new RoadIntersectionStyle(draft.materialPalette().pavementBlock(),
+                                Optional.of(draft.materialPalette().markingBlock()),
+                                Optional.of(draft.materialPalette().markingBlock()), old.stopLineBlock(),
+                                old.defaultCrosswalks(), old.defaultControl())));
+    }
+
+    private void updateJunction(UnaryOperator<RoadIntersectionStyle> update) {
+        mutate(() -> draft.setIntersectionStyle(update.apply(draft.intersectionStyle())));
+    }
+
+    private void addStepper(UiRectangle content, int y, Component label,
+                            boolean decrease, boolean increase, Runnable minus, Runnable plus) {
+        addButton(new UiRectangle(content.x(), y, 22, 20), Component.literal("−"),
+                RoadPresetEditorButton.Style.NORMAL, decrease, minus);
+        addFittingLabel(content, new UiRectangle(content.x() + 25, y, content.width() - 50, 20),
+                label, false);
+        addButton(new UiRectangle(content.right() - 22, y, 22, 20), Component.literal("+"),
+                RoadPresetEditorButton.Style.NORMAL, increase, plus);
+    }
+
+    private int addHelp(UiRectangle content, int y, String key) {
+        String suffix = activeViewport.height() < 140
+                && List.of("materials_hint", "variations_hint", "junctions_hint", "details_hint",
+                        "priority_hint", "multi_selection_hint").contains(key) ? ".compact" : "";
+        return addText(content, y, Component.translatable(KEY + key + suffix), false);
+    }
+
+    private int addText(UiRectangle content, int y, Component message, boolean heading) {
+        int textHeight = Math.max(font.lineHeight,
+                font.split(message, Math.max(1, content.width())).size() * font.lineHeight);
+        addPanelWidget(new RoadPresetEditorText(new UiRectangle(content.x(), y, content.width(), textHeight),
+                message, heading ? UIStyle.TEXT_PRIMARY : UIStyle.TEXT_SECONDARY));
+        return y + textHeight;
     }
 
     private void addLibraryControls() {
-        UiRectangle tabs = layout.catalogTabs();
-        int tabGap = Math.min(3, tabs.width());
-        int firstWidth = Math.max(0, (tabs.width() - tabGap) / 2);
-        addButton(
-                new UiRectangle(tabs.x(), tabs.y(), firstWidth, tabs.height()),
-                Component.translatable(KEY + "available_components"),
-                libraryTab == LibraryTab.COMPONENTS
-                        ? RoadPresetEditorButton.Style.SELECTED
-                        : RoadPresetEditorButton.Style.NORMAL,
-                true,
-                () -> selectLibraryTab(LibraryTab.COMPONENTS)
-        );
-        addButton(
-                new UiRectangle(
-                        tabs.x() + firstWidth + tabGap,
-                        tabs.y(),
-                        Math.max(0, tabs.width() - firstWidth - tabGap),
-                        tabs.height()
-                ),
-                Component.translatable(KEY + "saved_roads"),
-                libraryTab == LibraryTab.SAVED_ROADS
-                        ? RoadPresetEditorButton.Style.SELECTED
-                        : RoadPresetEditorButton.Style.NORMAL,
-                true,
-                () -> selectLibraryTab(LibraryTab.SAVED_ROADS)
-        );
-
         UiRectangle search = layout.catalogSearch();
-        if (search.width() > 0 && search.height() > 0) {
-            searchBox = new EditBox(
-                    font,
-                    search.x(),
-                    search.y(),
-                    search.width(),
-                    search.height(),
-                    Component.translatable(KEY + "search")
-            );
-            searchBox.setMaxLength(64);
-            searchBox.setValue(searchQuery);
-            searchBox.setHint(Component.translatable(KEY + "search"));
-            searchBox.setResponder(this::onSearchChanged);
-            addRenderableWidget(searchBox);
-        }
-        addCatalogCards();
+        searchBox = new EditBox(font, search.x(), search.y(), search.width(), search.height(),
+                Component.translatable(KEY + "search"));
+        searchBox.setMaxLength(64);
+        searchBox.setValue(searchQuery);
+        searchBox.setHint(Component.translatable(KEY + (tab == RoadPresetEditorTab.SAVED_ROADS
+                ? "search_roads" : "search_components")));
+        searchBox.setResponder(this::onSearchChanged);
+        addRenderableWidget(searchBox);
     }
 
     private void addCatalogCards() {
         UiRectangle viewport = layout.catalogViewport();
-        if (viewport.width() <= 0 || viewport.height() <= 0) {
-            return;
-        }
-        if (libraryTab == LibraryTab.COMPONENTS) {
-            List<RoadPresetEditorComponentCatalog.Entry> items =
-                    filteredComponents();
-            addCardGrid(
-                    viewport,
-                    items.size(),
-                    (index, bounds) -> addComponentCard(
-                            items.get(index),
-                            bounds
-                    )
-            );
+        if (tab == RoadPresetEditorTab.LAYOUT) {
+            List<RoadPresetEditorComponentCatalog.Entry> items = filteredComponents();
+            for (int index = 0; index < items.size(); index++) {
+                RoadPresetEditorComponentCatalog.Entry item = items.get(index);
+                RoadPresetEditorComponent prototype = RoadPresetEditorComponentCatalog.prototype(item.kind(), draft);
+                RoadPresetComponentButton button = new RoadPresetComponentButton(
+                        new UiRectangle(viewport.x(), viewport.y() + index * 38, viewport.width(), 34),
+                        prototype, item.name(), item.subtitle(), () -> addComponent(item.kind()));
+                button.active = canMutate() && draft.surfaceBlockWidth() + prototype.width()
+                        <= RoadPreset.MAXIMUM_SURFACE_BLOCK_WIDTH;
+                paletteCardHits.add(new PaletteCardHit(button, item.kind(), prototype));
+                addPanelWidget(button);
+            }
         } else {
             List<RoadPresetCatalogEntry> entries = filteredPresets();
-            addCardGrid(
-                    viewport,
-                    entries.size(),
-                    (index, bounds) -> addPresetCard(
-                            entries.get(index),
-                            bounds
-                    )
-            );
+            for (int index = 0; index < entries.size(); index++) {
+                RoadPresetCatalogEntry entry = entries.get(index);
+                RoadPresetEditorButton button = new RoadPresetEditorButton(
+                        new UiRectangle(viewport.x(), viewport.y() + index * 38, viewport.width(), 34),
+                        Component.literal(entry.display().fallbackName()),
+                        Component.translatable(KEY + "width_lanes", entry.surfaceWidth(), entry.laneCount()),
+                        entry.id().equals(editingId) ? RoadPresetEditorButton.Style.SELECTED
+                                : RoadPresetEditorButton.Style.NORMAL, () -> selectPreset(entry.id()));
+                button.active = !requests.savePending() && !requests.contentPending();
+                addPanelWidget(button);
+            }
         }
     }
 
-    private void addCardGrid(
-            UiRectangle viewport,
-            int itemCount,
-            BiConsumer<Integer, UiRectangle> cardAdder
-    ) {
-        int columns = viewport.width() >= 300 ? 2 : 1;
-        int gap = 3;
-        int cardHeight = Math.max(1, Math.min(34, viewport.height()));
-        int visibleRows = Math.max(
-                1,
-                (viewport.height() + gap) / (cardHeight + gap)
-        );
-        int totalRows = (itemCount + columns - 1) / columns;
-        int maximumScroll = Math.max(0, totalRows - visibleRows);
-        catalogScroll = clamp(catalogScroll, 0, maximumScroll);
-        int firstIndex = catalogScroll * columns;
-        int lastIndex = Math.min(
-                itemCount,
-                firstIndex + visibleRows * columns
-        );
-        for (int index = firstIndex; index < lastIndex; index++) {
-            int relative = index - firstIndex;
-            int column = relative % columns;
-            int row = relative / columns;
-            int available = viewport.width() - gap * (columns - 1);
-            int baseWidth = available / columns;
-            int x = viewport.x() + column * (baseWidth + gap);
-            int cardWidth = column == columns - 1
-                    ? viewport.right() - x
-                    : baseWidth;
-            cardAdder.accept(index, new UiRectangle(
-                    x,
-                    viewport.y() + row * (cardHeight + gap),
-                    cardWidth,
-                    cardHeight
-            ));
-        }
-    }
-
-    private void addComponentCard(
-            RoadPresetEditorComponentCatalog.Entry item,
-            UiRectangle bounds
-    ) {
-        RoadPresetEditorComponent prototype =
-                RoadPresetEditorComponentCatalog.prototype(item.kind(), draft);
-        RoadPresetComponentButton button = new RoadPresetComponentButton(
-                bounds,
-                prototype,
-                item.name(),
-                item.subtitle(),
-                () -> addComponent(item.kind())
-        );
-        button.active = canMutate();
-        paletteCardHits.add(new PaletteCardHit(
-                bounds,
-                item.kind(),
-                prototype
-        ));
-        addCatalogWidget(button);
-    }
-
-    private void addPresetCard(
-            RoadPresetCatalogEntry entry,
-            UiRectangle bounds
-    ) {
-        boolean selected = entry.id().equals(editingId);
-        RoadPresetEditorButton button = new RoadPresetEditorButton(
-                bounds,
-                Component.literal(entry.display().fallbackName()),
-                Component.translatable(
-                        KEY + "width_lanes",
-                        entry.surfaceWidth(),
-                        entry.laneCount()
-                ),
-                selected
-                        ? RoadPresetEditorButton.Style.SELECTED
-                        : RoadPresetEditorButton.Style.NORMAL,
-                () -> selectPreset(entry.id())
-        );
-        button.active = !requests.savePending() && !requests.contentPending();
-        addCatalogWidget(button);
+    private void addWorkspaceControls() {
+        UiRectangle preview = layout.preview();
+        RoadPresetEditorButton mirror = addButton(
+                new UiRectangle(preview.right() - 24, preview.y(), 24, 20),
+                Component.literal("↔"), RoadPresetEditorButton.Style.GHOST, canMutate(),
+                () -> mutate(() -> {
+                    draft.mirror();
+                    clearComponentSelection();
+                }));
+        mirror.setTooltip(Tooltip.create(Component.translatable(KEY + "mirror")));
     }
 
     private void addFooterControls() {
-        UiRectangle content = inset(layout.statusBar(), 2);
-        if (content.width() <= 0 || content.height() <= 0) {
-            return;
-        }
-        boolean compact = content.width() < 620;
-        int gap = 3;
-        int packWidth = compact ? 48 : 92;
-        int templateWidth = compact ? 46 : 104;
-        int resetWidth = compact ? 40 : 52;
-        int mirrorWidth = compact ? 34 : 54;
-        int deleteWidth = compact ? 42 : 76;
-        int saveWidth = compact ? 48 : 78;
-        int controlsWidth = packWidth + templateWidth + resetWidth + mirrorWidth
-                + deleteWidth + saveWidth + gap * 5;
-        int x = Math.max(content.x(), content.right() - controlsWidth);
-
-        addButton(
-                new UiRectangle(x, content.y(), packWidth, content.height()),
-                Component.translatable(KEY + "create_road_pack"),
-                RoadPresetEditorButton.Style.NORMAL,
-                !gateway.catalog().entries().isEmpty(),
-                () -> minecraft.setScreen(new RoadPackScreen(this))
-        );
-        x += packWidth + gap;
-        addButton(
-                new UiRectangle(x, content.y(), templateWidth, content.height()),
-                compact
-                        ? Component.translatable(KEY + "duplicate")
-                        : Component.translatable(KEY + "use_as_template"),
-                RoadPresetEditorButton.Style.NORMAL,
-                !requests.savePending(),
-                this::duplicateDraft
-        );
-        x += templateWidth + gap;
-        addButton(
-                new UiRectangle(x, content.y(), resetWidth, content.height()),
-                Component.translatable(KEY + "reset"),
-                RoadPresetEditorButton.Style.NORMAL,
-                dirty && !requests.savePending(),
-                this::resetDraft
-        );
-        x += resetWidth + gap;
-        addButton(
-                new UiRectangle(x, content.y(), mirrorWidth, content.height()),
-                compact
-                        ? Component.literal("↔")
-                        : Component.translatable(KEY + "mirror"),
-                RoadPresetEditorButton.Style.NORMAL,
-                canMutate(),
-                () -> mutate(draft::mirror)
-        );
-        x += mirrorWidth + gap;
-        addButton(
-                new UiRectangle(x, content.y(), deleteWidth, content.height()),
-                confirmations.deleteArmed()
-                        ? Component.translatable(KEY + "confirm_delete")
-                        : Component.translatable(KEY + "delete"),
-                RoadPresetEditorButton.Style.DANGER,
-                canDelete(),
-                this::deleteDraft
-        );
-        x += deleteWidth + gap;
-        saveButton = addButton(
-                new UiRectangle(x, content.y(), saveWidth, content.height()),
-                Component.translatable(KEY + "save"),
-                RoadPresetEditorButton.Style.PRIMARY,
-                false,
-                this::saveDraft
-        );
+        UiRectangle content = inset(layout.statusBar(), 3);
+        int buttonY = content.bottom() - 20;
+        int saveWidth = Math.min(100, content.width() / 3);
+        int copyWidth = Math.min(118, content.width() / 3);
+        addButton(new UiRectangle(content.x(), buttonY, copyWidth, 20),
+                Component.translatable(KEY + (editable ? "duplicate" : "use_as_template")),
+                RoadPresetEditorButton.Style.NORMAL, !requests.savePending(), this::duplicateDraft);
+        saveButton = addButton(new UiRectangle(content.right() - saveWidth, buttonY, saveWidth, 20),
+                Component.translatable(KEY + "save"), RoadPresetEditorButton.Style.PRIMARY,
+                false, this::saveDraft);
+        saveButton.setTooltip(Tooltip.create(Component.translatable(KEY
+                + (editable ? "save_shortcut" : "read_only"))));
     }
 
+    private <T extends AbstractWidget> T addPanelWidget(T widget) {
+        addRenderableWidget(widget);
+        if (buildingPanel) {
+            panelWidgets.add(new PanelWidget(widget, widget.getY() - activeViewport.y()));
+            panelBottom = Math.max(panelBottom, widget.getY() + widget.getHeight());
+        }
+        return widget;
+    }
+
+    private void addScrollControls() {
+        if (activeViewport.height() < 34) {
+            return;
+        }
+        int x = activeViewport.right() + 3;
+        scrollUp = addButton(new UiRectangle(x, activeViewport.y(), 15, 16),
+                Component.literal("↑"), RoadPresetEditorButton.Style.GHOST, true,
+                () -> scrollPanel(-RoadPresetEditorScroll.STEP));
+        scrollDown = addButton(new UiRectangle(x, activeViewport.bottom() - 16, 15, 16),
+                Component.literal("↓"), RoadPresetEditorButton.Style.GHOST, true,
+                () -> scrollPanel(RoadPresetEditorScroll.STEP));
+        scrollUp.setTooltip(Tooltip.create(Component.translatable(KEY + "scroll_up")));
+        scrollDown.setTooltip(Tooltip.create(Component.translatable(KEY + "scroll_down")));
+    }
+
+    private void scrollPanel(int amount) {
+        if (panelScroll.move(amount)) {
+            positionPanelWidgets();
+        }
+    }
+
+    private void positionPanelWidgets() {
+        for (PanelWidget entry : panelWidgets) {
+            AbstractWidget widget = entry.widget();
+            widget.setY(activeViewport.y() + entry.top() - panelScroll.offset());
+            widget.visible = widget.getY() >= activeViewport.y()
+                    && widget.getY() + widget.getHeight() <= activeViewport.bottom();
+            if (!widget.visible && widget.isFocused()) {
+                widget.setFocused(false);
+                if (getFocused() == widget) {
+                    setFocused(null);
+                }
+            }
+        }
+        if (scrollUp != null) {
+            scrollUp.active = panelScroll.offset() > 0;
+            scrollDown.active = panelScroll.offset() < panelScroll.maximum();
+            scrollUp.visible = panelScroll.maximum() > 0;
+            scrollDown.visible = scrollUp.visible;
+        }
+    }
     private void addComponent(RoadPresetEditorComponentCatalog.Kind kind) {
         int insertion = selection.primary() >= 0
                 ? selection.primary() + 1
@@ -823,6 +816,9 @@ public final class RoadPresetEditorScreen extends Screen {
     }
 
     private void removeSelectedComponent() {
+        if (!canRemoveSelectedComponent()) {
+            return;
+        }
         mutate(() -> {
             List<Integer> removals = selection.selected().stream()
                     .sorted(Comparator.reverseOrder())
@@ -885,16 +881,9 @@ public final class RoadPresetEditorScreen extends Screen {
         });
     }
 
-    private void selectLibraryTab(LibraryTab tab) {
-        captureInputs();
-        libraryTab = Objects.requireNonNull(tab, "tab");
-        catalogScroll = 0;
-        requestRebuild();
-    }
-
     private void duplicateDraft() {
         captureInputs();
-        if (draft == null || requests.savePending()) {
+        if (draft == null || requests.savePending() || invalidSpeed) {
             return;
         }
         try {
@@ -922,6 +911,8 @@ public final class RoadPresetEditorScreen extends Screen {
             editable = true;
             source = copy;
             draft = new RoadPresetEditorDraft(copy);
+            speedValue = null;
+            invalidSpeed = false;
             replaceNameValue(copyName);
             clearComponentSelection();
             dirty = true;
@@ -950,6 +941,8 @@ public final class RoadPresetEditorScreen extends Screen {
             return;
         }
         draft = new RoadPresetEditorDraft(source);
+        speedValue = null;
+        invalidSpeed = false;
         replaceNameValue(source.display().fallbackName());
         category = source.display().category();
         clearComponentSelection();
@@ -966,7 +959,7 @@ public final class RoadPresetEditorScreen extends Screen {
 
     void saveDraft() {
         captureInputs();
-        if (!canMutate() || !dirty) {
+        if (!canMutate() || !dirty || invalidSpeed) {
             return;
         }
         try {
@@ -1108,6 +1101,9 @@ public final class RoadPresetEditorScreen extends Screen {
         if (searchBox != null) {
             searchBox.tick();
         }
+        if (speedBox != null) {
+            speedBox.tick();
+        }
         pollRequests();
         long catalogRevision = gateway.catalog().revision();
         if (observedCatalogRevision != catalogRevision) {
@@ -1144,7 +1140,7 @@ public final class RoadPresetEditorScreen extends Screen {
             return;
         }
         searchQuery = replacement;
-        catalogScroll = 0;
+        panelScroll.reset();
         requestCatalogRefresh();
     }
 
@@ -1210,6 +1206,8 @@ public final class RoadPresetEditorScreen extends Screen {
     private void loadSource(RoadPreset preset) {
         source = Objects.requireNonNull(preset, "preset");
         draft = new RoadPresetEditorDraft(preset);
+        speedValue = null;
+        invalidSpeed = false;
         expectedRevision = preset.revision();
         editable = gateway.catalog().entries()
                 .stream()
@@ -1297,7 +1295,7 @@ public final class RoadPresetEditorScreen extends Screen {
 
     private void requestRebuild() {
         if (!rebuildPending) {
-            focus.capture(nameBox, searchBox);
+            focus.capture(nameBox, searchBox, speedBox);
         }
         captureInputs();
         rebuildPending = true;
@@ -1309,6 +1307,7 @@ public final class RoadPresetEditorScreen extends Screen {
         }
         saveButton.active = canMutate()
                 && dirty
+                && !invalidSpeed
                 && draft.validationError(
                         expectedRevision + 1,
                         nameValue,
@@ -1330,14 +1329,26 @@ public final class RoadPresetEditorScreen extends Screen {
 
     private void selectOnlyComponent(int component) {
         selection.selectOnly(component);
+        showSelection();
     }
 
     private void toggleComponentSelection(int component) {
         selection.toggle(component);
+        showSelection();
     }
 
     private void clearComponentSelection() {
         selection.clear();
+        inspectSelection = false;
+        editingComponentMaterials = false;
+        panelScroll.reset();
+    }
+
+    private void showSelection() {
+        tab = RoadPresetEditorTab.LAYOUT;
+        inspectSelection = !selection.isEmpty();
+        editingComponentMaterials = false;
+        panelScroll.reset();
     }
 
     private void replaceNameValue(String replacement) {
@@ -1364,10 +1375,10 @@ public final class RoadPresetEditorScreen extends Screen {
             float partialTick
     ) {
         renderBackground(graphics);
-        boolean componentCatalog = libraryTab == LibraryTab.COMPONENTS;
-        boolean catalogEmpty = componentCatalog
+        boolean componentCatalog = tab == RoadPresetEditorTab.LAYOUT;
+        boolean catalogEmpty = showingCatalog() && (componentCatalog
                 ? filteredComponents().isEmpty()
-                : filteredPresets().isEmpty();
+                : filteredPresets().isEmpty());
         RoadPresetEditorRenderer.render(
                 graphics,
                 font,
@@ -1382,18 +1393,41 @@ public final class RoadPresetEditorScreen extends Screen {
                         dirty,
                         selection.primary(),
                         selection.selected(),
-                        status,
-                        statusIsError,
+                        invalidSpeed ? Component.translatable(KEY + "invalid_speed") : status,
+                        invalidSpeed || statusIsError,
                         nameValue,
                         category,
                         catalogEmpty,
                         componentCatalog,
                         mouseX,
                         mouseY,
-                        dragVisual()
+                        dragVisual(),
+                        tab,
+                        editingMaterialRole != null,
+                        activeViewport,
+                        panelScroll.offset(),
+                        panelScroll.maximum()
                 )
         );
         super.render(graphics, mouseX, mouseY, partialTick);
+        if (draft != null && dragState == null && !draggingScrollbar) {
+            int component = componentIndexAt(mouseX, mouseY);
+            if (component >= 0) {
+                RoadPresetEditorComponent part = draft.components().get(component);
+                Component tooltip = componentLabel(part).copy().append(" · ")
+                        .append(Component.translatable(KEY + "component_width", part.width()));
+                graphics.renderTooltip(font, font.split(tooltip, Math.min(260, width - 20)), mouseX, mouseY);
+            } else if (layout.statusBar().contains(mouseX, mouseY)
+                    && mouseY < layout.statusBar().y() + 15) {
+                Component feedback = invalidSpeed ? Component.translatable(KEY + "invalid_speed") : status;
+                if (nameValue.isBlank()) {
+                    feedback = Component.translatable(KEY + "name_required");
+                }
+                if (!feedback.getString().isEmpty()) {
+                    graphics.renderTooltip(font, font.split(feedback, Math.min(300, width - 20)), mouseX, mouseY);
+                }
+            }
+        }
     }
 
     @Override
@@ -1403,8 +1437,18 @@ public final class RoadPresetEditorScreen extends Screen {
             int button
     ) {
         if (draft != null && button == 0) {
+            if (activeViewport != null && panelScroll.maximum() > 0
+                    && mouseX >= activeViewport.right() + 3
+                    && mouseX < activeViewport.right() + 18
+                    && mouseY >= activeViewport.y() + 18
+                    && mouseY < activeViewport.bottom() - 18) {
+                draggingScrollbar = true;
+                scrollToMouse(mouseY);
+                return true;
+            }
             Optional<PaletteCardHit> paletteHit = paletteCardHits.stream()
-                    .filter(hit -> hit.bounds().contains(mouseX, mouseY))
+                    .filter(hit -> hit.widget().visible && hit.widget().active
+                            && hit.bounds().contains(mouseX, mouseY))
                     .findFirst();
             if (paletteHit.isPresent() && canMutate()) {
                 PaletteCardHit hit = paletteHit.orElseThrow();
@@ -1447,6 +1491,10 @@ public final class RoadPresetEditorScreen extends Screen {
             double dragX,
             double dragY
     ) {
+        if (button == 0 && draggingScrollbar) {
+            scrollToMouse(mouseY);
+            return true;
+        }
         if (button == 0 && dragState != null) {
             dragState.update(mouseX, mouseY, insertionIndexAt(
                     mouseX,
@@ -1463,6 +1511,10 @@ public final class RoadPresetEditorScreen extends Screen {
             double mouseY,
             int button
     ) {
+        if (button == 0 && draggingScrollbar) {
+            draggingScrollbar = false;
+            return true;
+        }
         if (button == 0 && dragState != null) {
             RoadPresetEditorDragState completed = dragState;
             dragState = null;
@@ -1491,14 +1543,30 @@ public final class RoadPresetEditorScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (draggingScrollbar && keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            draggingScrollbar = false;
+            return true;
+        }
         if (dragState != null && keyCode == 256) {
             dragState = null;
             return true;
         }
         boolean textInputFocused = nameBox != null && nameBox.isFocused()
-                || searchBox != null && searchBox.isFocused();
+                || searchBox != null && searchBox.isFocused()
+                || speedBox != null && speedBox.isFocused();
+        if (hasControlDown() && keyCode == GLFW.GLFW_KEY_S) {
+            saveDraft();
+            return true;
+        }
+        if (!textInputFocused && activeViewport != null
+                && (keyCode == GLFW.GLFW_KEY_PAGE_DOWN || keyCode == GLFW.GLFW_KEY_PAGE_UP)) {
+            scrollPanel((keyCode == GLFW.GLFW_KEY_PAGE_UP ? -1 : 1)
+                    * Math.max(24, activeViewport.height() - 24));
+            return true;
+        }
         if (keyCode == GLFW.GLFW_KEY_DELETE
                 && !textInputFocused
+                && tab == RoadPresetEditorTab.LAYOUT
                 && !selection.isEmpty()) {
             if (canRemoveSelectedComponent()) {
                 removeSelectedComponent();
@@ -1512,6 +1580,19 @@ public final class RoadPresetEditorScreen extends Screen {
         return crossSectionGeometry(
                 RoadPresetEditorRenderer.roadBounds(layout.preview())
         ).componentIndexAt(mouseX, mouseY).orElse(-1);
+    }
+
+    private void scrollToMouse(double mouseY) {
+        int trackHeight = activeViewport.height() - 38;
+        if (trackHeight <= 0 || panelScroll.maximum() <= 0) {
+            return;
+        }
+        int thumb = Math.min(trackHeight, Math.max(6,
+                trackHeight * activeViewport.height() / (panelScroll.maximum() + activeViewport.height())));
+        double fraction = (mouseY - activeViewport.y() - 19 - thumb / 2.0)
+                / Math.max(1, trackHeight - thumb);
+        int target = (int) Math.round(Math.max(0, Math.min(1, fraction)) * panelScroll.maximum());
+        scrollPanel(target - panelScroll.offset());
     }
 
     private int insertionIndexAt(double mouseX, double mouseY) {
@@ -1550,12 +1631,10 @@ public final class RoadPresetEditorScreen extends Screen {
             double mouseY,
             double delta
     ) {
-        if (layout != null
-                && layout.catalogViewport().contains(mouseX, mouseY)
+        if (draft != null && layout != null
+                && layout.propertiesPanel().contains(mouseX, mouseY)
                 && delta != 0.0) {
-            catalogScroll -= (int) Math.signum(delta);
-            catalogScroll = Math.max(0, catalogScroll);
-            requestCatalogRefresh();
+            scrollPanel(-(int) Math.signum(delta) * RoadPresetEditorScroll.STEP);
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, delta);
@@ -1630,13 +1709,9 @@ public final class RoadPresetEditorScreen extends Screen {
                 action
         );
         button.active = active && bounds.width() > 0 && bounds.height() > 0;
-        addRenderableWidget(button);
+        button.setTooltip(Tooltip.create(message));
+        addPanelWidget(button);
         return button;
-    }
-
-    private void addCatalogWidget(AbstractWidget widget) {
-        catalogWidgets.add(widget);
-        addRenderableWidget(widget);
     }
 
     private void requestCatalogRefresh() {
@@ -1644,25 +1719,8 @@ public final class RoadPresetEditorScreen extends Screen {
     }
 
     private void refreshCatalogCards() {
-        catalogWidgets.forEach(this::removeWidget);
-        catalogWidgets.clear();
-        paletteCardHits.clear();
-        addCatalogCards();
         catalogRefreshPending = false;
-    }
-
-    private RoadPresetEditorButton addFittingButton(
-            UiRectangle container,
-            UiRectangle bounds,
-            Component message,
-            RoadPresetEditorButton.Style style,
-            boolean active,
-            Runnable action
-    ) {
-        if (!containedBy(container, bounds)) {
-            return null;
-        }
-        return addButton(bounds, message, style, active, action);
+        requestRebuild();
     }
 
     private RoadPresetEditorLabel addFittingLabel(
@@ -1679,7 +1737,7 @@ public final class RoadPresetEditorScreen extends Screen {
                 message,
                 selected
         );
-        addRenderableWidget(label);
+        addPanelWidget(label);
         return label;
     }
 
@@ -1688,16 +1746,18 @@ public final class RoadPresetEditorScreen extends Screen {
         return Component.translatable(KEY + "validation_error");
     }
 
-    private enum LibraryTab {
-        COMPONENTS,
-        SAVED_ROADS
+    private record PanelWidget(AbstractWidget widget, int top) {
     }
 
     private record PaletteCardHit(
-            UiRectangle bounds,
+            AbstractWidget widget,
             RoadPresetEditorComponentCatalog.Kind kind,
             RoadPresetEditorComponent prototype
     ) {
+        UiRectangle bounds() {
+            return new UiRectangle(widget.getX(), widget.getY(),
+                    widget.getWidth(), widget.getHeight());
+        }
     }
 
 }

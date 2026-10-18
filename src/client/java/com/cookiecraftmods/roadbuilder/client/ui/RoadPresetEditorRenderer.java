@@ -53,36 +53,22 @@ final class RoadPresetEditorRenderer {
 
     private void renderShell() {
         UiRectangle frame = layout.frame();
-        graphics.fill(
-                frame.x(), frame.y(), frame.right(), frame.bottom(),
-                BACKGROUND_FRAME
-        );
-        graphics.renderOutline(
-                frame.x(), frame.y(), frame.width(), frame.height(), BORDER_FRAME
-        );
-
+        fill(frame, BACKGROUND_FRAME);
+        graphics.renderOutline(frame.x(), frame.y(), frame.width(), frame.height(), BORDER_FRAME);
         UiRectangle header = layout.header();
-        drawTrimmed(
-                Component.translatable(KEY + "title"),
-                header.x() + 5,
-                header.y() + 5,
-                Math.max(1, header.width() - 38),
-                TEXT_PRIMARY
-        );
-        drawTrimmed(
-                Component.literal(view.editingId().toString()),
-                header.x() + 5,
-                header.y() + 17,
-                Math.max(1, header.width() - 38),
-                TEXT_SECONDARY
-        );
-
+        Component name = view.nameValue().isBlank()
+                ? Component.translatable(KEY + "title") : Component.literal(view.nameValue());
+        if (view.dirty()) {
+            name = name.copy().append(" *");
+        }
+        drawTrimmed(name, header.x() + 4, header.y() + 3,
+                Math.max(1, header.width() - 38), TEXT_PRIMARY);
+        drawTrimmed(Component.translatable(KEY + (view.editable() ? "header_editable" : "header_template")),
+                header.x() + 4, header.y() + 16, Math.max(1, header.width() - 38), TEXT_SECONDARY);
         renderPanel(layout.propertiesPanel());
         renderPanel(layout.workspacePanel());
-        renderPanel(layout.libraryPanel());
-        renderPanel(layout.statusBar());
+        fill(layout.statusBar(), BACKGROUND_STATUS);
     }
-
     private void renderPanel(UiRectangle panel) {
         graphics.fill(
                 panel.x(), panel.y(), panel.right(), panel.bottom(),
@@ -95,7 +81,7 @@ final class RoadPresetEditorRenderer {
 
     private void renderLoading() {
         UiRectangle content = union(
-                layout.propertiesPanel(), layout.libraryPanel()
+                layout.propertiesPanel(), layout.workspacePanel()
         );
         drawCenteredTrimmed(
                 view.status(),
@@ -107,86 +93,73 @@ final class RoadPresetEditorRenderer {
     }
 
     private void renderProperties() {
-        UiRectangle content = inset(layout.propertiesPanel(), 6);
-        drawTrimmed(
-                Component.translatable(KEY + "properties"),
-                content.x(), content.y() + 2, content.width(), HIGHLIGHT
-        );
-        if (content.height() >= 74) {
-            drawTrimmed(
-                    Component.translatable(
-                            KEY + "width_lanes",
-                            draft.surfaceBlockWidth(),
-                            draft.laneCount()
-                    ),
-                    content.x(),
-                    content.y() + 63,
-                    content.width(),
-                    TEXT_SECONDARY
-            );
+        if (view.tab() != RoadPresetEditorTab.LAYOUT
+                && view.tab() != RoadPresetEditorTab.SAVED_ROADS
+                && !(view.tab() == RoadPresetEditorTab.MATERIALS && view.materialSetOpen())) {
+            UiRectangle heading = layout.panelHeading();
+            drawTrimmed(Component.translatable(view.tab().key()), heading.x(), heading.y() + 6,
+                    heading.width(), HIGHLIGHT_STRONG);
         }
-        if (view.selectedComponent() >= 0
-                && view.selectedComponent() < draft.components().size()
-                && content.height() >= 92) {
-            drawTrimmed(
-                    Component.translatable(KEY + "selected_component"),
-                    content.x(),
-                    content.y() + 74,
-                    content.width(),
-                    HIGHLIGHT
-            );
-        } else if (content.height() >= 92) {
-            drawTrimmed(
-                    Component.translatable(KEY + "click_render_hint"),
-                    content.x(),
-                    content.y() + 75,
-                    content.width(),
-                    TEXT_SECONDARY
-            );
+        UiRectangle viewport = view.activeViewport();
+        if (viewport != null && view.scrollMaximum() > 0 && viewport.height() > 38) {
+            int x = viewport.right() + 9;
+            int top = viewport.y() + 19;
+            int trackHeight = viewport.height() - 38;
+            graphics.fill(x, top, x + 3, top + trackHeight, CONTROL_BACKGROUND);
+            int thumbHeight = Math.max(6, trackHeight * viewport.height()
+                    / (view.scrollMaximum() + viewport.height()));
+            thumbHeight = Math.min(trackHeight, thumbHeight);
+            int thumbTop = top + (trackHeight - thumbHeight) * view.scrollOffset() / view.scrollMaximum();
+            graphics.fill(x, thumbTop, x + 3, thumbTop + thumbHeight, HIGHLIGHT_STRONG);
         }
     }
 
     private void renderWorkspace() {
         UiRectangle preview = layout.preview();
-        graphics.fill(
-                preview.x(), preview.y(), preview.right(), preview.bottom(),
-                BACKGROUND_WORKSPACE
-        );
-        drawTrimmed(
-                Component.translatable(KEY + "cross_section"),
-                preview.x() + 3,
-                preview.y() + 3,
-                Math.max(1, preview.width() - 6),
-                HIGHLIGHT
-        );
-
+        fill(preview, BACKGROUND_WORKSPACE);
+        for (int x = preview.x() + 12; x < preview.right(); x += 16) {
+            graphics.fill(x, preview.y() + 32, x + 1, preview.bottom(), BACKGROUND_PANEL_RAISED);
+        }
+        for (int y = preview.y() + 32; y < preview.bottom(); y += 16) {
+            graphics.fill(preview.x(), y, preview.right(), y + 1, BACKGROUND_PANEL_RAISED);
+        }
+        drawTrimmed(Component.translatable(KEY + "preview"), preview.x() + 3, preview.y() + 3,
+                Math.max(1, preview.width() - 30), HIGHLIGHT_STRONG);
+        drawTrimmed(Component.translatable(KEY + "width_lanes", draft.surfaceBlockWidth(), draft.laneCount()),
+                preview.x() + 3, preview.y() + 17, Math.max(1, preview.width() - 6), TEXT_SECONDARY);
         UiRectangle road = roadBounds(preview);
         if (road.width() > 0 && road.height() > 0) {
             renderComponentRow(road);
-            graphics.renderOutline(
-                    road.x(), road.y(), road.width(), road.height(), BORDER_PANEL
-            );
+            graphics.renderOutline(road.x(), road.y(), road.width(), road.height(), BORDER_PANEL);
+            RoadPresetEditorCrossSectionGeometry geometry = geometry(road);
+            for (int index = 0; index < draft.components().size(); index++) {
+                UiRectangle part = geometry.componentRectangle(index);
+                String width = Integer.toString(draft.components().get(index).width());
+                if (part.width() >= font.width(width) + 4 && preview.height() >= 75) {
+                    drawCenteredTrimmed(Component.literal(width), part.x() + part.width() / 2,
+                            road.bottom() + 5, part.width(), TEXT_SECONDARY);
+                }
+            }
         }
-
-        if (view.dragVisual() != null
-                && view.dragVisual().active()
-                && view.dragVisual().dropIndex() >= 0) {
+        if (preview.height() >= 130) {
+            drawCenteredTrimmed(Component.translatable(KEY + "preview_hint"),
+                    preview.x() + preview.width() / 2, preview.bottom() - 11,
+                    Math.max(1, preview.width() - 6), TEXT_SECONDARY);
+        }
+        if (view.dragVisual() != null && view.dragVisual().active() && view.dragVisual().dropIndex() >= 0) {
             renderDropCaret(road, view.dragVisual().dropIndex());
         }
     }
 
     static UiRectangle roadBounds(UiRectangle preview) {
-        int horizontalInset = Math.min(8, preview.width() / 6);
-        int topInset = Math.min(18, preview.height() / 3);
-        int bottomInset = Math.min(5, Math.max(0, preview.height() - topInset));
-        return new UiRectangle(
-                preview.x() + horizontalInset,
-                preview.y() + topInset,
+        int horizontalInset = Math.min(12, preview.width() / 10);
+        int topInset = Math.min(36, preview.height() / 3);
+        int bottomInset = Math.min(preview.height() >= 130 ? 32 : 18,
+                Math.max(0, (preview.height() - topInset) / 3));
+        return new UiRectangle(preview.x() + horizontalInset, preview.y() + topInset,
                 Math.max(0, preview.width() - horizontalInset * 2),
-                Math.max(0, preview.height() - topInset - bottomInset)
-        );
+                Math.max(0, preview.height() - topInset - bottomInset));
     }
-
     private void renderComponentRow(UiRectangle bounds) {
         RoadPresetEditorCrossSectionGeometry geometry = geometry(bounds);
         for (int index = 0; index < draft.components().size(); index++) {
@@ -205,6 +178,10 @@ final class RoadPresetEditorRenderer {
                         componentBounds.height(),
                         hovered ? BORDER_HOVERED : HIGHLIGHT_STRONG
                 );
+                if (view.selectedComponents().contains(index)) {
+                    graphics.fill(componentBounds.x(), componentBounds.y(), componentBounds.right(),
+                            Math.min(componentBounds.bottom(), componentBounds.y() + 3), HIGHLIGHT_STRONG);
+                }
             }
         }
     }
@@ -220,7 +197,7 @@ final class RoadPresetEditorRenderer {
         switch (component.kind()) {
             case VEHICLE_LANE, BUS_LANE -> {
                 int material = materialColor(component.block());
-                fill(bounds, material);
+                fillMaterial(bounds, component);
                 renderLaneArrows(
                         bounds,
                         component.direction(),
@@ -230,27 +207,24 @@ final class RoadPresetEditorRenderer {
             }
             case PAVEMENT -> {
                 int material = materialColor(component.block());
-                fill(bounds, material);
+                fillMaterial(bounds, component);
                 renderPavementTexture(bounds, material);
             }
-            case SIDEWALK -> renderSidewalk(bounds, component.block());
+            case SIDEWALK -> renderSidewalk(bounds, component);
             case GRASS_MEDIAN -> renderMedian(
                     bounds,
-                    component.block(),
+                    component,
                     true
             );
             case CONCRETE_MEDIAN -> renderMedian(
                     bounds,
-                    component.block(),
+                    component,
                     false
             );
-            case SOLID_MARKING -> fill(
-                    bounds,
-                    markingColor(component.block())
-            );
-            case DASHED_MARKING -> renderDashed(bounds, component.block());
+            case SOLID_MARKING -> fillMaterial(bounds, component);
+            case DASHED_MARKING -> renderDashed(bounds, component);
             case DOUBLE_CONTINUOUS_MARKING ->
-                    renderDouble(bounds, component.block());
+                    renderDouble(bounds, component);
         }
         graphics.fill(
                 bounds.right() - 1,
@@ -414,10 +388,10 @@ final class RoadPresetEditorRenderer {
 
     private void renderSidewalk(
             UiRectangle bounds,
-            ResourceLocation block
+            RoadPresetEditorComponent component
     ) {
-        int material = materialColor(block);
-        fill(bounds, material);
+        int material = materialColor(component.block());
+        fillMaterial(bounds, component);
         graphics.fill(
                 bounds.x(), bounds.y(), bounds.right(), bounds.y() + 1,
                 lighten(material, 32)
@@ -433,11 +407,11 @@ final class RoadPresetEditorRenderer {
 
     private void renderMedian(
             UiRectangle bounds,
-            ResourceLocation block,
+            RoadPresetEditorComponent component,
             boolean grass
     ) {
-        int material = materialColor(block);
-        fill(bounds, material);
+        int material = materialColor(component.block());
+        fillMaterial(bounds, component);
         int edge = grass ? lighten(material, 24) : darken(material, 28);
         graphics.fill(bounds.x(), bounds.y(), bounds.x() + 1,
                 bounds.bottom(), edge);
@@ -447,39 +421,49 @@ final class RoadPresetEditorRenderer {
 
     private void renderDashed(
             UiRectangle bounds,
-            ResourceLocation block
+            RoadPresetEditorComponent component
     ) {
-        fill(bounds, materialColor(draft.fallbackSurfaceBlock()));
-        int marking = markingColor(block);
-        int dash = Math.max(4, Math.min(12, bounds.height() / 6));
-        for (int y = bounds.y(); y < bounds.bottom(); y += dash * 2) {
+        fillMaterial(bounds, component);
+        int pavement = materialColor(draft.fallbackSurfaceBlock());
+        int dash = Math.max(3, bounds.width() * 3 / component.width());
+        for (int y = bounds.y() + dash; y < bounds.bottom(); y += dash * 2) {
             graphics.fill(
                     bounds.x(),
                     y,
                     bounds.right(),
                     Math.min(bounds.bottom(), y + dash),
-                    marking
+                    pavement
             );
         }
     }
 
     private void renderDouble(
             UiRectangle bounds,
-            ResourceLocation block
+            RoadPresetEditorComponent component
     ) {
-        fill(bounds, materialColor(draft.fallbackSurfaceBlock()));
-        int marking = markingColor(block);
+        fillMaterial(bounds, component);
         int third = Math.max(1, bounds.width() / 3);
-        graphics.fill(
-                bounds.x(), bounds.y(),
-                Math.min(bounds.right(), bounds.x() + third), bounds.bottom(),
-                marking
-        );
-        graphics.fill(
-                Math.max(bounds.x(), bounds.right() - third), bounds.y(),
-                bounds.right(), bounds.bottom(),
-                marking
-        );
+        if (bounds.width() > third * 2) {
+            graphics.fill(bounds.x() + third, bounds.y(), bounds.right() - third, bounds.bottom(),
+                    materialColor(draft.fallbackSurfaceBlock()));
+        }
+    }
+
+    private void fillMaterial(UiRectangle bounds, RoadPresetEditorComponent component) {
+        if (component.blockSet().size() == 1) {
+            fill(bounds, materialColor(component.block()));
+            return;
+        }
+        // A stable sample of the palette; placement chooses blocks using world coordinates.
+        int tile = Math.max(4, bounds.width() / component.width());
+        int[] colors = component.blockSet().stream().mapToInt(RoadPresetEditorRenderer::materialColor).toArray();
+        for (int y = bounds.y(), row = 0; y < bounds.bottom(); y += tile, row++) {
+            for (int x = bounds.x(), column = 0; x < bounds.right(); x += tile, column++) {
+                int choice = Math.floorMod((row * 73428767) ^ (column * 912271), colors.length);
+                graphics.fill(x, y, Math.min(bounds.right(), x + tile), Math.min(bounds.bottom(), y + tile),
+                        colors[choice]);
+            }
+        }
     }
 
     private void renderDropCaret(UiRectangle bounds, int insertionIndex) {
@@ -548,7 +532,7 @@ final class RoadPresetEditorRenderer {
         drawCenteredTrimmed(
                 Component.translatable(
                         view.componentCatalog()
-                                ? KEY + "component_hint"
+                                ? KEY + "no_components"
                                 : KEY + "no_results"
                 ),
                 viewport.x() + viewport.width() / 2,
@@ -560,8 +544,7 @@ final class RoadPresetEditorRenderer {
 
     private void renderStatus() {
         UiRectangle content = inset(layout.statusBar(), 4);
-        int controlsWidth = content.width() < 620 ? 222 : 376;
-        int available = Math.max(1, content.width() - controlsWidth - 4);
+        int available = Math.max(1, content.width() - 4);
         Optional<String> validation = draft.validationError(
                 view.expectedRevision() + 1,
                 view.nameValue(),
@@ -571,10 +554,11 @@ final class RoadPresetEditorRenderer {
                 && !view.status().getString().isEmpty();
         Component message = explicitError
                 ? view.status()
-                : validation.<Component>map(Component::literal)
+                : validation.<Component>map(error -> Component.translatable(KEY
+                        + (view.nameValue().isBlank() ? "name_required" : "validation_error")))
                         .orElse(view.status());
         int color = validation.isPresent() || explicitError
-                ? HIGHLIGHT_STRONG : TEXT_SECONDARY;
+                ? 0xFFFFAAAA : TEXT_SECONDARY;
         if (view.dirty()
                 && !explicitError
                 && validation.isEmpty()
@@ -587,17 +571,13 @@ final class RoadPresetEditorRenderer {
         drawTrimmed(
                 message,
                 content.x(),
-                content.y() + Math.max(0, (content.height() - 8) / 2),
+                content.y(),
                 available,
                 color
         );
     }
 
     private static int materialColor(ResourceLocation block) {
-        return RoadPresetBlockAppearance.opaquePreviewColor(block);
-    }
-
-    private static int markingColor(ResourceLocation block) {
         return RoadPresetBlockAppearance.opaquePreviewColor(block);
     }
 
@@ -705,7 +685,12 @@ final class RoadPresetEditorRenderer {
             boolean componentCatalog,
             int mouseX,
             int mouseY,
-            DragVisual dragVisual
+            DragVisual dragVisual,
+            RoadPresetEditorTab tab,
+            boolean materialSetOpen,
+            UiRectangle activeViewport,
+            int scrollOffset,
+            int scrollMaximum
     ) {
         View {
             Objects.requireNonNull(editingId, "editingId");

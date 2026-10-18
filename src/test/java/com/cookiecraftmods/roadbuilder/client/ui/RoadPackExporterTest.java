@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadPackExporterTest {
@@ -17,7 +18,7 @@ class RoadPackExporterTest {
     Path temporaryDirectory;
 
     @Test
-    void exportsSelectedRoadsAsAnInstallableDatapack() throws Exception {
+    void exportsSelectedRoadsAsResourceAndDataPack() throws Exception {
         Path pack = RoadPackExporter.export(
                 temporaryDirectory,
                 "City Roads",
@@ -31,9 +32,16 @@ class RoadPackExporterTest {
         try (ZipFile zip = new ZipFile(pack.toFile())) {
             assertNotNull(zip.getEntry("pack.mcmeta"));
             assertNotNull(zip.getEntry("roadbuilder-pack.json"));
+            assertNotNull(zip.getEntry("assets/example/road_presets/urban/main.json"));
             assertNotNull(zip.getEntry(
                     "data/example/road_presets/urban/main.json"
             ));
+            try (var assets = zip.getInputStream(zip.getEntry(
+                    "assets/example/road_presets/urban/main.json"));
+                 var data = zip.getInputStream(zip.getEntry(
+                         "data/example/road_presets/urban/main.json"))) {
+                assertArrayEquals(assets.readAllBytes(), data.readAllBytes());
+            }
         }
     }
 }

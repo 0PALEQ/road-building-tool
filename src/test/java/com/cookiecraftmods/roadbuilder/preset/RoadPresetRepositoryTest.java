@@ -66,6 +66,19 @@ class RoadPresetRepositoryTest {
     }
 
     @Test
+    void clientPackCatalogOverridesLocallyAndDisablingRestoresServerEntries() {
+        ResourceLocation shared = new ResourceLocation("example", "shared");
+        ResourceLocation exclusive = new ResourceLocation("example", "exclusive");
+        RoadPresetCatalog server = RoadPresetCatalog.from(1, Map.of(shared, preset(1)), java.util.Set.of(shared));
+        RoadPresetCatalog enabled = server.withClientPacks(2, Map.of(shared, preset(2), exclusive, preset(2)));
+        assertEquals(2, enabled.entries().size());
+        assertTrue(enabled.entries().stream().noneMatch(RoadPresetCatalogEntry::editable));
+        assertEquals(2, enabled.entries().stream().filter(entry -> entry.id().equals(shared)).findFirst().orElseThrow().revision());
+        assertEquals(server.entries(), server.withClientPacks(3, Map.of()).entries());
+        assertEquals(1, server.entries().get(0).revision());
+    }
+
+    @Test
     void rejectsNullIdsAndValuesBeforePublishingANewSnapshot() {
         RoadPresetRepository repository = new RoadPresetRepository();
         ResourceLocation id = new ResourceLocation("roadbuilder", "kept");

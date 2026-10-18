@@ -145,45 +145,6 @@ public final class JunctionMarkingMaterializer {
                     maximumDistance,
                     conflictEdge + 1
             );
-            if (approach.primary()) {
-                approach.segment().presetSnapshot().intersectionStyle()
-                        .markingBlock()
-                        .flatMap(BuiltInRegistries.BLOCK::getOptional)
-                        .map(RoadBlockStateFactory::solid)
-                        .filter(state -> !state.isAir())
-                        .ifPresent(state -> {
-                            int finalDistance = Math.min(
-                                    maximumDistance,
-                                    Math.max(
-                                    2,
-                                    (int) Math.floor(
-                                            approach.trimDistance()
-                                    )
-                                    )
-                            );
-                            for (int distance = 2;
-                                    distance <= finalDistance;
-                                    distance++) {
-                                var point = approach.boundaryPosition().add(
-                                        approach.outwardTangent().scale(
-                                                distance
-                                        )
-                                );
-                                PlannedBlock block = new PlannedBlock(
-                                        BlockPos.containing(
-                                                point.x(),
-                                                point.y(),
-                                                point.z()
-                                        ),
-                                        state
-                                );
-                                if (!crosswalkPositions.contains(
-                                        block.position())) {
-                                    blocks.put(block.position(), block);
-                                }
-                            }
-                        });
-            }
             if (approach.control() != IntersectionControl.FREE) {
                 approach.segment().presetSnapshot().intersectionStyle()
                         .stopLineBlock()

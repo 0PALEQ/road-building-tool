@@ -21,6 +21,8 @@ import com.cookiecraftmods.roadbuilder.placement.StraightRoadPlanningService;
 import com.cookiecraftmods.roadbuilder.placement.RoadPathPlanner;
 import com.cookiecraftmods.roadbuilder.placement.RoadPathPlanningService;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetResources;
+import com.cookiecraftmods.roadbuilder.preset.RoadPresetLookup;
+import com.cookiecraftmods.roadbuilder.preset.RoadPresetReloadListener;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -102,6 +104,10 @@ public final class RoadBuilderServerNetworking {
             throw new IllegalStateException("Road Builder server networking is already registered");
         }
 
+        if (!ServerPlayNetworking.registerGlobalReceiver(ClientRoadIntentC2SPacket.TYPE,
+                (packet, player, responseSender) -> receiveClientRoadIntent(packet, player))) {
+            throw new IllegalStateException("client road intent receiver is already registered");
+        }
         boolean registered = ServerPlayNetworking.registerGlobalReceiver(
                 StraightRoadIntentC2SPacket.TYPE,
                 (packet, player, responseSender) -> receiveStraightRoadIntent(packet, player)
@@ -249,6 +255,27 @@ public final class RoadBuilderServerNetworking {
         );
     }
 
+    private static void receiveClientRoadIntent(ClientRoadIntentC2SPacket packet, ServerPlayer player) {
+        RoadPresetLookup lookup = id -> {
+            // This lookup is used only after the normal request rate/permission checks.
+            if (!id.equals(packet.presetId()) || !RoadPresetReloadListener.validateSurfaceBlock(id, packet.preset())) return Optional.empty();
+            return Optional.of(packet.preset());
+        };
+        if (packet.intent() instanceof StraightRoadIntentC2SPacket intent) {
+            receiveStraightRoadIntent(intent, player, new StraightRoadPlacementEndpoint(
+                    new StraightRoadPlanningService(lookup, new StraightRoadPlanner()),
+                    CONSTRUCTION_AUTHORIZER, SERVER_POLICY.constructionLimits(), new BlockPlanCommitter()));
+        } else if (packet.intent() instanceof RoadPathIntentC2SPacket intent) {
+            receiveRoadPathIntent(intent, player, new RoadPathPlacementEndpoint(
+                    new RoadPathPlanningService(lookup, new RoadPathPlanner()),
+                    CONSTRUCTION_AUTHORIZER, SERVER_POLICY.constructionLimits(), new BlockPlanCommitter(),
+                    SERVER_POLICY.trafficHandedness()));
+        } else if (packet.intent() instanceof SegmentReplaceIntentC2SPacket intent) {
+            receiveSegmentReplaceIntent(intent, player, new SegmentReplacementEndpoint(
+                    lookup, CONSTRUCTION_AUTHORIZER, SERVER_POLICY.constructionLimits(), new BlockPlanCommitter()));
+        }
+    }
+
     public static void broadcastPresetCatalog(MinecraftServer server) {
         RoadPresetNetworking.broadcastCatalog(server);
     }
@@ -256,6 +283,14 @@ public final class RoadBuilderServerNetworking {
     private static void receiveStraightRoadIntent(
             StraightRoadIntentC2SPacket packet,
             ServerPlayer player
+    ) {
+        receiveStraightRoadIntent(packet, player, STRAIGHT_ROAD_ENDPOINT);
+    }
+
+    private static void receiveStraightRoadIntent(
+            StraightRoadIntentC2SPacket packet,
+            ServerPlayer player,
+            StraightRoadPlacementEndpoint endpoint
     ) {
         // Never mutate if this connection cannot receive the operation ID.
         if (!ServerPlayNetworking.canSend(player, PlacementResultS2CPacket.TYPE)) {
@@ -279,7 +314,7 @@ public final class RoadBuilderServerNetworking {
         )) {
             result = PlacementResultS2CPacket.rejected(packet.requestId(), PlacementResultCode.RATE_LIMITED);
         } else {
-            result = process(packet, player);
+            result = process(packet, player, endpoint);
         }
         REQUEST_SESSIONS.rememberPlacement(playerId, result);
         if (result.resultCode() == PlacementResultCode.ACCEPTED) {
@@ -298,6 +333,14 @@ public final class RoadBuilderServerNetworking {
     private static void receiveRoadPathIntent(
             RoadPathIntentC2SPacket packet,
             ServerPlayer player
+    ) {
+        receiveRoadPathIntent(packet, player, ROAD_PATH_ENDPOINT);
+    }
+
+    private static void receiveRoadPathIntent(
+            RoadPathIntentC2SPacket packet,
+            ServerPlayer player,
+            RoadPathPlacementEndpoint endpoint
     ) {
         if (!ServerPlayNetworking.canSend(
                 player,
@@ -326,7 +369,7 @@ public final class RoadBuilderServerNetworking {
                     PlacementResultCode.RATE_LIMITED
             );
         } else {
-            result = process(packet, player);
+            result = process(packet, player, endpoint);
         }
         REQUEST_SESSIONS.rememberPlacement(playerId, result);
         if (result.resultCode() == PlacementResultCode.ACCEPTED) {
@@ -435,6 +478,14 @@ public final class RoadBuilderServerNetworking {
             SegmentReplaceIntentC2SPacket packet,
             ServerPlayer player
     ) {
+        receiveSegmentReplaceIntent(packet, player, REPLACEMENT_ENDPOINT);
+    }
+
+    private static void receiveSegmentReplaceIntent(
+            SegmentReplaceIntentC2SPacket packet,
+            ServerPlayer player,
+            SegmentReplacementEndpoint endpoint
+    ) {
         if (!ServerPlayNetworking.canSend(player, PlacementResultS2CPacket.TYPE)) {
             return;
         }
@@ -455,7 +506,7 @@ public final class RoadBuilderServerNetworking {
                     packet.requestId(), PlacementResultCode.RATE_LIMITED
             );
         } else {
-            result = process(packet, player);
+            result = process(packet, player, endpoint);
         }
         REQUEST_SESSIONS.rememberPlacement(playerId, result);
         if (result.resultCode() == PlacementResultCode.ACCEPTED) {
@@ -864,7 +915,8 @@ public final class RoadBuilderServerNetworking {
 
     private static PlacementResultS2CPacket process(
             StraightRoadIntentC2SPacket packet,
-            ServerPlayer player
+            ServerPlayer player,
+            StraightRoadPlacementEndpoint endpoint
     ) {
         try {
             RoadBuilderPlacementSavedData savedData = RoadBuilderPlacementSavedData.get(player.serverLevel());
@@ -911,7 +963,7 @@ public final class RoadBuilderServerNetworking {
                         PlacementResultCode.CONSTRUCTION_BUSY
                 );
             }
-            return STRAIGHT_ROAD_ENDPOINT.handle(
+            return endpoint.handle(
                     packet,
                     player,
                     savedData.ledger(),
@@ -934,7 +986,8 @@ public final class RoadBuilderServerNetworking {
 
     private static PlacementResultS2CPacket process(
             RoadPathIntentC2SPacket packet,
-            ServerPlayer player
+            ServerPlayer player,
+            RoadPathPlacementEndpoint endpoint
     ) {
         try {
             RoadBuilderPlacementSavedData savedData =
@@ -967,7 +1020,7 @@ public final class RoadBuilderServerNetworking {
                         PlacementResultCode.CONSTRUCTION_BUSY
                 );
             }
-            return ROAD_PATH_ENDPOINT.handle(
+            return endpoint.handle(
                     packet,
                     player,
                     savedData.ledger(),
@@ -990,7 +1043,8 @@ public final class RoadBuilderServerNetworking {
 
     private static PlacementResultS2CPacket process(
             SegmentReplaceIntentC2SPacket packet,
-            ServerPlayer player
+            ServerPlayer player,
+            SegmentReplacementEndpoint endpoint
     ) {
         try {
             RoadBuilderPlacementSavedData savedData =
@@ -1012,7 +1066,7 @@ public final class RoadBuilderServerNetworking {
                         packet.requestId(), PlacementResultCode.CONSTRUCTION_BUSY
                 );
             }
-            return REPLACEMENT_ENDPOINT.handle(
+            return endpoint.handle(
                     packet,
                     player,
                     savedData.ledger(),

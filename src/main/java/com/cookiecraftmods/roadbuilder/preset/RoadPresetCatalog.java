@@ -56,6 +56,13 @@ public record RoadPresetCatalog(
         return new RoadPresetCatalog(revision, entries);
     }
 
+    public RoadPresetCatalog withClientPacks(long revision, Map<ResourceLocation, RoadPreset> presets) {
+        java.util.TreeMap<ResourceLocation, RoadPresetCatalogEntry> merged = new java.util.TreeMap<>();
+        entries.forEach(entry -> merged.put(entry.id(), entry));
+        from(0, presets, Set.of()).entries().forEach(entry -> merged.put(entry.id(), entry));
+        return new RoadPresetCatalog(revision, List.copyOf(merged.values()));
+    }
+
     static String fingerprint(RoadPreset preset) {
         StringBuilder canonical = new StringBuilder()
                 .append(preset.schemaVersion()).append('|')

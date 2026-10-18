@@ -21,7 +21,8 @@ public record RoadGraphSnapshotChunkS2CPacket(
         byte[] payload
 ) implements FabricPacket {
     public static final int MAXIMUM_CHUNK_BYTES = 64 * 1024;
-    public static final int MAXIMUM_CHUNK_COUNT = 32;
+    public static final int MAXIMUM_CHUNK_COUNT =
+            RoadGraphSnapshotS2CPacket.MAX_TRANSFER_BYTES / MAXIMUM_CHUNK_BYTES;
     public static final PacketType<RoadGraphSnapshotChunkS2CPacket> TYPE =
             PacketType.create(
                     new ResourceLocation(
@@ -45,7 +46,7 @@ public record RoadGraphSnapshotChunkS2CPacket(
             throw new IllegalArgumentException("invalid snapshot chunk index/count");
         }
         if (totalBytes < 1
-                || totalBytes > RoadGraphSnapshotS2CPacket.MAX_PAYLOAD_BYTES) {
+                || totalBytes > RoadGraphSnapshotS2CPacket.MAX_TRANSFER_BYTES) {
             throw new IllegalArgumentException(
                     "invalid snapshot transfer size"
             );

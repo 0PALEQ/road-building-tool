@@ -15,6 +15,7 @@ public record RoadGraphSnapshotS2CPacket(
 ) implements FabricPacket {
     public static final int CURRENT_PROTOCOL_VERSION = PacketValidation.PROTOCOL_VERSION;
     public static final int MAX_PAYLOAD_BYTES = 1_048_576;
+    public static final int MAX_TRANSFER_BYTES = 64 * 1024 * 1024;
 
     public static final PacketType<RoadGraphSnapshotS2CPacket> TYPE = PacketType.create(
             new ResourceLocation("roadbuilder", "road_graph_snapshot_v1"),
@@ -35,23 +36,30 @@ public record RoadGraphSnapshotS2CPacket(
     }
 
     public byte[] encode() {
-        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
-        write(buffer);
-        byte[] encoded = new byte[buffer.readableBytes()];
-        buffer.readBytes(encoded);
-        return encoded;
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer(256, MAX_TRANSFER_BYTES));
+        try {
+            write(buffer);
+            byte[] encoded = new byte[buffer.readableBytes()];
+            buffer.readBytes(encoded);
+            return encoded;
+        } finally {
+            buffer.release();
+        }
     }
 
     public static RoadGraphSnapshotS2CPacket decode(byte[] encoded) {
         Objects.requireNonNull(encoded, "encoded");
-        if (encoded.length > MAX_PAYLOAD_BYTES) {
+        if (encoded.length > MAX_TRANSFER_BYTES) {
             throw new IllegalArgumentException(
                     "road graph snapshot payload exceeds limit"
             );
         }
-        return TYPE.read(new FriendlyByteBuf(
-                Unpooled.wrappedBuffer(encoded)
-        ));
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.wrappedBuffer(encoded));
+        try {
+            return new RoadGraphSnapshotS2CPacket(decode(buffer, MAX_TRANSFER_BYTES));
+        } finally {
+            buffer.release();
+        }
     }
 
     @Override
@@ -71,7 +79,11 @@ public record RoadGraphSnapshotS2CPacket(
     }
 
     private static WireFields decode(FriendlyByteBuf buffer) {
-        PacketValidation.requirePayloadSize(buffer, MAX_PAYLOAD_BYTES, "road graph snapshot");
+        return decode(buffer, MAX_PAYLOAD_BYTES);
+    }
+
+    private static WireFields decode(FriendlyByteBuf buffer, int maximumBytes) {
+        PacketValidation.requirePayloadSize(buffer, maximumBytes, "road graph snapshot");
         WireFields fields = new WireFields(
                 buffer.readVarInt(),
                 RoadGraphPacketCodecs.readSnapshot(buffer)

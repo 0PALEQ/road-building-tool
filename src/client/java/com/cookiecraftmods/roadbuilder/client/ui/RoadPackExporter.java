@@ -105,11 +105,13 @@ public final class RoadPackExporter {
                 )).toString();
                 write(
                         zip,
-                        "data/" + entry.getKey().getNamespace()
+                        "assets/" + entry.getKey().getNamespace()
                                 + "/road_presets/"
                                 + entry.getKey().getPath() + ".json",
                         json
                 );
+                write(zip, "data/" + entry.getKey().getNamespace()
+                        + "/road_presets/" + entry.getKey().getPath() + ".json", json);
             }
         }
     }

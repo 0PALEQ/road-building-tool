@@ -4,7 +4,9 @@ import com.cookiecraftmods.roadbuilder.RoadBuilder;
 import com.cookiecraftmods.roadbuilder.network.RoadGraphDelta;
 import com.cookiecraftmods.roadbuilder.network.RoadGraphSnapshot;
 import com.cookiecraftmods.roadbuilder.persistence.RoadBuilderNetworkSavedData;
+import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -41,19 +43,21 @@ final class RoadGraphSynchronizer {
 
         RoadGraphDeltaS2CPacket deltaPacket = null;
         try {
-            RoadGraphSnapshotS2CPacket.current(after);
             if (before != null && before.dimension().equals(after.dimension())) {
                 deltaPacket = RoadGraphDeltaS2CPacket.current(
                         RoadGraphDelta.between(before, after)
                 );
+                // A large mutation uses the bounded, chunked snapshot path instead.
+                FriendlyByteBuf buffer = new FriendlyByteBuf(
+                        Unpooled.buffer(256, RoadGraphDeltaS2CPacket.MAX_PAYLOAD_BYTES));
+                try {
+                    deltaPacket.write(buffer);
+                } finally {
+                    buffer.release();
+                }
             }
-        } catch (IllegalArgumentException exception) {
-            RoadBuilder.LOGGER.error(
-                    "Road graph mutation in {} exceeds synchronization limits",
-                    level.dimension().location(),
-                    exception
-            );
-            return;
+        } catch (IllegalArgumentException | IndexOutOfBoundsException exception) {
+            deltaPacket = null;
         }
 
         for (ServerPlayer player : level.players()) {
@@ -81,9 +85,12 @@ final class RoadGraphSynchronizer {
                     player,
                     RoadGraphSnapshotS2CPacket.TYPE
             )) {
+                if (encoded.length > RoadGraphSnapshotS2CPacket.MAX_PAYLOAD_BYTES) {
+                    throw new IllegalArgumentException("client needs chunked graph synchronization");
+                }
                 ServerPlayNetworking.send(player, packet);
             }
-        } catch (IllegalArgumentException exception) {
+        } catch (IllegalArgumentException | IndexOutOfBoundsException exception) {
             RoadBuilder.LOGGER.error(
                     "Road graph in {} exceeds synchronization limits for player {}",
                     snapshot.dimension().location(),

@@ -96,6 +96,17 @@ class JunctionMarkingMaterializerTest {
                         10_000
                 )
         ).plan();
+        for (SolvedJunctionApproach primary : solved.approaches().stream()
+                .filter(SolvedJunctionApproach::primary).toList()) {
+            for (int distance = 2;
+                    distance <= (int) Math.floor(primary.trimDistance());
+                    distance++) {
+                BlockPos center = position(primary, distance, 0);
+                assertFalse(markings.blocks().stream().anyMatch(block ->
+                        block.position().equals(center)),
+                        "Priority-road center lines must stop outside the junction");
+            }
+        }
         SolvedJunctionApproach approach = solved.approaches().stream()
                 .filter(value -> value.segment().id().equals(north.id()))
                 .findFirst()

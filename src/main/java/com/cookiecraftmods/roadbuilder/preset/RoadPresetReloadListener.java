@@ -30,11 +30,20 @@ public final class RoadPresetReloadListener extends SimpleJsonResourceReloadList
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final Logger LOGGER = LoggerFactory.getLogger("roadbuilder/presets");
 
-    private final RoadPresetRepository repository;
+    private final java.util.function.Consumer<Map<ResourceLocation, RoadPreset>> receiver;
 
     public RoadPresetReloadListener(RoadPresetRepository repository) {
+        this(presets -> {
+            repository.replaceAll(presets);
+            RoadPresetResources.catalogReloaded();
+        });
+    }
+
+    public RoadPresetReloadListener(
+            java.util.function.Consumer<Map<ResourceLocation, RoadPreset>> receiver
+    ) {
         super(GSON, DIRECTORY);
-        this.repository = Objects.requireNonNull(repository, "repository");
+        this.receiver = Objects.requireNonNull(receiver, "receiver");
     }
 
     @Override
@@ -64,14 +73,14 @@ public final class RoadPresetReloadListener extends SimpleJsonResourceReloadList
                     .ifPresent(preset -> decoded.put(id, preset));
         });
 
-        repository.replaceAll(decoded);
-        RoadPresetResources.catalogReloaded();
+        receiver.accept(Map.copyOf(decoded));
         LOGGER.info("Loaded {} road preset(s)", decoded.size());
     }
 
-    private static boolean validateSurfaceBlock(ResourceLocation id, RoadPreset preset) {
+    public static boolean validateSurfaceBlock(ResourceLocation id, RoadPreset preset) {
         HashSet<ResourceLocation> blockIds =
                 new HashSet<>(preset.surfaceColumnBlocks());
+        blockIds.add(preset.surfaceBlock());
         preset.surfaceColumns().forEach(column -> {
             blockIds.addAll(column.blocks());
             blockIds.addAll(column.underlayBlocks());

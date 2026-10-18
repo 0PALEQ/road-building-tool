@@ -16,6 +16,8 @@ import com.cookiecraftmods.roadbuilder.networking.LaneConnectorEditC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.RemovalIntentC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.RemovalResultS2CPacket;
 import com.cookiecraftmods.roadbuilder.networking.StraightRoadIntentC2SPacket;
+import com.cookiecraftmods.roadbuilder.networking.ClientRoadIntentC2SPacket;
+import com.cookiecraftmods.roadbuilder.client.preset.ClientRoadPacks;
 import com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetCatalogS2CPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetContentRequestC2SPacket;
@@ -58,6 +60,8 @@ public final class RoadBuilderClientNetworking {
     private static final ClientRoadGraphCache ROAD_GRAPHS = new ClientRoadGraphCache();
     private static final RoadGraphSnapshotChunkAssembler SNAPSHOT_CHUNKS =
             new RoadGraphSnapshotChunkAssembler();
+    private static RoadPresetCatalog serverPresetCatalog = new RoadPresetCatalog(0, java.util.List.of());
+    private static long localCatalogRevision;
     private static RoadPresetCatalog presetCatalog =
             new RoadPresetCatalog(0, java.util.List.of());
     private static final Map<ResourceLocation, RoadPreset> PRESET_CONTENT =
@@ -222,8 +226,7 @@ public final class RoadBuilderClientNetworking {
             return false;
         }
 
-        ClientPlayNetworking.send(packet);
-        return true;
+        return sendPresetIntent(packet, packet.presetId());
     }
 
     public static boolean canSendRoadPathIntent() {
@@ -237,7 +240,28 @@ public final class RoadBuilderClientNetworking {
         if (!canSendRoadPathIntent()) {
             return false;
         }
-        ClientPlayNetworking.send(packet);
+        return sendPresetIntent(packet, packet.presetId());
+    }
+
+    private static boolean sendPresetIntent(
+            net.fabricmc.fabric.api.networking.v1.FabricPacket packet,
+            ResourceLocation presetId
+    ) {
+        RoadPreset local = ClientRoadPacks.presets().get(presetId);
+        if (local == null) {
+            ClientPlayNetworking.send(packet);
+            return true;
+        }
+        if (!ClientPlayNetworking.canSend(ClientRoadIntentC2SPacket.TYPE)) {
+            return false;
+        }
+        final ClientRoadIntentC2SPacket request;
+        try {
+            request = new ClientRoadIntentC2SPacket(packet, local);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+        ClientPlayNetworking.send(request);
         return true;
     }
 
@@ -280,6 +304,7 @@ public final class RoadBuilderClientNetworking {
             ResourceLocation id
     ) {
         Objects.requireNonNull(id, "id");
+        if (ClientRoadPacks.presets().containsKey(id)) return true;
         if (PRESET_CONTENT.containsKey(id)
                 || PRESET_CONTENT_REQUESTS.values().stream()
                 .anyMatch(request -> request.presetId().equals(id))) {
@@ -295,6 +320,12 @@ public final class RoadBuilderClientNetworking {
     ) {
         Objects.requireNonNull(requestId, "requestId");
         Objects.requireNonNull(id, "id");
+        RoadPreset local = ClientRoadPacks.presets().get(id);
+        if (local != null) {
+            if (retainResult) rememberBounded(PRESET_CONTENT_RESULTS, requestId,
+                    PresetContentS2CPacket.current(requestId, id, local), MAX_CACHED_PRESET_CONTENT_RESULTS);
+            return true;
+        }
         if (!ClientPlayNetworking.canSend(
                 PresetContentRequestC2SPacket.TYPE
         )) {
@@ -336,6 +367,8 @@ public final class RoadBuilderClientNetworking {
     public static synchronized Optional<RoadPreset> presetContent(
             ResourceLocation id
     ) {
+        RoadPreset local = ClientRoadPacks.presets().get(id);
+        if (local != null) return Optional.of(local);
         return Optional.ofNullable(PRESET_CONTENT.get(
                 Objects.requireNonNull(id, "id")
         ));
@@ -432,8 +465,7 @@ public final class RoadBuilderClientNetworking {
         if (!canSendSegmentReplaceIntent()) {
             return false;
         }
-        ClientPlayNetworking.send(packet);
-        return true;
+        return sendPresetIntent(packet, packet.presetId());
     }
 
     public static boolean canSendSegmentDirectionInvertIntent() {
@@ -568,6 +600,7 @@ public final class RoadBuilderClientNetworking {
         clearResults();
         ROAD_GRAPHS.clear();
         SNAPSHOT_CHUNKS.clear();
+        serverPresetCatalog = new RoadPresetCatalog(0, java.util.List.of());
         presetCatalog = new RoadPresetCatalog(0, java.util.List.of());
         PRESET_CONTENT.clear();
         selectedPresetId = null;
@@ -650,9 +683,17 @@ public final class RoadBuilderClientNetworking {
         requestedDimension = dimension.location();
     }
 
-    private static synchronized void receivePresetCatalog(
-            RoadPresetCatalog replacement
-    ) {
+    private static synchronized void receivePresetCatalog(RoadPresetCatalog replacement) {
+        serverPresetCatalog = replacement;
+        refreshClientRoadPacks();
+    }
+
+    public static synchronized void refreshClientRoadPacks() {
+        applyPresetCatalog(serverPresetCatalog.withClientPacks(++localCatalogRevision,
+                ClientRoadPacks.presets()));
+    }
+
+    private static synchronized void applyPresetCatalog(RoadPresetCatalog replacement) {
         RoadPresetCatalog priorCatalog = presetCatalog;
         RoadPresetCatalogEntry previous = selectedPreset().orElse(null);
         presetCatalog = replacement;

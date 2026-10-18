@@ -24,8 +24,8 @@ public final class RoadPresetEditorDraft {
     private final List<RoadPresetEditorComponent> components;
     private final List<RoadPresetEditorComponent> componentView;
     private final RoadPresetDisplay display;
-    private final RoadClassification classification;
-    private final RoadIntersectionStyle intersectionStyle;
+    private RoadClassification classification;
+    private RoadIntersectionStyle intersectionStyle;
     private RoadMaterialPalette materialPalette;
 
     public RoadPresetEditorDraft(RoadPreset source) {
@@ -111,6 +111,18 @@ public final class RoadPresetEditorDraft {
 
     public RoadIntersectionStyle intersectionStyle() {
         return intersectionStyle;
+    }
+
+    public void setIntersectionStyle(RoadIntersectionStyle replacement) {
+        intersectionStyle = Objects.requireNonNull(replacement, "replacement");
+    }
+
+    public RoadClassification classification() {
+        return classification;
+    }
+
+    public void setClassification(RoadClassification replacement) {
+        classification = Objects.requireNonNull(replacement, "replacement");
     }
 
     public void mirror() {
@@ -257,22 +269,8 @@ public final class RoadPresetEditorDraft {
                 List.copyOf(bands),
                 candidateDisplay,
                 classification,
-                resolvedIntersectionStyle(),
+                intersectionStyle,
                 materialPalette
-        );
-    }
-
-    private RoadIntersectionStyle resolvedIntersectionStyle() {
-        Optional<ResourceLocation> laneMarking = Optional.of(
-                materialPalette.markingBlock()
-        );
-        return new RoadIntersectionStyle(
-                materialPalette.pavementBlock(),
-                laneMarking,
-                laneMarking,
-                intersectionStyle.stopLineBlock(),
-                true,
-                intersectionStyle.defaultControl()
         );
     }
 

@@ -72,9 +72,12 @@ final class RoadPresetEditorButton extends AbstractButton {
                     right,
                     top + 1,
                     style == Style.PRIMARY || style == Style.SELECTED
-                            ? HIGHLIGHT
+                            ? HIGHLIGHT_STRONG
                             : BORDER_CONTROL
             );
+        }
+        if (isFocused()) {
+            graphics.renderOutline(left, top, getWidth(), getHeight(), HIGHLIGHT_STRONG);
         }
         var font = Minecraft.getInstance().font;
         if (subtitle == null || getHeight() < 27) {

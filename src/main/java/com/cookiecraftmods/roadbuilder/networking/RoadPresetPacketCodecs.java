@@ -98,6 +98,9 @@ final class RoadPresetPacketCodecs {
 
     static RoadPreset readPreset(FriendlyByteBuf buffer) {
         String json = buffer.readUtf(MAXIMUM_PRESET_JSON_BYTES);
+        if (json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAXIMUM_PRESET_JSON_BYTES) {
+            throw new IllegalArgumentException("road preset payload is too large");
+        }
         return RoadPreset.CODEC.parse(
                 JsonOps.INSTANCE,
                 JsonParser.parseString(json)

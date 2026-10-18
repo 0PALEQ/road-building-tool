@@ -3,7 +3,7 @@
   "id": "roadbuilder",
   "version": "${version}",
   "name": "Road Builder",
-  "description": "A tool for building complex road networks adding city builder-like road tools; This is an alpha build of the mod, not intended to be published on any platform and can be obtained only through restricted-access-files channel on cookiecraftmods discord - if you obtained the mod from any other source, you installed an illegal copy; copyright opaleq - All-Rights-Reserved",
+  "description": "A tool for building complex road networks by adding city builder-like road tools. This is an alpha build of the mod not intended for public distribution. It can only be obtained through the restricted-access-files channel on the CookieCraftMods Discord or directly from opaleq's DMs. Any other source is unauthorized.\n\nCopyright © 2026 opaleq. All rights reserved.",
   "icon": "assets/roadbuilder/icon.png",
   "authors": [
     "opaleq - CookieCraftMods"

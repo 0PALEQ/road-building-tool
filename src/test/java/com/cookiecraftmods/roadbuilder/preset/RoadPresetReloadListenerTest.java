@@ -24,6 +24,19 @@ class RoadPresetReloadListenerTest {
     }
 
     @Test
+    void resourcePackReloadPublishesReplacementWithoutChangingServerCatalog() {
+        RoadPresetRepository server = new RoadPresetRepository();
+        java.util.concurrent.atomic.AtomicReference<Map<ResourceLocation, RoadPreset>> client =
+                new java.util.concurrent.atomic.AtomicReference<>(Map.of());
+        RoadPresetReloadListener listener = new RoadPresetReloadListener(client::set);
+        listener.apply(Map.of(SAMPLE_ID, sampleJson()), null, null);
+        assertTrue(client.get().containsKey(SAMPLE_ID));
+        assertEquals(0, server.size());
+        listener.apply(Map.of(), null, null);
+        assertTrue(client.get().isEmpty());
+    }
+
+    @Test
     void resourcePresetUsesItsResourcePathAsId() {
         RoadPresetRepository repository = new RoadPresetRepository();
         RoadPresetReloadListener listener = new RoadPresetReloadListener(repository);
