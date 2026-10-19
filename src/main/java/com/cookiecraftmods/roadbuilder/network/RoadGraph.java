@@ -884,6 +884,55 @@ public final class RoadGraph {
         );
     }
 
+    /** Preflight both paths on an isolated graph, then publish one atomic mutation. */
+    public PreparedRoadNetworkMutation prepareParallelRoadNetwork(
+            ReferenceGeometry primary, ReferenceGeometry parallel, ResourceLocation presetId,
+            RoadPreset preset, TrafficHandedness handedness) {
+        RoadGraph staged = restore(dimension, revision, roads.values(), nodes.values(),
+                segments.values(), connectors.values(), junctionDefinitions.values(), limits, () -> { });
+        PreparedRoadNetworkMutation first = staged.prepareRoadNetwork(primary, presetId, preset, handedness);
+        staged.applyNetworkMutation(first);
+        PreparedRoadNetworkMutation second = staged.prepareRoadNetwork(parallel, presetId, preset, handedness);
+        if (second.createsRoad()) {
+            // The pair is one road operation; keep its disconnected segments under one road ID.
+            List<RoadSegment> pairedSegments = second.placedSegments().stream().map(segment ->
+                    RoadSegment.path(segment.id(), first.road().id(), segment.startNodeId(),
+                            segment.endNodeId(), segment.referenceGeometry(), segment.presetId(),
+                            segment.presetRevision(), segment.presetSnapshot(), segment.trafficHandedness(),
+                            segment.lanes().stream().map(RoadLane::id).toList())).toList();
+            second = new PreparedRoadNetworkMutation(second.expectedRevision(), first.road(), false,
+                    second.addedNodes(), second.segmentSplits(), pairedSegments,
+                    second.removedConnectorIds(), second.addedConnectors());
+        }
+        staged.applyNetworkMutation(second);
+        Map<RoadSegmentId, List<RoadSegment>> laterSplits = new HashMap<>();
+        second.segmentSplits().forEach(split -> laterSplits.put(split.original().id(), split.replacements()));
+        List<PreparedSegmentSplit> combinedSplits = new ArrayList<>();
+        Set<RoadSegmentId> intermediateIds = new HashSet<>();
+        first.replacementSegments().forEach(segment -> intermediateIds.add(segment.id()));
+        first.placedSegments().forEach(segment -> intermediateIds.add(segment.id()));
+        for (PreparedSegmentSplit split : first.segmentSplits()) {
+            combinedSplits.add(new PreparedSegmentSplit(split.original(), expandSplits(split.replacements(), laterSplits)));
+        }
+        second.segmentSplits().stream().filter(split -> !intermediateIds.contains(split.original().id()))
+                .forEach(combinedSplits::add);
+        List<RoadSegment> placed = new ArrayList<>(expandSplits(first.placedSegments(), laterSplits));
+        placed.addAll(second.placedSegments());
+        List<RoadNode> addedNodes = new ArrayList<>(first.addedNodes());
+        addedNodes.addAll(second.addedNodes());
+        PreparedRoadNetworkMutation combined = new PreparedRoadNetworkMutation(revision, first.road(),
+                first.createsRoad(), addedNodes, combinedSplits, placed,
+                connectors.keySet().stream().filter(id -> !staged.connectors.containsKey(id)).toList(),
+                staged.connectors.values().stream().filter(connector -> !connectors.containsKey(connector.id())).toList());
+        validateNetworkMutation(combined);
+        return combined;
+    }
+
+    private static List<RoadSegment> expandSplits(List<RoadSegment> originals,
+                                                 Map<RoadSegmentId, List<RoadSegment>> splits) {
+        return originals.stream().flatMap(segment -> splits.getOrDefault(segment.id(), List.of(segment)).stream()).toList();
+    }
+
     private PreparedRoadNetworkMutation prepareRoundaboutNetwork(
             RoundaboutGeometry geometry,
             ResourceLocation presetId,

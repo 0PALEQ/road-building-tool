@@ -25,6 +25,8 @@ public final class RoadSnapResolver {
     static final double NODE_SNAP_MAXIMUM_VERTICAL_GAP = 6.0;
     static final double ANGLE_SNAP_INCREMENT_RADIANS = Math.toRadians(45.0);
 
+    private static final double[] ANGLE_OFFSETS = {0, 45, -45, 90, -90, 135, -135, 180};
+
     private static final double GEOMETRY_CONTACT_TOLERANCE = 0.075;
     private static final double PROJECTION_CHORD_LENGTH = 0.5;
     private static final int MAXIMUM_PROJECTION_CHORDS = 8_192;
@@ -250,7 +252,7 @@ public final class RoadSnapResolver {
                                 )
                                 : curveAngleTarget(
                                         raw,
-                                        curveAngleContext
+                                        curveAngleContext, settings.range()
                                 )
                         : null;
             };
@@ -430,7 +432,7 @@ public final class RoadSnapResolver {
                     segments
             );
             for (DirectionCandidate direction : startDirections) {
-                SnapCandidate candidate = rayCandidate(
+                SnapCandidate candidate = orthogonalGuideCandidate(
                         raw,
                         start.roadPoint(),
                         direction.direction(),
@@ -464,7 +466,7 @@ public final class RoadSnapResolver {
                 for (double offset : offsets) {
                     RoadPoint anchor = endpoint.offsetLaterally(offset)
                             .position();
-                    SnapCandidate candidate = rayCandidate(
+                    SnapCandidate candidate = orthogonalGuideCandidate(
                             raw,
                             anchor,
                             outward,
@@ -561,7 +563,7 @@ public final class RoadSnapResolver {
             }
         }
 
-        double[] offsets = {45.0, -45.0, 90.0, -90.0, 180.0};
+        double[] offsets = ANGLE_OFFSETS;
         for (RoadNode suppliedNode : nodes) {
             RoadNode node = Objects.requireNonNull(
                     suppliedNode,
@@ -650,7 +652,7 @@ public final class RoadSnapResolver {
                     Math.sin(snappedAngle)
             ));
         } else {
-            double[] offsets = {45.0, -45.0, 90.0, -90.0, 180.0};
+            double[] offsets = ANGLE_OFFSETS;
             for (DirectionCandidate frame : frames) {
                 RoadVector horizontal = horizontalUnit(frame.direction());
                 for (double degrees : offsets) {
@@ -703,7 +705,7 @@ public final class RoadSnapResolver {
 
     private static SnapCandidate curveAngleTarget(
             CursorTarget raw,
-            CurveAngleContext context
+            CurveAngleContext context, double range
     ) {
         RoadPoint start = context.start();
         RoadPoint control = context.control();
@@ -719,7 +721,14 @@ public final class RoadSnapResolver {
                 0.0,
                 startDeltaZ / tangentLength
         );
-        double[] angles = {45.0, -45.0, 90.0, -90.0, 180.0};
+        double legLength = context.equalLegs() ? tangentLength
+                : horizontalDistance(control, raw.roadPoint());
+        if (legLength <= GEOMETRY_CONTACT_TOLERANCE) {
+            return null;
+        }
+        double[] angles = context.equalLegs()
+                ? new double[]{45.0, -45.0, 90.0, -90.0, 180.0}
+                : ANGLE_OFFSETS;
         List<SnapCandidate> candidates = new ArrayList<>(angles.length);
         for (int index = 0; index < angles.length; index++) {
             RoadVector endDirection = rotateHorizontal(
@@ -727,11 +736,14 @@ public final class RoadSnapResolver {
                     Math.toRadians(angles[index])
             );
             RoadPoint snapped = new RoadPoint(
-                    control.x() + endDirection.x() * tangentLength,
+                    control.x() + endDirection.x() * legLength,
                     raw.roadPoint().y(),
-                    control.z() + endDirection.z() * tangentLength
+                    control.z() + endDirection.z() * legLength
             );
             double distance = horizontalDistance(raw.roadPoint(), snapped);
+            if (!context.equalLegs() && distance > range) {
+                continue;
+            }
             RoadPoint guideStart = new RoadPoint(
                     control.x(),
                     raw.roadPoint().y(),
@@ -743,7 +755,7 @@ public final class RoadSnapResolver {
                             guideStart,
                             guideStart.add(endDirection.scale(Math.max(
                                     MINIMUM_VISIBLE_GUIDE_LENGTH,
-                                    tangentLength + GUIDE_EXTENSION
+                                    legLength + GUIDE_EXTENSION
                             ))),
                             RoadSnapGuide.Kind.NODE_ANGLE
                     ),
@@ -868,6 +880,31 @@ public final class RoadSnapResolver {
                 existing.dot(unit) >= DIRECTION_DUPLICATE_DOT)) {
             directions.add(unit);
         }
+    }
+
+    /** Guidelines extend along both road axes, on either side of the anchor. */
+    private static SnapCandidate orthogonalGuideCandidate(
+            CursorTarget raw,
+            RoadPoint anchor,
+            RoadVector suppliedDirection,
+            double range,
+            double maximumProjection,
+            RoadSnapGuide.Kind kind,
+            int priority,
+            RoadSegmentId segmentId,
+            long tieBreaker
+    ) {
+        List<SnapCandidate> candidates = new ArrayList<>(4);
+        RoadVector forward = horizontalUnit(suppliedDirection);
+        RoadVector side = new RoadVector(-forward.z(), 0, forward.x());
+        for (RoadVector direction : List.of(forward, forward.scale(-1), side, side.scale(-1))) {
+            SnapCandidate candidate = rayCandidate(raw, anchor, direction, range,
+                    maximumProjection, kind, priority, segmentId, tieBreaker);
+            if (candidate != null) {
+                candidates.add(candidate);
+            }
+        }
+        return bestCandidate(candidates);
     }
 
     private static SnapCandidate rayCandidate(
@@ -1136,7 +1173,11 @@ public final class RoadSnapResolver {
         }
     }
 
-    public record CurveAngleContext(RoadPoint start, RoadPoint control) {
+    public record CurveAngleContext(RoadPoint start, RoadPoint control, boolean equalLegs) {
+        public CurveAngleContext(RoadPoint start, RoadPoint control) {
+            this(start, control, true);
+        }
+
         public CurveAngleContext {
             Objects.requireNonNull(start, "start");
             Objects.requireNonNull(control, "control");

@@ -25,7 +25,8 @@ public record RoadPathIntentC2SPacket(
         int expectedPresetRevision,
         long expectedGraphRevision,
         PathType pathType,
-        List<RoadPoint> points
+        List<RoadPoint> points,
+        double parallelOffset
 ) implements FabricPacket {
     public static final int MAXIMUM_POINTS = 64;
     public static final double MAXIMUM_CONTROL_POLYGON_LENGTH = 8_192.0;
@@ -34,7 +35,7 @@ public record RoadPathIntentC2SPacket(
             PacketType.create(
                     new ResourceLocation(
                             "roadbuilder",
-                            "road_path_intent_v1"
+                            "road_path_intent_v2"
                     ),
                     RoadPathIntentC2SPacket::new
             );
@@ -66,7 +67,28 @@ public record RoadPathIntentC2SPacket(
         requireBoundedControlPolygon(points);
         // Construct once at the packet boundary to reject cusps, vertical
         // paths, and other invalid control arrangements before sending.
-        geometry(pathType, points);
+        var primary = geometry(pathType, points);
+        if (parallelOffset != 0) {
+            var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(primary, parallelOffset);
+            if (parallel instanceof MultiCurveGeometry multi) {
+                multi.anchors().forEach(RoadPathIntentC2SPacket::requirePoint);
+                requireBoundedControlPolygon(multi.anchors());
+            }
+            requirePoint(parallel.start());
+            requirePoint(parallel.end());
+        }
+    }
+
+    public RoadPathIntentC2SPacket(int protocolVersion, UUID requestId, ResourceLocation dimensionId,
+            ResourceLocation presetId, int expectedPresetRevision, long expectedGraphRevision,
+            PathType pathType, List<RoadPoint> points) {
+        this(protocolVersion, requestId, dimensionId, presetId, expectedPresetRevision,
+                expectedGraphRevision, pathType, points, 0);
+    }
+
+    public RoadPathIntentC2SPacket withParallelOffset(double offset) {
+        return new RoadPathIntentC2SPacket(protocolVersion, requestId, dimensionId, presetId,
+                expectedPresetRevision, expectedGraphRevision, pathType, points, offset);
     }
 
     public RoadPathIntentC2SPacket(FriendlyByteBuf buffer) {
@@ -153,6 +175,7 @@ public record RoadPathIntentC2SPacket(
             buffer.writeDouble(point.y());
             buffer.writeDouble(point.z());
         }
+        buffer.writeDouble(parallelOffset);
     }
 
     @Override
@@ -169,7 +192,8 @@ public record RoadPathIntentC2SPacket(
                 fields.expectedPresetRevision,
                 fields.expectedGraphRevision,
                 fields.pathType,
-                fields.points
+                fields.points,
+                fields.parallelOffset
         );
     }
 
@@ -200,6 +224,7 @@ public record RoadPathIntentC2SPacket(
             requirePoint(point);
             points.add(point);
         }
+        double offset = buffer.readDouble();
         PacketValidation.requireFullyRead(buffer, "road path intent");
         return new WireFields(
                 protocol,
@@ -209,7 +234,8 @@ public record RoadPathIntentC2SPacket(
                 revision,
                 graphRevision,
                 type,
-                List.copyOf(points)
+                List.copyOf(points),
+                offset
         );
     }
 
@@ -218,6 +244,7 @@ public record RoadPathIntentC2SPacket(
             List<RoadPoint> points
     ) {
         return switch (type) {
+            case STRAIGHT -> new com.cookiecraftmods.roadbuilder.geometry.StraightGeometry(points.get(0), points.get(1));
             case QUADRATIC -> new QuadraticBezierGeometry(
                     points.get(0), points.get(1), points.get(2)
             );
@@ -266,7 +293,8 @@ public record RoadPathIntentC2SPacket(
         CUBIC(1, 4, 4),
         MULTI(2, 3, MAXIMUM_POINTS),
         FREEHAND(3, 2, MAXIMUM_POINTS),
-        ROUNDABOUT(4, 2, 2);
+        ROUNDABOUT(4, 2, 2),
+        STRAIGHT(5, 2, 2);
 
         private final int wireId;
         private final int minimumPoints;
@@ -307,7 +335,8 @@ public record RoadPathIntentC2SPacket(
             int expectedPresetRevision,
             long expectedGraphRevision,
             PathType pathType,
-            List<RoadPoint> points
+            List<RoadPoint> points,
+            double parallelOffset
     ) {
     }
 }

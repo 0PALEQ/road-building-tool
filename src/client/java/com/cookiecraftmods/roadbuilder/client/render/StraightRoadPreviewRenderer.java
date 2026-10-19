@@ -63,7 +63,7 @@ public final class StraightRoadPreviewRenderer {
             float previewRed = tool.placementPending() ? 0.95F : 0.15F;
             float previewGreen = tool.placementPending() ? 0.62F : 0.72F;
             float previewBlue = tool.placementPending() ? 0.12F : 0.95F;
-            tool.rawPreview().ifPresent(preview -> {
+            tool.rawPreviews().forEach(preview -> {
                 VertexConsumer fill = consumers.getBuffer(NODE_FILL);
                 List<RawRoadPreview.CrossSection> sections =
                         preview.crossSections();

@@ -78,6 +78,48 @@ class RoadGraphTest {
     }
 
     @Test
+    void parallelPairPreparesWithoutMutatingAndCommitsAtOneRevision() {
+        RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+        var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(EASTBOUND, 16);
+        var mutation = graph.prepareParallelRoadNetwork(EASTBOUND, parallel, PRESET_ID, PRESET, TrafficHandedness.RHT);
+        assertEquals(0, graph.snapshot().revision());
+        assertTrue(graph.snapshot().segments().isEmpty());
+        assertEquals(2, mutation.placedSegments().size());
+        graph.applyNetworkMutation(mutation);
+        assertEquals(1, graph.snapshot().revision());
+        assertEquals(2, graph.snapshot().segments().size());
+        assertTrue(graph.snapshot().segments().values().stream().anyMatch(segment -> segment.referenceGeometry().equals(parallel)));
+    }
+
+    @Test
+    void parallelPairFlattensTwoCrossingsOfTheSameExistingRoad() {
+        RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+        graph.applyNetworkMutation(graph.prepareRoadNetwork(new StraightGeometry(
+                new RoadPoint(5.5, 64, -20), new RoadPoint(5.5, 64, 40)),
+                PRESET_ID, PRESET, TrafficHandedness.RHT));
+        var before = graph.snapshot();
+        var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(EASTBOUND, 16);
+        var mutation = graph.prepareParallelRoadNetwork(EASTBOUND, parallel, PRESET_ID, PRESET, TrafficHandedness.RHT);
+        assertEquals(before, graph.snapshot());
+        assertEquals(1, mutation.segmentSplits().size());
+        assertEquals(3, mutation.segmentSplits().get(0).replacements().size());
+        graph.applyNetworkMutation(mutation);
+        assertEquals(before.revision() + 1, graph.snapshot().revision());
+        assertEquals(7, graph.snapshot().segments().size());
+    }
+
+    @Test
+    void invalidSecondRoadLeavesTheFirstUnbuilt() {
+        RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+        var tooSmallRing = new com.cookiecraftmods.roadbuilder.geometry.RoundaboutGeometry(
+                new RoadPoint(40, 64, 40), new RoadPoint(44, 64, 40));
+        assertThrows(IllegalArgumentException.class, () -> graph.prepareParallelRoadNetwork(
+                EASTBOUND, tooSmallRing, PRESET_ID, PRESET, TrafficHandedness.RHT));
+        assertEquals(0, graph.snapshot().revision());
+        assertTrue(graph.snapshot().segments().isEmpty());
+    }
+
+    @Test
     void manualUturnsUseTheIncomingLaneEndpointAtBothEnds() {
         RoadGraph graph = new RoadGraph(Level.OVERWORLD);
         graph.applyAddition(graph.prepareStraightRoad(

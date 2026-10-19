@@ -374,15 +374,17 @@ public record RoadBuilderToolbarLayout(
         return roadSnappingButton(2);
     }
 
+    public UiRectangle parallelToggleButton() { return roadSnappingButton(3); }
+
     private UiRectangle roadSnappingButton(int index) {
         int padding = toolModePanel.width() < 70 ? 3 : PADDING;
         int gap = toolModePanel.width() < 70 ? 1 : GAP;
         int availableWidth = Math.max(
-                3,
-                toolModePanel.width() - padding * 2 - gap * 2
+                4,
+                toolModePanel.width() - padding * 2 - gap * 3
         );
-        int baseWidth = availableWidth / 3;
-        int remainder = availableWidth - baseWidth * 3;
+        int baseWidth = availableWidth / 4;
+        int remainder = availableWidth - baseWidth * 4;
         int availableHeight = Math.max(
                 2,
                 toolModePanel.height() - padding * 2 - gap

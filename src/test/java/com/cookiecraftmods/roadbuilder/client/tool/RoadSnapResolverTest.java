@@ -31,6 +31,77 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadSnapResolverTest {
     @Test
+    void guidelinesReachBothSidesAndBothEndsOfRotatedRoads() {
+        RoadPoint anchor = new RoadPoint(10, 64, 10);
+        RoadVector forward = new RoadVector(1, 0, 1).normalize();
+        RoadSegment road = segment(1, anchor.subtract(forward.scale(10)), anchor,
+                8, List.of(lane(0, LaneTravelDirection.FORWARD)));
+        RoadSnapSettings settings = new RoadSnapSettings(2.5, 1,
+                RoadSnapPriority.TANGENT_ANGLE_GRID, false, true, 60);
+        for (RoadVector direction : List.of(forward, forward.scale(-1),
+                new RoadVector(-forward.z(), 0, forward.x()),
+                new RoadVector(forward.z(), 0, -forward.x()))) {
+            RoadPoint expected = anchor.add(direction.scale(30));
+            RoadVector lateral = new RoadVector(-direction.z(), 0, direction.x());
+            RoadPoint near = expected.add(lateral.scale(0.1));
+            RoadSnapResult result = RoadSnapResolver.resolve(
+                    target(near.x(), 64, near.z()), null, List.of(), List.of(road),
+                    RoadSnappingMode.GUIDELINES, settings, false);
+            assertEquals(expected.x(), result.target().roadPoint().x(), 1e-9);
+            assertEquals(expected.z(), result.target().roadPoint().z(), 1e-9);
+            assertFalse(result.guides().isEmpty());
+            RoadVector guide = result.guides().get(0).start().vectorTo(result.guides().get(0).end());
+            assertTrue(guide.dot(direction) > 0);
+        }
+    }
+
+    @Test
+    void complexCurveAngleSnapsCoverTheWholeCircle() {
+        RoadPoint pivot = new RoadPoint(10, 64, 10);
+        RoadPoint reference = new RoadPoint(0, 64, 0);
+        for (int degrees = 0; degrees < 360; degrees += 45) {
+            double angle = Math.toRadians(degrees);
+            CursorTarget raw = target(10 + 30 * Math.cos(angle + 0.005), 64,
+                    10 + 30 * Math.sin(angle + 0.005));
+            RoadSnapResult result = RoadSnapResolver.resolve(raw, null, List.of(), List.of(),
+                    RoadSnappingMode.ANGLES, snappingWithoutOptionalGuides(), false,
+                    new RoadSnapResolver.CurveAngleContext(reference, pivot, false));
+            assertEquals(10 + 30 * Math.cos(angle), result.target().roadPoint().x(), 1e-9);
+            assertEquals(10 + 30 * Math.sin(angle), result.target().roadPoint().z(), 1e-9);
+            assertFalse(result.guides().isEmpty());
+        }
+    }
+
+    @Test
+    void twoHandleAnglesPreserveLengthAndElevationInRotatedFrames() {
+        RoadPoint pivot = new RoadPoint(20, 64, 20);
+        // Entry points northeast; test perpendicular and parallel exit tangents.
+        RoadPoint reference = new RoadPoint(10, 64, 10);
+        for (RoadVector direction : List.of(
+                new RoadVector(1, 0, 1).normalize(),
+                new RoadVector(-1, 0, 1).normalize())) {
+            RoadPoint desired = pivot.add(direction.scale(30));
+            CursorTarget raw = target(desired.x() + 0.1, 70, desired.z());
+            RoadSnapResult result = RoadSnapResolver.resolve(
+                    raw, target(0, 64, 0), List.of(), List.of(),
+                    RoadSnappingMode.ANGLES, snappingWithoutOptionalGuides(), false,
+                    new RoadSnapResolver.CurveAngleContext(reference, pivot, false)
+            );
+            RoadVector actual = pivot.vectorTo(result.target().roadPoint());
+            assertEquals(0, actual.x() * direction.z() - actual.z() * direction.x(), 1e-9);
+            assertEquals(pivot.vectorTo(raw.roadPoint()).horizontalLength(),
+                    actual.horizontalLength(), 1e-9);
+            assertEquals(70, result.target().roadPoint().y());
+            assertFalse(result.guides().isEmpty());
+            assertEquals(raw, RoadSnapResolver.resolve(
+                    raw, null, List.of(), List.of(), RoadSnappingMode.ANGLES,
+                    snappingWithoutOptionalGuides(), true,
+                    new RoadSnapResolver.CurveAngleContext(reference, pivot, false)
+            ).target());
+        }
+    }
+
+    @Test
     void nodeSnappingTakesPriorityAndSkipsTheActiveStartNode() {
         CursorTarget start = target(0.5, 64.0, 0.5);
         RoadNode startNode = node(1, start.roadPoint());

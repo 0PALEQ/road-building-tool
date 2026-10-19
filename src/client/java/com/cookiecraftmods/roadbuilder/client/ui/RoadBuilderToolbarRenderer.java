@@ -47,6 +47,8 @@ public final class RoadBuilderToolbarRenderer {
             new ResourceLocation("roadbuilder", "textures/gui/snap_guideline.png");
     private static final ResourceLocation SNAP_ANGLE_ICON =
             new ResourceLocation("roadbuilder", "textures/gui/snap_angle.png");
+    private static final ResourceLocation PARALLEL_ICON =
+            new ResourceLocation("roadbuilder", "textures/gui/parallel.png");
     private static final ResourceLocation UNDO_ICON =
             new ResourceLocation("roadbuilder", "textures/gui/undo.png");
     private static final ResourceLocation REDO_ICON =
@@ -212,6 +214,14 @@ public final class RoadBuilderToolbarRenderer {
                 cursor,
                 tool.snappingMode().snapsAngles(),
                 SNAP_ANGLE_ICON,
+                highContrast
+        );
+        roadSnappingButton(
+                graphics,
+                layout.parallelToggleButton(),
+                cursor,
+                tool.parallelEnabled(),
+                PARALLEL_ICON,
                 highContrast
         );
         renderPresetShelf(
@@ -1412,6 +1422,10 @@ public final class RoadBuilderToolbarRenderer {
             tooltip = Component.translatable(
                     "tooltip.roadbuilder.replace"
             );
+        } else if (tool.selectedGroup() == RoadBuilderToolGroup.ROADS
+                && layout.parallelToggleButton().contains(cursor.x(), cursor.y())) {
+            tooltip = Component.translatable("tooltip.roadbuilder.parallel", Math.abs(tool.parallelOffset()),
+                    Component.translatable(tool.parallelOffset() > 0 ? "toolbar.roadbuilder.left" : "toolbar.roadbuilder.right"));
         } else if (layout.primaryActionButton().contains(cursor.x(), cursor.y())) {
             tooltip = switch (tool.selectedGroup()) {
                 case ROADS -> null;

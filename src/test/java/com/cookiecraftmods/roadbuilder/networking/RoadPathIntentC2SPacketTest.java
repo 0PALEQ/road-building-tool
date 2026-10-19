@@ -26,6 +26,29 @@ class RoadPathIntentC2SPacketTest {
             new ResourceLocation("roadbuilder", "two_way");
 
     @Test
+    void parallelPreviewSurvivesThePlacementPacketUnchanged() {
+        var source = new com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry(
+                new RoadPoint(0, 64, 0), new RoadPoint(30, 64, 0),
+                new RoadPoint(30, 64, 30), new RoadPoint(60, 64, 30));
+        var preview = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(source, 8);
+        RoadPathIntentC2SPacket packet = RoadPathIntentC2SPacket.current(
+                REQUEST_ID, DIMENSION, PRESET, 2, 19L,
+                RoadPathIntentC2SPacket.PathType.CUBIC, source.controlPoints()).withParallelOffset(8);
+        FriendlyByteBuf buffer = PacketByteBufs.create();
+        try {
+            packet.write(buffer);
+            var decoded = RoadPathIntentC2SPacket.TYPE.read(buffer);
+            assertEquals(source, decoded.geometry());
+            assertEquals(8, decoded.parallelOffset());
+            assertEquals(preview, com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(decoded.geometry(), decoded.parallelOffset()));
+            assertEquals(19L, decoded.expectedGraphRevision());
+            assertEquals(0, buffer.readableBytes());
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @Test
     void roundTripsCanonicalMultiControlData() {
         RoadPathIntentC2SPacket packet = RoadPathIntentC2SPacket.current(
                 REQUEST_ID,

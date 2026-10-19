@@ -8,7 +8,9 @@ import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderToolGroup;
 import com.cookiecraftmods.roadbuilder.client.ui.RoadPresetEditorScreen;
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import com.cookiecraftmods.roadbuilder.geometry.FreehandGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.MultiCurveGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.StraightGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometry;
@@ -76,6 +78,10 @@ public final class StraightRoadToolController {
     private RoadLaneGraph.ConnectionPoint hoveredLaneConnectionPoint;
     private CursorTargetResult cursorResult = CursorTargetResult.failure(CursorTargetProblem.NO_WORLD);
     private CursorTarget startTarget;
+    private boolean parallelEnabled;
+    private int parallelOffset = 16;
+    private RawRoadPreview parallelPreview;
+    private boolean parallelPreviewInvalid;
     private CursorTarget previewEndTarget;
     private final PlacementContinuation placementContinuation =
             new PlacementContinuation();
@@ -324,11 +330,18 @@ public final class StraightRoadToolController {
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             handleLeftClick(client);
         } else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+            if (overParallelToggle(client)) {
+                if (pendingPlacementRequestId == null) {
+                    parallelOffset = -parallelOffset;
+                    rebuildPreview(client);
+                }
+                return true;
+            }
             if (activeTool == RoadBuilderTool.REPLACE
                     && hoveredRemovalSegment != null) {
                 requestDirectionInversion(client);
             } else {
-                cancelCurrentStep();
+                cancelCurrentStep(client);
             }
         }
         return true;
@@ -357,11 +370,37 @@ public final class StraightRoadToolController {
                 window.getGuiScaledHeight()
         );
 
+        if (layout.parallelToggleButton().contains(guiX, guiY)) {
+            if (pendingPlacementRequestId == null) {
+                int magnitude = Math.max(1, Math.min(256, Math.abs(parallelOffset) + (verticalOffset > 0 ? 1 : -1)));
+                parallelOffset = Integer.signum(parallelOffset) * magnitude;
+                rebuildPreview(client);
+            }
+            return true;
+        }
         if (!layout.presetPanel().contains(guiX, guiY)) {
             return false;
         }
         changePresetPage(verticalOffset > 0.0 ? -1 : 1);
         return true;
+    }
+
+    public boolean parallelEnabled() { return parallelEnabled; }
+
+    public int parallelOffset() { return parallelOffset; }
+
+    public List<RawRoadPreview> rawPreviews() {
+        if (rawPreview == null) return List.of();
+        return parallelPreview == null ? List.of(rawPreview) : List.of(rawPreview, parallelPreview);
+    }
+
+    private boolean overParallelToggle(Minecraft client) {
+        Window window = client.getWindow();
+        return selectedGroup == RoadBuilderToolGroup.ROADS
+                && RoadBuilderToolbarLayout.create(window.getGuiScaledWidth(), window.getGuiScaledHeight())
+                .parallelToggleButton().contains(
+                        client.mouseHandler.xpos() * window.getGuiScaledWidth() / window.getScreenWidth(),
+                        client.mouseHandler.ypos() * window.getGuiScaledHeight() / window.getScreenHeight());
     }
 
     public Optional<RawRoadPreview> rawPreview() {
@@ -385,7 +424,21 @@ public final class StraightRoadToolController {
     }
 
     public List<RoadSnapGuide> snapGuides() {
-        return snapGuides;
+        if (activeTool != RoadBuilderTool.COMPLEX_CURVE || startTarget == null) {
+            return snapGuides;
+        }
+        List<RoadSnapGuide> guides = new ArrayList<>(snapGuides);
+        RoadPoint previous = startTarget.roadPoint();
+        List<CursorTarget> controls = new ArrayList<>(pathPoints);
+        cursorResult.target().ifPresent(controls::add);
+        for (CursorTarget control : controls) {
+            RoadPoint point = control.roadPoint();
+            if (horizontalDistance(previous, point) > 0.05) {
+                guides.add(new RoadSnapGuide(previous, point, RoadSnapGuide.Kind.NODE_ANGLE));
+            }
+            previous = point;
+        }
+        return List.copyOf(guides);
     }
 
     public RoadSnappingMode snappingMode() {
@@ -582,7 +635,10 @@ public final class StraightRoadToolController {
                             "status.roadbuilder.crosswalk_click"
                     );
         }
-        boolean straight = activeTool == RoadBuilderTool.STRAIGHT_ROAD;
+        if (parallelPreviewInvalid) {
+            return Component.translatable("status.roadbuilder.parallel_invalid");
+        }
+        boolean straight = activeTool == RoadBuilderTool.STRAIGHT_ROAD && !parallelEnabled;
         if (straight
                 ? !RoadBuilderClientNetworking.canSendStraightRoadIntent()
                 : !RoadBuilderClientNetworking.canSendRoadPathIntent()) {
@@ -647,7 +703,9 @@ public final class StraightRoadToolController {
             return Component.translatable(
                     pathPoints.isEmpty()
                             ? "status.roadbuilder.complex_curve_set_guide"
-                            : "status.roadbuilder.complex_curve_select_end"
+                            : pathPoints.size() == 1
+                                    ? "status.roadbuilder.complex_curve_set_second_guide"
+                                    : "status.roadbuilder.complex_curve_select_end"
             );
         }
         return endpointInstruction();
@@ -692,10 +750,17 @@ public final class StraightRoadToolController {
             }
         }
         if (layout.cancelButton().contains(guiX, guiY)) {
-            cancelCurrentStep();
+            cancelCurrentStep(client);
             return;
         }
         if (selectedGroup == RoadBuilderToolGroup.ROADS) {
+            if (layout.parallelToggleButton().contains(guiX, guiY)) {
+                if (pendingPlacementRequestId == null) {
+                    parallelEnabled = !parallelEnabled;
+                    rebuildPreview(client);
+                }
+                return;
+            }
             if (layout.roadNodeSnappingButton().contains(guiX, guiY)) {
                 setSnappingMode(client, snappingMode.toggleNodes());
                 return;
@@ -834,7 +899,12 @@ public final class StraightRoadToolController {
         switch (activeTool) {
             case STRAIGHT_ROAD, ROUNDABOUT -> submitPreview(client);
             case SIMPLE_CURVE, COMPLEX_CURVE -> {
-                if (pathPoints.isEmpty()) {
+                if (pathPoints.size() < (activeTool == RoadBuilderTool.COMPLEX_CURVE ? 2 : 1)) {
+                    CursorTarget previous = pathPoints.isEmpty()
+                            ? startTarget : pathPoints.get(pathPoints.size() - 1);
+                    if (horizontalDistance(previous.roadPoint(), target.roadPoint()) < 0.05) {
+                        return;
+                    }
                     pathPoints.add(target);
                     rebuildPreview(client);
                 } else {
@@ -854,7 +924,7 @@ public final class StraightRoadToolController {
                 || placementJob.isActive()) {
             return;
         }
-        boolean straight = activeTool == RoadBuilderTool.STRAIGHT_ROAD;
+        boolean straight = activeTool == RoadBuilderTool.STRAIGHT_ROAD && !parallelEnabled;
         if (straight
                 ? !RoadBuilderClientNetworking.canSendStraightRoadIntent()
                 : !RoadBuilderClientNetworking.canSendRoadPathIntent()) {
@@ -910,7 +980,7 @@ public final class StraightRoadToolController {
                             graphRevision,
                             pathType(),
                             canonicalPathPoints()
-                    );
+                    ).withParallelOffset(parallelEnabled ? parallelOffset : 0);
             sent = RoadBuilderClientNetworking.sendRoadPathIntent(packet);
         }
         if (!sent) {
@@ -949,6 +1019,8 @@ public final class StraightRoadToolController {
     private void rebuildPreview(Minecraft client) {
         previewGeometry = null;
         rawPreview = null;
+        parallelPreview = null;
+        parallelPreviewInvalid = false;
         previewEndTarget = null;
         previewProblem = StraightRoadPreviewProblem.none();
         if (startTarget == null) {
@@ -999,6 +1071,16 @@ public final class StraightRoadToolController {
                 .map(RoadPresetCatalogEntry::surfaceWidth)
                 .orElse(FALLBACK_PREVIEW_WIDTH);
         rawPreview = new RawRoadPreview(geometry, width);
+        if (parallelEnabled) {
+            try {
+                parallelPreview = new RawRoadPreview(ParallelRoadGeometry.create(geometry, parallelOffset), width);
+            } catch (IllegalArgumentException invalid) {
+                parallelPreviewInvalid = true;
+                previewGeometry = null;
+                rawPreview = null;
+                previewEndTarget = null;
+            }
+        }
     }
 
     private ReferenceGeometry buildPreviewGeometry(CursorTarget cursor) {
@@ -1025,16 +1107,16 @@ public final class StraightRoadToolController {
                     requireDifferentEndpoint(startTarget, cursor);
                     yield new StraightGeometry(start, cursor.roadPoint());
                 }
-                List<RoadPoint> anchors = new ArrayList<>();
-                anchors.add(start);
-                pathPoints.stream()
-                        .map(CursorTarget::roadPoint)
-                        .forEach(anchors::add);
-                if (anchors.get(anchors.size() - 1)
-                        .distanceTo(cursor.roadPoint()) >= 0.05) {
-                    anchors.add(cursor.roadPoint());
+                requireDifferentEndpoint(startTarget, cursor);
+                if (pathPoints.size() == 1) {
+                    yield new QuadraticBezierGeometry(
+                            start, pathPoints.get(0).roadPoint(), cursor.roadPoint()
+                    );
                 }
-                yield anchors.size() < 3 ? null : new MultiCurveGeometry(anchors);
+                yield new CubicBezierGeometry(
+                        start, pathPoints.get(0).roadPoint(),
+                        pathPoints.get(1).roadPoint(), cursor.roadPoint()
+                );
             }
             case FREEHAND -> {
                 List<RoadPoint> stroke = pathPoints.stream()
@@ -1626,13 +1708,22 @@ public final class StraightRoadToolController {
         previewEndTarget = null;
         previewGeometry = null;
         rawPreview = null;
+        parallelPreview = null;
+        parallelPreviewInvalid = false;
         snapGuides = List.of();
         previewProblem = StraightRoadPreviewProblem.none();
         selectedLaneConnectionPoint = null;
         hoveredLaneConnectionPoint = null;
     }
 
-    private void cancelCurrentStep() {
+    private void cancelCurrentStep(Minecraft client) {
+        if (activeTool == RoadBuilderTool.COMPLEX_CURVE
+                && pendingPlacementRequestId == null && !pathPoints.isEmpty()) {
+            pathPoints.remove(pathPoints.size() - 1);
+            updatePointer(client);
+            rebuildPreview(client);
+            return;
+        }
         cancelInteractiveStep();
     }
 
@@ -1684,6 +1775,19 @@ public final class StraightRoadToolController {
                                 pathPoints.get(0).roadPoint()
                         )
                         : null;
+        if (activeTool == RoadBuilderTool.COMPLEX_CURVE
+                && startTarget != null && !pathPoints.isEmpty()) {
+            RoadPoint first = pathPoints.get(0).roadPoint();
+            RoadPoint pivot = pathPoints.get(pathPoints.size() - 1).roadPoint();
+            // Keep the exit tangent relative to the entry tangent so that
+            // parallel ends produce an S-bend, even for rotated roads.
+            RoadPoint reference = pathPoints.size() == 1
+                    ? startTarget.roadPoint()
+                    : pivot.subtract(startTarget.roadPoint().vectorTo(first));
+            curveAngleContext = new RoadSnapResolver.CurveAngleContext(
+                    reference, pivot, false
+            );
+        }
         RoadSnapResult snap = RoadSnapResolver.resolve(
                 elevated,
                 snapStart,
@@ -1924,7 +2028,8 @@ public final class StraightRoadToolController {
             case SIMPLE_CURVE ->
                     RoadPathIntentC2SPacket.PathType.QUADRATIC;
             case COMPLEX_CURVE ->
-                    RoadPathIntentC2SPacket.PathType.MULTI;
+                    RoadPathIntentC2SPacket.PathType.CUBIC;
+            case STRAIGHT_ROAD -> RoadPathIntentC2SPacket.PathType.STRAIGHT;
             case FREEHAND -> RoadPathIntentC2SPacket.PathType.FREEHAND;
             case ROUNDABOUT ->
                     RoadPathIntentC2SPacket.PathType.ROUNDABOUT;
@@ -1935,9 +2040,15 @@ public final class StraightRoadToolController {
     }
 
     private List<RoadPoint> canonicalPathPoints() {
+        if (previewGeometry instanceof StraightGeometry straight) {
+            return List.of(straight.start(), straight.end());
+        }
         if (previewGeometry
                 instanceof QuadraticBezierGeometry quadratic) {
             return quadratic.controlPoints();
+        }
+        if (previewGeometry instanceof CubicBezierGeometry cubic) {
+            return cubic.controlPoints();
         }
         if (previewGeometry instanceof MultiCurveGeometry multi) {
             return multi.anchors();

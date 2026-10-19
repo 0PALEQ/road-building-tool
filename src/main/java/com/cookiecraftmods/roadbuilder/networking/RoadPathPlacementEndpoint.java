@@ -135,12 +135,20 @@ public final class RoadPathPlacementEndpoint {
                 ((RoadPathPlanningResult.Success) result).roadPlan();
         PreparedRoadNetworkMutation mutation;
         try {
-            mutation = graph.prepareRoadNetwork(
-                    planned.geometry(),
-                    planned.presetId(),
-                    planned.preset(),
-                    trafficHandedness
-            );
+            if (packet.parallelOffset() == 0) {
+                mutation = graph.prepareRoadNetwork(planned.geometry(), planned.presetId(),
+                        planned.preset(), trafficHandedness);
+            } else {
+                var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(
+                        planned.geometry(), packet.parallelOffset());
+                RoadPathPlanningResult parallelResult = planningService.resolve(new RoadPathIntent(
+                        dimension, parallel, packet.presetId(), packet.expectedPresetRevision()), limits);
+                if (parallelResult instanceof RoadPathPlanningResult.Failure failure) {
+                    return rejected(packet, mapPlanFailure(failure.code()));
+                }
+                mutation = graph.prepareParallelRoadNetwork(planned.geometry(), parallel,
+                        planned.presetId(), planned.preset(), trafficHandedness);
+            }
         } catch (IllegalArgumentException invalid) {
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }

@@ -10,6 +10,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadBuilderToolbarLayoutTest {
     @Test
+    void parallelToggleFitsBesideSnappingAtAllSupportedWidths() {
+        for (int width : new int[]{120, 400, 1920}) {
+            RoadBuilderToolbarLayout layout = RoadBuilderToolbarLayout.create(width, 240);
+            UiRectangle parallel = layout.parallelToggleButton();
+            assertTrue(parallel.width() > 0);
+            assertTrue(parallel.x() >= layout.roadAngleSnappingButton().right());
+            assertTrue(parallel.right() <= layout.toolModePanel().right());
+        }
+    }
+
+    @Test
     void centersPreferredLayoutAndKeepsButtonsDisjoint() {
         RoadBuilderToolbarLayout layout = RoadBuilderToolbarLayout.create(400, 240);
 

@@ -73,6 +73,52 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
     private static final int UPDATE_FLAGS = Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS;
 
     @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 100)
+    public void parallelTogglePlacesBothRoadsInOneOperation(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos start = helper.absolutePos(new BlockPos(4, 2, 2));
+        BlockPos end = helper.absolutePos(new BlockPos(4, 2, 5));
+        ResourceLocation presetId = new ResourceLocation("roadbuilder", "two_way");
+        var source = new StraightGeometry(pointAtBlockCenter(start), pointAtBlockCenter(end));
+        var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(source, 12);
+        var limits = ConstructionLimits.defaults();
+        var planner = new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanningService(
+                RoadPresetResources.repository(), new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanner());
+        List<BlockPlacementPlan> surfaces = new ArrayList<>();
+        for (var geometry : List.of(source, parallel)) {
+            var result = planner.resolve(new com.cookiecraftmods.roadbuilder.placement.RoadPathIntent(
+                    level.dimension(), geometry, presetId, testPresetRevision(presetId)), limits);
+            var planned = requireType(helper, result,
+                    com.cookiecraftmods.roadbuilder.placement.RoadPathPlanningResult.Success.class,
+                    "both parallel surfaces should plan");
+            surfaces.add(planned.roadPlan().blockPlan());
+            for (PlannedBlock block : planned.roadPlan().blockPlan().blocks()) {
+                level.setBlock(block.position(), Blocks.DIRT.defaultBlockState(), UPDATE_FLAGS);
+            }
+        }
+        var ledger = new PlacementOwnershipLedger(level.dimension());
+        var graph = new RoadGraph(level.dimension());
+        ServerPlayer player = testPlayer(level, true);
+        player.setPos(start.getX() + 0.5, start.getY() + 1, start.getZ() + 0.5);
+        var endpoint = new com.cookiecraftmods.roadbuilder.networking.RoadPathPlacementEndpoint(
+                planner, ConstructionAuthorizer.creativeOnly(), limits, new BlockPlanCommitter(), TrafficHandedness.RHT);
+        var packet = com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket.current(
+                UUID.randomUUID(), level.dimension().location(), presetId, testPresetRevision(presetId),
+                com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket.PathType.STRAIGHT,
+                List.of(source.start(), source.end())).withParallelOffset(12);
+        var result = endpoint.handle(packet, player, ledger, graph, null);
+        helper.assertTrue(result.resultCode() == PlacementResultCode.ACCEPTED, "parallel pair should be accepted: " + result.resultCode());
+        helper.assertTrue(graph.revision() == 1 && graph.snapshot().segments().size() == 2,
+                "one placement should publish both road segments at one revision");
+        for (BlockPlacementPlan surface : surfaces) {
+            for (PlannedBlock block : surface.blocks()) {
+                helper.assertTrue(level.getBlockState(block.position()).equals(block.targetState()),
+                        "both road surfaces must be materialized");
+            }
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 100)
     public void authoritativeEndpointPlacesAndRemovesTestPreset(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         BlockPos start = helper.absolutePos(new BlockPos(4, 2, 2));

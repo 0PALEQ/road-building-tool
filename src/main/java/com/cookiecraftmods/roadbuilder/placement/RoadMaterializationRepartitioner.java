@@ -164,14 +164,16 @@ public final class RoadMaterializationRepartitioner {
             RoadSegment segment
     ) {
         double nearest = Double.POSITIVE_INFINITY;
+        var geometry = segment.referenceGeometry();
+        double length = geometry.length();
         int samples = Math.max(
                 1,
-                (int) Math.ceil(segment.referenceGeometry().length() * 2.0)
+                (int) Math.ceil(length * 2.0)
         );
         for (int index = 0; index <= samples; index++) {
-            var point = segment.referenceGeometry().sample(
-                    segment.referenceGeometry().length() * index / samples
-            ).position();
+            // Multiplying before dividing can round the endpoint past length.
+            double distance = index == samples ? length : length * index / samples;
+            var point = geometry.sample(distance).position();
             double deltaX = position.getX() + 0.5 - point.x();
             double deltaY = position.getY() + 0.5 - point.y();
             double deltaZ = position.getZ() + 0.5 - point.z();
