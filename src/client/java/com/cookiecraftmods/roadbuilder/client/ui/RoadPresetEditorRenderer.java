@@ -211,6 +211,14 @@ final class RoadPresetEditorRenderer {
                 renderPavementTexture(bounds, material);
             }
             case SIDEWALK -> renderSidewalk(bounds, component);
+            case RAILING -> {
+                fillMaterial(bounds, component);
+                int x = bounds.x() + bounds.width() / 2;
+                graphics.fill(x - 1, bounds.y(), x + 1, bounds.bottom(), 0xFFD0D0D0);
+                for (int y = bounds.y() + 4; y < bounds.bottom(); y += 12) {
+                    graphics.fill(x - 3, y, x + 3, Math.min(y + 3, bounds.bottom()), 0xFF777777);
+                }
+            }
             case GRASS_MEDIAN -> renderMedian(
                     bounds,
                     component,

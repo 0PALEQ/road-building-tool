@@ -529,6 +529,7 @@ public final class RoadGraphPacketCodecs {
                 case SIDEWALK -> 2;
                 case GRASS_MEDIAN -> 5;
                 case CONCRETE_MEDIAN -> 6;
+                case RAILING -> 7;
             });
             buffer.writeVarInt(band.width());
             PacketValidation.writeBoundedId(buffer, band.block());
@@ -579,6 +580,7 @@ public final class RoadGraphPacketCodecs {
                 case 2 -> RoadSurfaceRole.SIDEWALK;
                 case 5 -> RoadSurfaceRole.GRASS_MEDIAN;
                 case 6 -> RoadSurfaceRole.CONCRETE_MEDIAN;
+                case 7 -> RoadSurfaceRole.RAILING;
                 default -> throw new IllegalArgumentException("unknown road surface role");
             };
             RoadMarkingPattern pattern = switch (encodedRole) {

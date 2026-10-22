@@ -262,7 +262,7 @@ public final class SmoothRoadTransitionMaterializer {
                 : Optional.empty();
     }
 
-    private static ReferenceGeometry transitionGeometry(
+    static ReferenceGeometry transitionGeometry(
             RoadNode node,
             RoadSegment narrow,
             RoadSegment wide,
@@ -272,9 +272,10 @@ public final class SmoothRoadTransitionMaterializer {
         double endDistance = narrowStartsAtNode
                 ? transitionLength
                 : narrow.referenceGeometry().length() - transitionLength;
-        RoadPoint end = narrow.referenceGeometry().sample(endDistance).position();
+        PathSample endSample = narrow.referenceGeometry().sample(endDistance);
+        RoadPoint end = endSample.position();
         RoadVector startTangent = outwardTangent(wide, node).scale(-1.0);
-        RoadVector endTangent = outwardTangent(narrow, node);
+        RoadVector endTangent = endSample.tangent().scale(narrowStartsAtNode ? 1.0 : -1.0);
         double chord = node.position().distanceTo(end);
         double handle = Math.min(
                 transitionLength * 0.45,

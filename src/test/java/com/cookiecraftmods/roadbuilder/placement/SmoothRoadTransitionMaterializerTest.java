@@ -45,6 +45,39 @@ class SmoothRoadTransitionMaterializerTest {
     }
 
     @Test
+    void curvedTransitionMatchesTheRoadTangentAtBothEnds() {
+        for (boolean reversed : new boolean[]{false, true}) {
+            RoadNodeId nodeId = new RoadNodeId(UUID.randomUUID());
+            RoadNodeId farId = new RoadNodeId(UUID.randomUUID());
+            RoadNode node = new RoadNode(nodeId, new RoadPoint(0.5, 64.0, 0.5));
+            RoadPoint far = new RoadPoint(40.5, 68.0, 20.5);
+            var curve = new com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry(
+                    reversed ? far : node.position(),
+                    new RoadPoint(20.5, 65.0, 0.5),
+                    reversed ? node.position() : far);
+            RoadSegment narrow = RoadSegment.path(
+                    new RoadSegmentId(UUID.randomUUID()), new RoadId(UUID.randomUUID()),
+                    reversed ? farId : nodeId, reversed ? nodeId : farId,
+                    curve, PRESET_ID, 1, RoadPresetSnapshot.from(preset(7, 1)),
+                    TrafficHandedness.RHT, List.of(new RoadLaneId(UUID.randomUUID())));
+            RoadSegment wide = segment(new RoadPoint(-40.5, 64.0, 0.5), node.position(),
+                    new RoadNodeId(UUID.randomUUID()), nodeId, preset(15, 2));
+            var transition = SmoothRoadTransitionMaterializer.transitionGeometry(
+                    node, narrow, wide, 20.0);
+            var expected = curve.sample(reversed ? curve.length() - 20.0 : 20.0);
+            var actual = transition.sample(transition.length());
+            assertEquals(expected.position().x(), actual.position().x(), 1.0e-8);
+            assertEquals(expected.position().y(), actual.position().y(), 1.0e-8);
+            assertEquals(expected.position().z(), actual.position().z(), 1.0e-8);
+            var tangent = expected.tangent().scale(reversed ? -1.0 : 1.0);
+            assertEquals(tangent.x(), actual.tangent().x(), 1.0e-8);
+            assertEquals(tangent.y(), actual.tangent().y(), 1.0e-8);
+            assertEquals(tangent.z(), actual.tangent().z(), 1.0e-8);
+            assertEquals(1.0, transition.sample(0.0).tangent().x(), 1.0e-8);
+        }
+    }
+
+    @Test
     void tapersAConnectedNarrowRoadIntoTheWiderCrossSection() {
         RoadNodeId nodeId = new RoadNodeId(UUID.randomUUID());
         RoadNode node = new RoadNode(nodeId, new RoadPoint(0.5, 64.0, 0.5));

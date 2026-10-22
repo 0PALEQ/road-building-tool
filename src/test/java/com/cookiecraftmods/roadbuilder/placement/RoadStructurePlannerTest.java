@@ -30,6 +30,95 @@ class RoadStructurePlannerTest {
     }
 
     @Test
+    void presetRailingsWorkAtGroundLevelAndReplaceAutomaticBridgeEdges() {
+        var stone = new net.minecraft.resources.ResourceLocation("minecraft", "smooth_stone");
+        var pavement = new net.minecraft.resources.ResourceLocation("minecraft", "gray_concrete");
+        var bands = List.of(
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.RAILING, 1, stone),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.PAVEMENT, 3, pavement),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.RAILING, 1, stone));
+        for (int height : new int[]{1, 9}) {
+            var geometry = new StraightGeometry(new RoadPoint(0.5, height, 2.5),
+                    new RoadPoint(8.5, height, 2.5));
+            var spans = List.of(new RoadStructurePlanner.StructureSpan(geometry, 5, bands));
+            BlockPlacementPlan result = success(new RoadStructurePlanner().addStructures(
+                    railingSurface(height, false), new MapWorld(0), spans,
+                    position -> false, 20_000));
+            for (int x = 0; x < 9; x++) {
+                for (int z : new int[]{0, 4}) {
+                    assertBlock(result, new BlockPos(x, height + 1, z), Blocks.IRON_BARS);
+                    assertBlock(result, new BlockPos(x, height + 2, z), Blocks.IRON_TRAPDOOR);
+                }
+                assertFalse(result.positions().contains(new BlockPos(x, height + 1, -1)));
+                assertFalse(result.positions().contains(new BlockPos(x, height + 1, 5)));
+                assertFalse(result.positions().contains(new BlockPos(x, height + 1, 2)));
+            }
+            assertState(result, new BlockPos(4, height + 1, 0),
+                    Blocks.IRON_BARS.defaultBlockState()
+                            .setValue(CrossCollisionBlock.EAST, true)
+                            .setValue(CrossCollisionBlock.WEST, true));
+            BlockPlacementPlan crossing = success(new RoadStructurePlanner().addStructures(
+                    railingSurface(height, false), new MapWorld(0), spans,
+                    position -> position.equals(new BlockPos(4, height, -1)), 20_000));
+            assertFalse(crossing.blocks().stream().anyMatch(block ->
+                    block.position().equals(new BlockPos(4, height + 1, 0))
+                            && block.targetState().is(Blocks.IRON_BARS)));
+            assertInstanceOf(BlockPlanResult.Failure.class,
+                    new RoadStructurePlanner().addStructures(railingSurface(height, false),
+                            new MapWorld(0), spans, position -> false,
+                            result.affectedBlockCount() - 1));
+        }
+    }
+
+    @Test
+    void explicitRailingSlabsSupportBarsAndBuriedFoundationsBecomePavement() {
+        var stone = new net.minecraft.resources.ResourceLocation("minecraft", "smooth_stone");
+        var asphalt = new net.minecraft.resources.ResourceLocation("minecraft", "gray_concrete");
+        var bands = List.of(
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.RAILING, 1, stone),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.PAVEMENT, 3, asphalt),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.RAILING, 1, stone));
+        var geometry = new StraightGeometry(new RoadPoint(0.5, 1.5, 2.5),
+                new RoadPoint(8.5, 1.5, 2.5));
+        var spans = List.of(new RoadStructurePlanner.StructureSpan(geometry, 5, bands));
+        MapWorld world = new MapWorld(0);
+        BlockPos mergingLane = new BlockPos(4, 2, 0);
+        world.states.put(mergingLane, Blocks.GRAY_CONCRETE.defaultBlockState());
+        world.states.put(mergingLane.above(), Blocks.IRON_BARS.defaultBlockState());
+        world.states.put(mergingLane.above(2), Blocks.IRON_TRAPDOOR.defaultBlockState());
+        var result = success(new RoadStructurePlanner().addStructures(
+                railingSurface(2, true), world, spans, world.states::containsKey, 20_000));
+        assertState(result, new BlockPos(3, 2, 0), Blocks.SMOOTH_STONE_SLAB.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.SlabBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.SlabType.DOUBLE));
+        assertBlock(result, new BlockPos(3, 3, 0), Blocks.IRON_BARS);
+        assertBlock(result, mergingLane, Blocks.GRAY_CONCRETE);
+        assertBlock(result, mergingLane.above(), Blocks.AIR);
+        assertBlock(result, mergingLane.above(2), Blocks.AIR);
+
+        var opened = success(new RoadStructurePlanner().addStructures(
+                railingSurface(2, false), new MapWorld(0), spans,
+                pos -> pos.equals(new BlockPos(4, 2, -1)), 20_000));
+        assertBlock(opened, mergingLane, Blocks.GRAY_CONCRETE);
+        assertFalse(opened.blocks().stream().anyMatch(block ->
+                block.position().equals(mergingLane.above()) && block.targetState().is(Blocks.IRON_BARS)));
+    }
+
+    private static BlockPlacementPlan railingSurface(int y, boolean slabs) {
+        return BlockPlacementPlan.create(Level.OVERWORLD, surface(y, 5, 9).blocks().stream()
+                .map(block -> block.position().getZ() == 0 || block.position().getZ() == 4
+                        ? new PlannedBlock(block.position(), slabs
+                                ? Blocks.SMOOTH_STONE_SLAB.defaultBlockState()
+                                : Blocks.SMOOTH_STONE.defaultBlockState()) : block).toList());
+    }
+
+    @Test
     void selectsEmbankmentSolidBaseAndDeckAtHeightBoundaries() {
         MapWorld world = new MapWorld(59);
         RoadStructurePlanner planner = new RoadStructurePlanner();
@@ -376,11 +465,11 @@ class RoadStructurePlannerTest {
         assertFalse(result.positions().contains(new BlockPos(12, 7, 0)));
         assertState(result, new BlockPos(12, 7, 1),
                 Blocks.SMOOTH_STONE.defaultBlockState());
-        assertState(result, new BlockPos(12, 10, 0),
+        assertState(result, new BlockPos(12, 10, -1),
                 Blocks.IRON_BARS.defaultBlockState()
                         .setValue(CrossCollisionBlock.EAST, true)
                         .setValue(CrossCollisionBlock.WEST, true));
-        assertState(result, new BlockPos(12, 11, 0),
+        assertState(result, new BlockPos(12, 11, -1),
                 Blocks.IRON_TRAPDOOR.defaultBlockState());
 
         assertState(result, new BlockPos(2, 6, 4),
@@ -396,6 +485,86 @@ class RoadStructurePlannerTest {
                 Blocks.STONE_BRICKS.defaultBlockState());
         assertState(result, new BlockPos(22, 4, 10),
                 Blocks.STONE_BRICKS.defaultBlockState());
+    }
+
+    @Test
+    void retainingWallEdgesHaveSupportedRailingsButLowEmbankmentsDoNot() {
+        for (int height : new int[]{5, 6, 7}) {
+            StraightGeometry geometry = new StraightGeometry(
+                    new RoadPoint(0.5, height, 1.5),
+                    new RoadPoint(8.5, height, 1.5));
+            BlockPlacementPlan slabs = BlockPlacementPlan.create(Level.OVERWORLD,
+                    surface(height, 3, 9).blocks().stream()
+                            .map(block -> new PlannedBlock(block.position(),
+                                    Blocks.SMOOTH_STONE_SLAB.defaultBlockState()))
+                            .toList());
+            BlockPlacementPlan result = success(new RoadStructurePlanner().addStructures(
+                    slabs, new MapWorld(0), geometry, 3, position -> false, 20_000));
+
+            for (PlannedBlock slab : slabs.blocks()) {
+                assertState(result, slab.position(), slab.targetState());
+            }
+            if (height == 5) {
+                assertFalse(result.blocks().stream().anyMatch(block ->
+                        block.targetState().is(Blocks.IRON_BARS)));
+                continue;
+            }
+            for (int z : new int[]{-1, 3}) {
+                assertState(result, new BlockPos(4, height - 1, z),
+                        Blocks.SMOOTH_STONE.defaultBlockState());
+                assertState(result, new BlockPos(4, height, z),
+                        Blocks.SMOOTH_STONE.defaultBlockState());
+                assertState(result, new BlockPos(4, height + 1, z),
+                        Blocks.IRON_BARS.defaultBlockState()
+                                .setValue(CrossCollisionBlock.EAST, true)
+                                .setValue(CrossCollisionBlock.WEST, true));
+                assertBlock(result, new BlockPos(4, height + 2, z), Blocks.IRON_TRAPDOOR);
+            }
+            assertState(result, new BlockPos(4, height - 1, 0),
+                    Blocks.POLISHED_ANDESITE.defaultBlockState());
+            assertFalse(result.positions().contains(new BlockPos(-1, height + 1, 1)));
+            assertFalse(result.positions().contains(new BlockPos(9, height + 1, 1)));
+        }
+    }
+
+    @Test
+    void slabBridgeHasSolidOuterLedgeUnderEveryRailing() {
+        BlockPlacementPlan slabs = BlockPlacementPlan.create(Level.OVERWORLD,
+                surface(9, 3, 9).blocks().stream()
+                        .map(block -> new PlannedBlock(block.position(),
+                                Blocks.SMOOTH_STONE_SLAB.defaultBlockState()))
+                        .toList());
+        StraightGeometry geometry = new StraightGeometry(
+                new RoadPoint(0.5, 9.0, 1.5),
+                new RoadPoint(8.5, 9.0, 1.5));
+        BlockPlacementPlan result = success(new RoadStructurePlanner().addStructures(
+                slabs, new MapWorld(0), geometry, 3, position -> false, 20_000));
+
+        for (PlannedBlock slab : slabs.blocks()) {
+            assertState(result, slab.position(), slab.targetState());
+            assertFalse(result.positions().contains(slab.position().above()));
+        }
+        for (int z : new int[]{-1, 3}) {
+            for (int x = 0; x < 9; x++) {
+                assertState(result, new BlockPos(x, 8, z),
+                        Blocks.SMOOTH_STONE.defaultBlockState());
+                assertState(result, new BlockPos(x, 9, z),
+                        Blocks.SMOOTH_STONE.defaultBlockState());
+                assertBlock(result, new BlockPos(x, 10, z), Blocks.IRON_BARS);
+            }
+        }
+        MapWorld builtWorld = new MapWorld(0);
+        result.blocks().forEach(block -> builtWorld.states.put(block.position(), block.targetState()));
+        BlockPlacementPlan rebuilt = success(new RoadStructurePlanner().addStructures(
+                slabs, builtWorld, geometry, 3, result.positions()::contains, 20_000));
+        for (PlannedBlock block : result.blocks()) {
+            if (block.targetState().is(Blocks.IRON_BARS)) {
+                assertState(rebuilt, block.position(), block.targetState());
+            }
+        }
+        assertInstanceOf(BlockPlanResult.Failure.class,
+                new RoadStructurePlanner().addStructures(slabs, new MapWorld(0),
+                        geometry, 3, position -> false, result.blocks().size() - 1));
     }
 
     @Test
@@ -471,6 +640,10 @@ class RoadStructurePlannerTest {
                 .map(PlannedBlock::position)
                 .collect(java.util.stream.Collectors.toSet());
         assertFalse(barriers.isEmpty());
+        for (BlockPos barrier : barriers) {
+            assertState(result, barrier.below(), Blocks.SMOOTH_STONE.defaultBlockState());
+            assertState(result, barrier.below(2), Blocks.SMOOTH_STONE.defaultBlockState());
+        }
         assertTrue(barriers.stream().allMatch(position ->
                 cardinalNeighborCount(position, barriers) <= 2));
     }
@@ -518,7 +691,7 @@ class RoadStructurePlannerTest {
                 Blocks.AIR.defaultBlockState());
         assertState(result, new BlockPos(4, 11, 2),
                 Blocks.AIR.defaultBlockState());
-        assertState(result, new BlockPos(3, 10, 0),
+        assertState(result, new BlockPos(3, 10, -1),
                 Blocks.IRON_BARS.defaultBlockState()
                         .setValue(CrossCollisionBlock.EAST, false)
                         .setValue(CrossCollisionBlock.WEST, true));
@@ -542,7 +715,7 @@ class RoadStructurePlannerTest {
                 ));
 
         assertFalse(result.positions().contains(new BlockPos(0, 10, 1)));
-        assertBlock(result, new BlockPos(0, 10, 0), Blocks.IRON_BARS);
+        assertBlock(result, new BlockPos(0, 10, -1), Blocks.IRON_BARS);
     }
 
     @Test

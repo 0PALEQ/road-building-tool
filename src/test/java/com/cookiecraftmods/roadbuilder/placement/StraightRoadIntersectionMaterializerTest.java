@@ -72,6 +72,75 @@ class StraightRoadIntersectionMaterializerTest {
     }
 
     @Test
+    void pavesShallowHighwayExitsAndTheirLaneConnections() {
+        for (double angle : new double[]{2.0, 5.0, 9.0}) {
+            RoadNodeId centerId = new RoadNodeId(UUID.randomUUID());
+            RoadNode center = new RoadNode(centerId, new RoadPoint(0.5, 64.0, 0.5));
+            List<RoadSegment> incident = List.of(
+                    segment(new RoadPoint(-60.5, 64.0, 0.5), center.position(),
+                            new RoadNodeId(UUID.randomUUID()), centerId, 15),
+                    segment(center.position(), new RoadPoint(60.5, 64.0, 0.5),
+                            centerId, new RoadNodeId(UUID.randomUUID()), 15),
+                    segment(center.position(),
+                            new RoadPoint(60.5, 64.0, 0.5 + 60 * Math.tan(Math.toRadians(angle))),
+                            centerId, new RoadNodeId(UUID.randomUUID()), 7)
+            );
+            BlockPlacementPlan plan = assertInstanceOf(BlockPlanResult.Success.class,
+                    new StraightRoadIntersectionMaterializer().plan(
+                            Level.OVERWORLD, center, incident,
+                            new ResourceLocation("minecraft", "gray_concrete"),
+                            new ResourceLocation("minecraft", "smooth_stone"),
+                            10_000, 100_000)).plan();
+            assertConnectorPathsArePaved(center, incident, plan);
+            // The overlap extends well beyond the node. It must not be clipped
+            // to the small endpoint cap and leave old markings in the merge.
+            assertTrue(plan.positions().contains(new BlockPos(10, 64, 0)));
+            assertTrue(plan.affectedBlockCount() < 2_000);
+        }
+    }
+
+    @Test
+    void preservesBranchesThatStartTangentAndThenCurveApart() {
+        RoadNodeId centerId = new RoadNodeId(UUID.randomUUID());
+        RoadNode center = new RoadNode(centerId, new RoadPoint(0.5, 64.0, 0.5));
+        List<RoadSegment> incident = List.of(
+                sidewalkSegment(new RoadPoint(-60.5, 64.0, 0.5), center.position(),
+                        new RoadNodeId(UUID.randomUUID()), centerId, 15),
+                sidewalkSegment(center.position(), new RoadPoint(60.5, 64.0, 0.5),
+                        centerId, new RoadNodeId(UUID.randomUUID()), 7),
+                sidewalkSegment(new QuadraticBezierGeometry(center.position(),
+                        new RoadPoint(10.5, 64.0, 0.5), new RoadPoint(50.5, 64.0, 30.5)),
+                        centerId, new RoadNodeId(UUID.randomUUID()), 7));
+        BlockPlacementPlan plan = assertInstanceOf(BlockPlanResult.Success.class,
+                new StraightRoadIntersectionMaterializer().plan(
+                        Level.OVERWORLD, center, incident,
+                        new ResourceLocation("minecraft", "gray_concrete"),
+                        new ResourceLocation("minecraft", "smooth_stone"),
+                        10_000, 100_000)).plan();
+        assertConnectorPathsArePaved(center, incident, plan);
+        assertTrue(plan.positions().contains(new BlockPos(10, 64, 0)));
+    }
+
+    @Test
+    void pavesEqualWidthHighwayContinuation() {
+        RoadNodeId centerId = new RoadNodeId(UUID.randomUUID());
+        RoadNode center = new RoadNode(centerId, new RoadPoint(0.5, 64.0, 0.5));
+        List<RoadSegment> incident = List.of(
+                segment(new RoadPoint(-60.5, 64.0, 0.5), center.position(),
+                        new RoadNodeId(UUID.randomUUID()), centerId, 15),
+                segment(center.position(), new RoadPoint(60.5, 64.0, 0.5),
+                        centerId, new RoadNodeId(UUID.randomUUID()), 15));
+        BlockPlacementPlan plan = assertInstanceOf(BlockPlanResult.Success.class,
+                new StraightRoadIntersectionMaterializer().plan(
+                        Level.OVERWORLD, center, incident,
+                        new ResourceLocation("minecraft", "gray_concrete"),
+                        new ResourceLocation("minecraft", "smooth_stone"),
+                        10_000, 100_000)).plan();
+        assertConnectorPathsArePaved(center, incident, plan);
+        assertTrue(plan.positions().contains(new BlockPos(0, 64, 0)));
+    }
+
+    @Test
     void fillsTheConflictAndAddsTangentCornerFillets() {
         RoadGraph graph = new RoadGraph(Level.OVERWORLD);
         PreparedRoadAddition eastWest = graph.prepareStraightRoad(

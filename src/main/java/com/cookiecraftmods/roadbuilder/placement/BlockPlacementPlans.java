@@ -43,7 +43,7 @@ public final class BlockPlacementPlans {
             Collection<BlockPos> excludedPositions
     ) {
         Objects.requireNonNull(plan, "plan");
-        Set<BlockPos> excluded = Set.copyOf(Objects.requireNonNull(
+        Set<BlockPos> excluded = BlockPositionSets.copyOf(Objects.requireNonNull(
                 excludedPositions,
                 "excludedPositions"
         ));

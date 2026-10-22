@@ -38,10 +38,14 @@ public final class RoadTransitionPlanPreparer {
                 .stream()
                 .map(segment -> new RoadStructurePlanner.StructureSpan(
                         segment.referenceGeometry(),
-                        segment.presetSnapshot().surfaceBlockWidth()
+                        segment.presetSnapshot().surfaceBlockWidth(),
+                        segment.presetSnapshot().surfaceBands()
                 ))
                 .toList();
-        BlockPlanResult structures = new RoadStructurePlanner().addStructures(
+        RoadStructurePlanner structurePlanner = new RoadStructurePlanner();
+        surfacePlan = structurePlanner.prepareRailingSurface(
+                surfacePlan, structureSpans, world, protectedPosition);
+        BlockPlanResult structures = structurePlanner.addStructures(
                 surfacePlan,
                 world,
                 structureSpans,
@@ -51,7 +55,7 @@ public final class RoadTransitionPlanPreparer {
         if (!(structures instanceof BlockPlanResult.Success structured)) {
             return structures;
         }
-        Set<BlockPos> structurePositions = Set.copyOf(
+        Set<BlockPos> structurePositions = BlockPositionSets.copyOf(
                 structured.plan().positions()
         );
         BlockPlanResult clearance = new RoadClearancePlanner().addClearance(

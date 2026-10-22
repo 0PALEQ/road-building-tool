@@ -21,6 +21,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlacementTransactionTest {
@@ -29,6 +30,29 @@ class PlacementTransactionTest {
     @BeforeAll
     static void bootstrapMinecraft() {
         MinecraftBootstrap.bootstrap();
+    }
+
+    @Test
+    void positionSnapshotIsOrderedReadOnlyAndDetachedFromLaterChanges() {
+        BlockPos east = ORIGIN.offset(1, 0, 0);
+        MapBackedPlacementBlockWorld world = worldWith(ORIGIN, Blocks.DIRT.defaultBlockState());
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(Level.OVERWORLD);
+        assertInstanceOf(PlacementCommitResult.Success.class,
+                commit(operationId(1), world, ledger, east, Blocks.STONE.defaultBlockState()));
+        assertInstanceOf(PlacementCommitResult.Success.class,
+                commit(operationId(2), world, ledger, ORIGIN, Blocks.STONE.defaultBlockState()));
+
+        Map<BlockPos, PositionChangeStack> snapshot = ledger.positionStacks();
+        assertEquals(List.of(ORIGIN, east), List.copyOf(snapshot.keySet()));
+        assertThrows(UnsupportedOperationException.class, snapshot::clear);
+        assertThrows(UnsupportedOperationException.class,
+                () -> snapshot.entrySet().iterator().next().setValue(snapshot.get(east)));
+
+        assertInstanceOf(PlacementRemovalResult.Success.class,
+                new PlacementRemovalService().remove(operationId(2), RemovalMode.SAFE, world, ledger));
+        assertEquals(1, ledger.positionCount());
+        assertEquals(2, snapshot.size());
+        assertEquals(operationId(2), snapshot.get(ORIGIN).top().operationId());
     }
 
     @Test

@@ -277,6 +277,7 @@ public record RoadPresetEditorComponent(
                 RoadMarkingPattern.DOUBLE_CONTINUOUS,
                 null
         ),
+        RAILING(RoadSurfaceRole.RAILING, RoadMarkingPattern.CONTINUOUS, null),
         SIDEWALK(
                 RoadSurfaceRole.SIDEWALK,
                 RoadMarkingPattern.CONTINUOUS,
@@ -331,6 +332,7 @@ public record RoadPresetEditorComponent(
             return switch (band.role()) {
                 case PAVEMENT -> PAVEMENT;
                 case SIDEWALK -> SIDEWALK;
+                case RAILING -> RAILING;
                 case GRASS_MEDIAN -> GRASS_MEDIAN;
                 case CONCRETE_MEDIAN -> CONCRETE_MEDIAN;
                 case MARKING -> switch (band.pattern()) {

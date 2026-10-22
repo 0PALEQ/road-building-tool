@@ -120,7 +120,7 @@ public final class JunctionMarkingMaterializer {
                     });
         }
         java.util.Set<BlockPos> crosswalkPositions =
-                java.util.Set.copyOf(crosswalkClearZones.keySet());
+                BlockPositionSets.copyOf(crosswalkClearZones.keySet());
         Map<BlockPos, PlannedBlock> blocks =
                 new LinkedHashMap<>(crosswalkClearZones);
         blocks.putAll(crosswalks);

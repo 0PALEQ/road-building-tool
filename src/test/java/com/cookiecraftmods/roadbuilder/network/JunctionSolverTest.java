@@ -28,6 +28,23 @@ class JunctionSolverTest {
     private static final RoadId MAIN_ROAD = id(RoadId::new, 2);
 
     @Test
+    void shortArmsKeepPositiveNonOverlappingTrims() {
+        RoadNode node = new RoadNode(NODE_ID, point(0, 0));
+        for (double length : new double[]{0.1, 0.5, 1.0, 2.0}) {
+            RoadSegment shortArm = segment(10, MAIN_ROAD, node.position(),
+                    point(length, 0), true, RoadClassification.DEFAULT);
+            RoadSegment incoming = segment(20, MAIN_ROAD, point(-30, 0),
+                    node.position(), false, RoadClassification.DEFAULT);
+            var solved = assertInstanceOf(JunctionSolveResult.Success.class,
+                    new JunctionSolver().solve(node, List.of(shortArm, incoming),
+                            JunctionDefinition.automatic(NODE_ID)));
+            var trim = solved.approaches().stream()
+                    .filter(arm -> arm.segment() == shortArm).findFirst().orElseThrow().trimDistance();
+            assertTrue(trim > 0 && trim * 2 < length);
+        }
+    }
+
+    @Test
     void higherPriorityRoadControlsAutomaticTJunctionPriority() {
         RoadNode node = new RoadNode(NODE_ID, point(0, 0));
         RoadSegment west = segment(

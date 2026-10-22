@@ -134,7 +134,10 @@ public final class StraightRoadIntersectionMaterializer {
         ) ? MAXIMUM_FORK_FOOTPRINT_RADIUS
                 : MAXIMUM_LOCAL_FOOTPRINT_RADIUS;
         List<Axis> axes = distinctAxes(approaches);
-        if (axes.size() < 2) {
+        // Tangent continuations and shallow highway forks are valid junctions.
+        // Axis separation is useful for corner fillets, not for deciding whether
+        // the lane ribbons and overlapping road surfaces can be materialized.
+        if (approaches.size() < 2) {
             return new BlockPlanResult.Failure(
                     BlockPlanFailureCode.INVALID_GEOMETRY
             );
@@ -149,10 +152,12 @@ public final class StraightRoadIntersectionMaterializer {
                 maximumFootprintRadius,
                 1.0 + BLOCK_CELL_RADIUS
         );
+        double boundReach = axes.size() < 2
+                ? maximumFootprintRadius : approachReach;
         double bound = approaches.stream()
                 .mapToDouble(approach ->
                         Math.hypot(approach.originX(), approach.originZ())
-                                + approachReach
+                                + boundReach
                                 + approach.halfWidth()
                                 + 1.0)
                 .max()
@@ -444,7 +449,10 @@ public final class StraightRoadIntersectionMaterializer {
                                                     - candidate.originX(),
                                             existing.originZ()
                                                     - candidate.originZ()
-                                    ) <= PARALLEL_TOLERANCE);
+                                    ) <= PARALLEL_TOLERANCE
+                                    && existing.width() == candidate.width()
+                                    && existing.columnRoles().equals(candidate.columnRoles())
+                                    && existing.curvedSamples().equals(candidate.curvedSamples()));
                     if (!duplicate) {
                         approaches.add(candidate);
                     }

@@ -376,5 +376,7 @@
   "screen.roadbuilder.road_pack.loading": "Loading selected road definitions...",
   "screen.roadbuilder.road_pack.exported": "Exported to %s",
   "road_preset.roadbuilder.two_way": "Two-Way Avenue",
-  "road_preset.roadbuilder.marked_two_way": "Marked Two-Way Road"
+  "road_preset.roadbuilder.marked_two_way": "Marked Two-Way Road",
+  "screen.roadbuilder.preset_editor.railing": "Railing",
+  "screen.roadbuilder.preset_editor.material.railing": "Railing base"
 }

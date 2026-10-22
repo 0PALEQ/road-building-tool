@@ -353,6 +353,7 @@ public final class RoadPresetEditorScreen extends Screen {
             case PAVEMENT -> "pavement";
             case MARKING -> "marking";
             case SIDEWALK -> "sidewalk";
+            case RAILING -> "railing";
             case GRASS_MEDIAN -> "grass_median";
             case CONCRETE_MEDIAN -> "concrete_median";
         };

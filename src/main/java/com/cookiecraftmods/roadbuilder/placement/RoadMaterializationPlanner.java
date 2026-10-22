@@ -104,9 +104,12 @@ public final class RoadMaterializationPlanner {
                 .stream()
                 .map(surface -> new RoadStructurePlanner.StructureSpan(
                         surface.segment().referenceGeometry(),
-                        surface.segment().presetSnapshot().surfaceBlockWidth()
+                        surface.segment().presetSnapshot().surfaceBlockWidth(),
+                        surface.segment().presetSnapshot().surfaceBands()
                 ))
                 .toList();
+        mergedSurface = structurePlanner.prepareRailingSurface(
+                mergedSurface, structureSpans, world, ledger::isMaterializedRoadPosition);
         BlockPlanResult structures = structurePlanner.addStructures(
                 mergedSurface,
                 world,
@@ -117,7 +120,7 @@ public final class RoadMaterializationPlanner {
         if (!(structures instanceof BlockPlanResult.Success structured)) {
             return structures;
         }
-        Set<BlockPos> structurePositions = Set.copyOf(
+        Set<BlockPos> structurePositions = BlockPositionSets.copyOf(
                 structured.plan().positions()
         );
         materialLayers.add(new LayeredBlockPlan(

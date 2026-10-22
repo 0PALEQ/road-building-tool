@@ -1,6 +1,8 @@
 package com.cookiecraftmods.roadbuilder.placement;
 
 import com.cookiecraftmods.roadbuilder.geometry.PathSample;
+import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand;
+import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import com.cookiecraftmods.roadbuilder.geometry.RoadVector;
@@ -9,6 +11,9 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CrossCollisionBlock;
 import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.state.properties.SlabType;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.HashMap;
@@ -106,6 +111,7 @@ public final class RoadStructurePlanner {
             );
         }
 
+        surfacePlan = prepareRailingSurface(surfacePlan, spans, world, existingRoadPosition);
         Map<BlockPos, PlannedBlock> targets = new LinkedHashMap<>();
         Set<BlockPos> surfacePositions = new HashSet<>();
         Set<BlockPos> roadSurfacePositions = new HashSet<>();
@@ -131,7 +137,7 @@ public final class RoadStructurePlanner {
         );
         Map<HorizontalColumn, EmbankmentCandidate> embankments =
                 new HashMap<>();
-        Set<BlockPos> deckSurfacePositions = new HashSet<>();
+        Set<BlockPos> railingSurfacePositions = new HashSet<>();
         for (PlannedBlock surface : surfacePlan.blocks()) {
             if (surface.targetState().isAir()) {
                 continue;
@@ -167,8 +173,11 @@ public final class RoadStructurePlanner {
                 )) {
                     return failure();
                 }
-                deckSurfacePositions.add(position);
+                railingSurfacePositions.add(position);
             } else if (verticalGap > 1) {
+                if (sideEdge && verticalGap > MAXIMUM_TERRAIN_FILL_HEIGHT) {
+                    railingSurfacePositions.add(position);
+                }
                 BlockState interior = verticalGap
                         <= MAXIMUM_TERRAIN_FILL_HEIGHT
                         ? materials.terrainFill()
@@ -229,11 +238,52 @@ public final class RoadStructurePlanner {
         }
 
         Set<BlockPos> barrierPositions = barrierPositions(
-                deckSurfacePositions,
+                railingSurfacePositions,
                 roadSurfacePositions,
                 spans,
+                world,
                 existingRoadPosition
         );
+        // A terrain cut wall beside the road is not an exposed drop.
+        barrierPositions.removeIf(position -> {
+            PlannedBlock curb = targets.get(position.below());
+            return curb != null && !curb.targetState().isAir();
+        });
+        Set<BlockPos> presetBarriers = new HashSet<>();
+        for (StructureSpan span : spans) {
+            int column = 0;
+            for (RoadSurfaceBand band : span.surfaceBands()) {
+                if (band.role() == RoadSurfaceRole.RAILING) {
+                    Set<BlockPos> bandPositions = new HashSet<>();
+                    for (int index = 0; index < band.width(); index++) {
+                        addBarrierPath(bandPositions, span.geometry(),
+                                (span.roadWidth() - 1) / 2.0 - column - index);
+                    }
+                    if (column == 0 || column + band.width() == span.roadWidth()) {
+                        bandPositions.removeIf(position -> !isExposedHorizontalEdge(
+                                position, roadSurfacePositions, existingRoadPosition));
+                    }
+                    bandPositions.removeIf(position -> {
+                        PlannedBlock base = targets.get(position);
+                        return base == null || !isRailingMaterial(base.targetState(), band);
+                    });
+                    presetBarriers.addAll(bandPositions);
+                }
+                column += band.width();
+            }
+        }
+        presetBarriers.retainAll(roadSurfacePositions);
+        // An explicit edge railing replaces the automatic outer bridge railing.
+        barrierPositions.removeIf(position -> {
+            for (int[] direction : CARDINAL_DIRECTIONS) {
+                if (presetBarriers.contains(position.below().offset(
+                        direction[0], 0, direction[1]))) {
+                    return true;
+                }
+            }
+            return false;
+        });
+        presetBarriers.stream().map(BlockPos::above).forEach(barrierPositions::add);
         if (!addBarriers(
                 targets,
                 surfacePositions,
@@ -276,6 +326,74 @@ public final class RoadStructurePlanner {
                 surfacePlan.dimension(),
                 targets.values()
         ));
+    }
+
+    /** Replaces buried railing foundations with pavement and gives exposed bars a full-height base. */
+    public BlockPlacementPlan prepareRailingSurface(
+            BlockPlacementPlan surface, List<StructureSpan> spans,
+            PlacementBlockWorld world, Predicate<BlockPos> existingRoadPosition
+    ) {
+        Map<BlockPos, PlannedBlock> blocks = new LinkedHashMap<>();
+        surface.blocks().forEach(block -> blocks.put(block.position(), block));
+        Set<BlockPos> footprint = surface.blocks().stream()
+                .filter(block -> !block.targetState().isAir())
+                .map(PlannedBlock::position).collect(java.util.stream.Collectors.toSet());
+        for (StructureSpan span : spans) {
+            RoadSurfaceBand pavement = span.surfaceBands().stream()
+                    .filter(band -> band.role() == RoadSurfaceRole.PAVEMENT)
+                    .findFirst().orElse(null);
+            if (pavement == null) {
+                continue;
+            }
+            int column = 0;
+            for (RoadSurfaceBand band : span.surfaceBands()) {
+                if (band.role() == RoadSurfaceRole.RAILING) {
+                    Set<BlockPos> positions = new HashSet<>();
+                    for (int index = 0; index < band.width(); index++) {
+                        addBarrierPath(positions, span.geometry(),
+                                (span.roadWidth() - 1) / 2.0 - column - index);
+                    }
+                    boolean edge = column == 0 || column + band.width() == span.roadWidth();
+                    for (BlockPos position : positions) {
+                        PlannedBlock base = blocks.get(position);
+                        if (base == null || !isRailingMaterial(base.targetState(), band)) {
+                            continue;
+                        }
+                        BlockState old = world.blockState(position);
+                        boolean existingPavement = existingRoadPosition.test(position)
+                                && !old.isAir() && !isRailingMaterial(old, band);
+                        boolean buriedEdge = edge && !isExposedHorizontalEdge(
+                                position, footprint, existingRoadPosition);
+                        BlockState state = base.targetState();
+                        if (existingPavement) {
+                            state = old;
+                        } else if (buriedEdge) {
+                            state = RoadBlockStateFactory.solid(
+                                    BuiltInRegistries.BLOCK.get(pavement.block()));
+                            if (base.targetState().getBlock() instanceof SlabBlock
+                                    && base.targetState().getValue(SlabBlock.TYPE) == SlabType.BOTTOM) {
+                                state = RoadBlockStateFactory.slabCompanion(state)
+                                        .map(slab -> slab.setValue(SlabBlock.TYPE, SlabType.BOTTOM))
+                                        .orElse(state);
+                            }
+                        } else if (state.getBlock() instanceof SlabBlock) {
+                            state = state.setValue(SlabBlock.TYPE, SlabType.DOUBLE);
+                        }
+                        blocks.put(position, new PlannedBlock(position, state));
+                    }
+                }
+                column += band.width();
+            }
+        }
+        return BlockPlacementPlan.create(surface.dimension(), blocks.values());
+    }
+
+    private static boolean isRailingMaterial(BlockState state, RoadSurfaceBand band) {
+        return band.blockSet().stream().anyMatch(id -> {
+            BlockState material = BuiltInRegistries.BLOCK.get(id).defaultBlockState();
+            return state.is(material.getBlock()) || RoadBlockStateFactory.slabCompanion(material)
+                    .map(slab -> state.is(slab.getBlock())).orElse(false);
+        });
     }
 
     private boolean addDeck(
@@ -322,6 +440,15 @@ public final class RoadStructurePlanner {
             int maximumAffectedBlocks
     ) {
         for (BlockPos position : barrierPositions) {
+            // Carry the fascia out beneath the railing and up to road level.
+            // A full curb supports the bars even beside a bottom-slab surface.
+            if (!surfacePositions.contains(position.below())
+                    && (!put(targets, surfacePositions, position.below(2),
+                    materials.deckFascia(), maximumAffectedBlocks)
+                    || !put(targets, surfacePositions, position.below(),
+                    materials.deckFascia(), maximumAffectedBlocks))) {
+                return false;
+            }
             BlockState state = materials.barrier();
             if (state.is(Blocks.IRON_BARS)) {
                 state = state
@@ -393,24 +520,50 @@ public final class RoadStructurePlanner {
         return true;
     }
 
-    private static Set<BlockPos> barrierPositions(
-            Set<BlockPos> deckSurfacePositions,
+    private Set<BlockPos> barrierPositions(
+            Set<BlockPos> railingSurfacePositions,
             Set<BlockPos> roadSurfacePositions,
             List<StructureSpan> spans,
+            PlacementBlockWorld world,
             Predicate<BlockPos> existingRoadPosition
     ) {
         Set<BlockPos> candidates = new HashSet<>();
+        Set<BlockPos> outerDeckPositions = new HashSet<>();
+        Set<HorizontalColumn> footprint = new HashSet<>();
+        for (BlockPos surface : roadSurfacePositions) {
+            footprint.add(new HorizontalColumn(surface.getX(), surface.getZ()));
+        }
+        for (BlockPos surface : railingSurfacePositions) {
+            for (int[] direction : CARDINAL_DIRECTIONS) {
+                BlockPos outer = surface.offset(direction[0], 0, direction[1]);
+                boolean existingLedge = existingRoadPosition.test(outer)
+                        && world.blockState(outer).equals(materials.deckFascia())
+                        && existingRoadPosition.test(outer.above())
+                        && world.blockState(outer.above()).is(
+                                materials.barrier().getBlock());
+                boolean occupied = existingRoadPosition.test(outer)
+                        || existingRoadPosition.test(outer.below())
+                        || existingRoadPosition.test(outer.above())
+                        || existingRoadPosition.test(outer.above(2));
+                if (!footprint.contains(new HorizontalColumn(
+                        outer.getX(), outer.getZ()))
+                        && !isEndDirection(surface, direction, spans)
+                        && (existingLedge || !occupied)) {
+                    outerDeckPositions.add(outer);
+                }
+            }
+        }
         if (spans.isEmpty()) {
-            candidates.addAll(deckSurfacePositions);
+            candidates.addAll(outerDeckPositions);
         } else {
             for (StructureSpan span : spans) {
-                double edgeOffset = (span.roadWidth() - 1) / 2.0;
+                double edgeOffset = (span.roadWidth() + 1) / 2.0;
                 addBarrierPath(candidates, span.geometry(), edgeOffset);
                 if (edgeOffset != 0.0) {
                     addBarrierPath(candidates, span.geometry(), -edgeOffset);
                 }
             }
-            candidates.retainAll(deckSurfacePositions);
+            candidates.retainAll(outerDeckPositions);
         }
         candidates.removeIf(position -> !isExposedHorizontalEdge(
                 position,
@@ -1341,9 +1494,19 @@ public final class RoadStructurePlanner {
 
     public record StructureSpan(
             ReferenceGeometry geometry,
-            int roadWidth
+            int roadWidth,
+            List<RoadSurfaceBand> surfaceBands
     ) {
+        public StructureSpan(ReferenceGeometry geometry, int roadWidth) {
+            this(geometry, roadWidth, List.of());
+        }
+
         public StructureSpan {
+            surfaceBands = List.copyOf(Objects.requireNonNull(surfaceBands, "surfaceBands"));
+            if (!surfaceBands.isEmpty()
+                    && surfaceBands.stream().mapToInt(RoadSurfaceBand::width).sum() != roadWidth) {
+                throw new IllegalArgumentException("surface bands must match road width");
+            }
             Objects.requireNonNull(geometry, "geometry");
             if (roadWidth < 1) {
                 throw new IllegalArgumentException(

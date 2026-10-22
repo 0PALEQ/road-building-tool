@@ -17,7 +17,8 @@ public record RoadMaterialPalette(
         List<ResourceLocation> markingBlocks,
         List<ResourceLocation> sidewalkBlocks,
         List<ResourceLocation> grassMedianBlocks,
-        List<ResourceLocation> concreteMedianBlocks
+        List<ResourceLocation> concreteMedianBlocks,
+        List<ResourceLocation> railingBlocks
 ) {
     private static final ResourceLocation DEFAULT_MARKING = id("white_concrete");
     private static final ResourceLocation DEFAULT_SIDEWALK = id("smooth_stone");
@@ -50,8 +51,24 @@ public record RoadMaterialPalette(
                             .forGetter(RoadMaterialPalette::grassMedianBlocks),
                     ResourceLocation.CODEC.listOf()
                             .optionalFieldOf("concrete_median_set", List.of())
-                            .forGetter(RoadMaterialPalette::concreteMedianBlocks)
+                            .forGetter(RoadMaterialPalette::concreteMedianBlocks),
+                    ResourceLocation.CODEC.listOf()
+                            .optionalFieldOf("railing_set", List.of(DEFAULT_SIDEWALK))
+                            .forGetter(RoadMaterialPalette::railingBlocks)
             ).apply(instance, RoadMaterialPalette::new));
+
+    public RoadMaterialPalette(
+            ResourceLocation pavementBlock, ResourceLocation markingBlock,
+            ResourceLocation sidewalkBlock, ResourceLocation grassMedianBlock,
+            ResourceLocation concreteMedianBlock,
+            List<ResourceLocation> pavementBlocks, List<ResourceLocation> markingBlocks,
+            List<ResourceLocation> sidewalkBlocks, List<ResourceLocation> grassMedianBlocks,
+            List<ResourceLocation> concreteMedianBlocks
+    ) {
+        this(pavementBlock, markingBlock, sidewalkBlock, grassMedianBlock,
+                concreteMedianBlock, pavementBlocks, markingBlocks, sidewalkBlocks,
+                grassMedianBlocks, concreteMedianBlocks, List.of(DEFAULT_SIDEWALK));
+    }
 
     public RoadMaterialPalette(
             ResourceLocation pavementBlock,
@@ -75,6 +92,11 @@ public record RoadMaterialPalette(
     }
 
     public RoadMaterialPalette {
+        railingBlocks = List.copyOf(Objects.requireNonNull(railingBlocks, "railingBlocks"));
+        if (railingBlocks.isEmpty()) {
+            throw new IllegalArgumentException("railing block set must not be empty");
+        }
+        railingBlocks = normalize(railingBlocks.get(0), railingBlocks, "railingBlocks");
         Objects.requireNonNull(pavementBlock, "pavementBlock");
         Objects.requireNonNull(markingBlock, "markingBlock");
         Objects.requireNonNull(sidewalkBlock, "sidewalkBlock");
@@ -127,7 +149,8 @@ public record RoadMaterialPalette(
         return new RoadMaterialPalette(
                 pavement.get(0), marking.get(0), sidewalk.get(0),
                 grass.get(0), concrete.get(0), pavement, marking,
-                sidewalk, grass, concrete
+                sidewalk, grass, concrete,
+                firstBlockSet(bands, RoadSurfaceRole.RAILING, defaults.railingBlocks)
         );
     }
 
@@ -138,6 +161,7 @@ public record RoadMaterialPalette(
             case SIDEWALK -> sidewalkBlock;
             case GRASS_MEDIAN -> grassMedianBlock;
             case CONCRETE_MEDIAN -> concreteMedianBlock;
+            case RAILING -> railingBlocks.get(0);
         };
     }
 
@@ -148,6 +172,7 @@ public record RoadMaterialPalette(
             case SIDEWALK -> sidewalkBlocks;
             case GRASS_MEDIAN -> grassMedianBlocks;
             case CONCRETE_MEDIAN -> concreteMedianBlocks;
+            case RAILING -> railingBlocks;
         };
     }
 
@@ -175,23 +200,27 @@ public record RoadMaterialPalette(
             case PAVEMENT -> new RoadMaterialPalette(primary, markingBlock,
                     sidewalkBlock, grassMedianBlock, concreteMedianBlock,
                     replacement, markingBlocks, sidewalkBlocks,
-                    grassMedianBlocks, concreteMedianBlocks);
+                    grassMedianBlocks, concreteMedianBlocks, railingBlocks);
             case MARKING -> new RoadMaterialPalette(pavementBlock, primary,
                     sidewalkBlock, grassMedianBlock, concreteMedianBlock,
                     pavementBlocks, replacement, sidewalkBlocks,
-                    grassMedianBlocks, concreteMedianBlocks);
+                    grassMedianBlocks, concreteMedianBlocks, railingBlocks);
             case SIDEWALK -> new RoadMaterialPalette(pavementBlock, markingBlock,
                     primary, grassMedianBlock, concreteMedianBlock,
                     pavementBlocks, markingBlocks, replacement,
-                    grassMedianBlocks, concreteMedianBlocks);
+                    grassMedianBlocks, concreteMedianBlocks, railingBlocks);
             case GRASS_MEDIAN -> new RoadMaterialPalette(pavementBlock, markingBlock,
                     sidewalkBlock, primary, concreteMedianBlock,
                     pavementBlocks, markingBlocks, sidewalkBlocks,
-                    replacement, concreteMedianBlocks);
+                    replacement, concreteMedianBlocks, railingBlocks);
             case CONCRETE_MEDIAN -> new RoadMaterialPalette(pavementBlock, markingBlock,
                     sidewalkBlock, grassMedianBlock, primary,
                     pavementBlocks, markingBlocks, sidewalkBlocks,
-                    grassMedianBlocks, replacement);
+                    grassMedianBlocks, replacement, railingBlocks);
+            case RAILING -> new RoadMaterialPalette(pavementBlock, markingBlock,
+                    sidewalkBlock, grassMedianBlock, concreteMedianBlock,
+                    pavementBlocks, markingBlocks, sidewalkBlocks,
+                    grassMedianBlocks, concreteMedianBlocks, replacement);
         };
     }
 

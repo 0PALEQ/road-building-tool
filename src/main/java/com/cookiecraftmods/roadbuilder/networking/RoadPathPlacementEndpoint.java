@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.networking;
 
+import com.cookiecraftmods.roadbuilder.placement.BlockPositionSets;
 import com.cookiecraftmods.roadbuilder.RoadBuilder;
 import com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation;
 import com.cookiecraftmods.roadbuilder.network.RoadGraph;
@@ -176,7 +177,7 @@ public final class RoadPathPlacementEndpoint {
                     world,
                     graph,
                     ledger,
-                    Set.copyOf(roadPlan.positions())
+                    BlockPositionSets.copyOf(roadPlan.positions())
             );
         } catch (JunctionPlanningFailure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));
@@ -464,9 +465,14 @@ public final class RoadPathPlacementEndpoint {
                     .stream()
                     .map(segment -> new RoadStructurePlanner.StructureSpan(
                             segment.referenceGeometry(),
-                            segment.presetSnapshot().surfaceBlockWidth()
+                            segment.presetSnapshot().surfaceBlockWidth(),
+                            segment.presetSnapshot().surfaceBands()
                     ))
                     .toList();
+            decoratedSurface = structurePlanner.prepareRailingSurface(
+                    decoratedSurface, structureSpans, world,
+                    position -> ledger.isMaterializedRoadPosition(position)
+                            || proposedRoadPositions.contains(position));
             BlockPlanResult structured = structurePlanner.addStructures(
                     decoratedSurface,
                     world,
@@ -480,7 +486,7 @@ public final class RoadPathPlacementEndpoint {
                         ((BlockPlanResult.Failure) structured).code()
                 );
             }
-            Set<BlockPos> structurePositions = Set.copyOf(
+            Set<BlockPos> structurePositions = BlockPositionSets.copyOf(
                     structureSuccess.plan().positions()
             );
             BlockPlanResult cleared = clearancePlanner.addClearance(

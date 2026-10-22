@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.networking;
 
+import com.cookiecraftmods.roadbuilder.placement.BlockPositionSets;
 import com.cookiecraftmods.roadbuilder.RoadBuilder;
 import com.cookiecraftmods.roadbuilder.network.PreparedSegmentRemoval;
 import com.cookiecraftmods.roadbuilder.network.RoadGraph;
@@ -847,9 +848,12 @@ public final class PlacementRemovalEndpoint {
                     .stream()
                     .map(segment -> new RoadStructurePlanner.StructureSpan(
                             segment.referenceGeometry(),
-                            segment.presetSnapshot().surfaceBlockWidth()
+                            segment.presetSnapshot().surfaceBlockWidth(),
+                            segment.presetSnapshot().surfaceBands()
                     ))
                     .toList();
+            combined = new RoadStructurePlanner().prepareRailingSurface(
+                    combined, structureSpans, world, ledger::isMaterializedRoadPosition);
             BlockPlanResult structures = new RoadStructurePlanner()
                     .addStructures(
                             combined,
@@ -863,7 +867,7 @@ public final class PlacementRemovalEndpoint {
                         "retained junction structures could not be planned"
                 );
             }
-            Set<BlockPos> structurePositions = Set.copyOf(
+            Set<BlockPos> structurePositions = BlockPositionSets.copyOf(
                     structured.plan().positions()
             );
             BlockPlanResult clearance = new RoadClearancePlanner()
@@ -939,7 +943,7 @@ public final class PlacementRemovalEndpoint {
             return List.of();
         }
         Set<BlockPos> selectedPositions = ledger.operation(selectedOperationId)
-                .map(operation -> Set.copyOf(operation.positions()))
+                .map(operation -> BlockPositionSets.copyOf(operation.positions()))
                 .orElse(Set.of());
         java.util.stream.Stream<PlacementOperationId> endpointNodes =
                 java.util.stream.Stream.of(

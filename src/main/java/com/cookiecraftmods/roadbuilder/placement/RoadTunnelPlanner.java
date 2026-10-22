@@ -400,7 +400,7 @@ public final class RoadTunnelPlanner {
     ) {
         public Result {
             Objects.requireNonNull(plan, "plan");
-            protectedRoofPositions = Set.copyOf(Objects.requireNonNull(
+            protectedRoofPositions = BlockPositionSets.copyOf(Objects.requireNonNull(
                     protectedRoofPositions,
                     "protectedRoofPositions"
             ));

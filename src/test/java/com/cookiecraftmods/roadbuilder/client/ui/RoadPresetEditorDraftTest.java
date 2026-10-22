@@ -31,6 +31,46 @@ class RoadPresetEditorDraftTest {
             new ResourceLocation("minecraft", "white_concrete");
 
     @Test
+    void railingCanBeAddedAsAnEdgeAndSurvivesSaveAndNetworkSync() {
+        RoadPresetEditorDraft draft = oneLaneDraft(3);
+        RoadPresetEditorComponent railing = RoadPresetEditorComponentCatalog.prototype(
+                RoadPresetEditorComponentCatalog.Kind.RAILING, draft);
+        assertEquals(1, railing.width());
+        draft.insertComponent(0, railing);
+        draft.addComponent(railing);
+        RoadPreset preset = draft.build(1);
+        assertEquals(5, preset.surfaceBlockWidth());
+        assertEquals(RoadSurfaceRole.RAILING, preset.surfaceBands().get(0).role());
+        assertEquals(1, preset.lanes().size());
+        var json = RoadPreset.CODEC.encodeStart(com.mojang.serialization.JsonOps.INSTANCE, preset)
+                .result().orElseThrow();
+        RoadPreset decoded = RoadPreset.CODEC.parse(com.mojang.serialization.JsonOps.INSTANCE, json)
+                .result().orElseThrow();
+        assertEquals(preset, decoded);
+        assertEquals(RoadPresetEditorComponent.Kind.RAILING,
+                new RoadPresetEditorDraft(decoded).components().get(0).kind());
+        var graph = new com.cookiecraftmods.roadbuilder.network.RoadGraph(
+                net.minecraft.world.level.Level.OVERWORLD);
+        graph.applyAddition(graph.prepareStraightRoad(
+                new com.cookiecraftmods.roadbuilder.geometry.StraightGeometry(
+                        new com.cookiecraftmods.roadbuilder.geometry.RoadPoint(0, 64, 0),
+                        new com.cookiecraftmods.roadbuilder.geometry.RoadPoint(20, 64, 0)),
+                new ResourceLocation("roadbuilder", "railing_test"), preset,
+                com.cookiecraftmods.roadbuilder.preset.TrafficHandedness.RHT));
+        var packet = com.cookiecraftmods.roadbuilder.networking.RoadGraphSnapshotS2CPacket
+                .current(graph.snapshot());
+        var buffer = net.fabricmc.fabric.api.networking.v1.PacketByteBufs.create();
+        try {
+            packet.write(buffer);
+            assertEquals(graph.snapshot(),
+                    com.cookiecraftmods.roadbuilder.networking.RoadGraphSnapshotS2CPacket.TYPE
+                            .read(buffer).snapshot());
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @Test
     void projectsLegacyLanesAndBandsIntoOneOrderedCrossSection() {
         RoadPresetEditorDraft draft = new RoadPresetEditorDraft(preset(
                 9,

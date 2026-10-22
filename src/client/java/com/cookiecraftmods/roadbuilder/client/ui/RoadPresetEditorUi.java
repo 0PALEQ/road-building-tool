@@ -46,6 +46,7 @@ final class RoadPresetEditorUi {
             case DASHED_MARKING -> "dashed_marking";
             case DOUBLE_CONTINUOUS_MARKING -> "double_marking";
             case SIDEWALK -> "sidewalk";
+            case RAILING -> "railing";
             case GRASS_MEDIAN -> "grass_median";
             case CONCRETE_MEDIAN -> "concrete_median";
         };

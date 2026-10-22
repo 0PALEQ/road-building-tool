@@ -11,7 +11,8 @@ public enum RoadSurfaceRole {
     MARKING("marking"),
     SIDEWALK("sidewalk"),
     GRASS_MEDIAN("grass_median"),
-    CONCRETE_MEDIAN("concrete_median");
+    CONCRETE_MEDIAN("concrete_median"),
+    RAILING("railing");
 
     public static final Codec<RoadSurfaceRole> CODEC = Codec.STRING.comapFlatMap(
             serializedName -> fromSerializedName(serializedName)

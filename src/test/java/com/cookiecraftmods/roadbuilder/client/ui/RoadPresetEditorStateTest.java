@@ -93,7 +93,7 @@ class RoadPresetEditorStateTest {
                 RoadPresetTemplates.blank()
         );
 
-        assertEquals(10, RoadPresetEditorComponentCatalog.filtered("").size());
+        assertEquals(11, RoadPresetEditorComponentCatalog.filtered("").size());
         assertFalse(RoadPresetEditorComponentCatalog.filtered("lane").isEmpty());
 
         RoadPresetEditorComponent backward =

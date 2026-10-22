@@ -72,6 +72,95 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class RoadBuilderPlacementGameTests implements FabricGameTest {
     private static final int UPDATE_FLAGS = Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS;
 
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 400)
+    public void dividedHighwayBranchesConnectToWiderOneWayRoadsAndRamp(GameTestHelper helper) {
+        var level = helper.getLevel();
+        var origin = helper.absolutePos(new BlockPos(4096, 0, 4096));
+        int y = 64;
+        for (int x = -70; x <= 170; x++) {
+            for (int z = -45; z <= 30; z++) {
+                level.setBlock(new BlockPos(origin.getX() + x, y - 1, origin.getZ() + z),
+                        Blocks.STONE.defaultBlockState(), UPDATE_FLAGS);
+            }
+        }
+        var presets = new java.util.HashMap<ResourceLocation, com.cookiecraftmods.roadbuilder.preset.RoadPreset>();
+        presets.put(new ResourceLocation("roadbuilder", "test_four_lane"), interchangePreset(4, true, false));
+        presets.put(new ResourceLocation("roadbuilder", "test_two_out"), interchangePreset(2, false, false));
+        presets.put(new ResourceLocation("roadbuilder", "test_two_in"), interchangePreset(2, false, true));
+        presets.put(new ResourceLocation("roadbuilder", "test_three_out"), interchangePreset(3, false, false));
+        presets.put(new ResourceLocation("roadbuilder", "test_three_in"), interchangePreset(3, false, true));
+        presets.put(new ResourceLocation("roadbuilder", "test_ramp"), interchangePreset(1, false, false));
+        var endpoint = new StraightRoadPlacementEndpoint(
+                new StraightRoadPlanningService(id -> java.util.Optional.ofNullable(presets.get(id)),
+                        new StraightRoadPlanner()), ConstructionAuthorizer.creativeOnly(),
+                ConstructionLimits.defaults(), new BlockPlanCommitter());
+        var graph = new RoadGraph(level.dimension());
+        var ledger = new PlacementOwnershipLedger(level.dimension());
+        var player = testPlayer(level, true);
+        player.setPos(origin.getX() + 40, y + 2, origin.getZ());
+        String[] names = {"four_lane", "two_out", "two_in", "three_out", "three_in",
+                "two_out", "two_in", "ramp"};
+        // Ports are deliberately half a block inside the end caps, as can
+        // happen when connecting an offset branch using the road tool.
+        double[][] ends = {
+                {-60, 0, 0, 0}, {0, -5, 20, -12}, {0, 5, 20, 12},
+                {100, -12, 160, -12}, {100, 12, 160, 12},
+                {19.8, -12, 100.2, -12}, {19.8, 12, 100.2, 12},
+                {60, -35, 100, -17}
+        };
+        for (int index = 0; index < names.length; index++) {
+            var id = new ResourceLocation("roadbuilder", "test_" + names[index]);
+            var points = ends[index];
+            var result = endpoint.handle(StraightRoadIntentC2SPacket.current(UUID.randomUUID(),
+                    level.dimension().location(), id, 1,
+                    origin.getX() + points[0] + 0.5, y, origin.getZ() + points[1] + 0.5,
+                    origin.getX() + points[2] + 0.5, y, origin.getZ() + points[3] + 0.5),
+                    player, ledger, graph);
+            helper.assertTrue(result.resultCode() == PlacementResultCode.ACCEPTED,
+                    "interchange road " + index + " (" + names[index] + ") failed: " + result.resultCode());
+        }
+        helper.assertTrue(graph.snapshot().segments().size() >= names.length,
+                "all interchange segments should remain in the graph");
+        helper.assertTrue(!graph.snapshot().connectors().isEmpty(), "interchange needs directed lane connections");
+        for (int x = 25; x < 95; x++) {
+            for (int z : new int[]{-12, 12}) {
+                helper.assertTrue(level.getBlockState(new BlockPos(origin.getX() + x, y, origin.getZ() + z))
+                        .is(Blocks.GRAY_CONCRETE), "connecting highways must have continuous pavement");
+            }
+        }
+        helper.succeed();
+    }
+
+    private static com.cookiecraftmods.roadbuilder.preset.RoadPreset interchangePreset(
+            int count, boolean twoWay, boolean reverse) {
+        var pavement = new ResourceLocation("minecraft", "gray_concrete");
+        var lanes = new ArrayList<com.cookiecraftmods.roadbuilder.preset.LaneComponent>();
+        for (int index = 0; index < count; index++) {
+            boolean backward = twoWay ? index >= count / 2 : reverse;
+            lanes.add(new com.cookiecraftmods.roadbuilder.preset.LaneComponent(
+                    com.cookiecraftmods.roadbuilder.preset.LaneType.VEHICLE, 3,
+                    (index - (count - 1) / 2.0) * 4,
+                    backward ? com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.BACKWARD
+                            : com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.FORWARD));
+        }
+        int width = count * 4 + 3;
+        return new com.cookiecraftmods.roadbuilder.preset.RoadPreset(
+                com.cookiecraftmods.roadbuilder.preset.RoadPreset.CURRENT_SCHEMA_VERSION, 1, width,
+                pavement, lanes, List.of(
+                        new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                                com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.RAILING, 1,
+                                new ResourceLocation("minecraft", "smooth_stone")),
+                        new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                                com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.PAVEMENT, width - 2, pavement),
+                        new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                                com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.RAILING, 1,
+                                new ResourceLocation("minecraft", "smooth_stone"))),
+                com.cookiecraftmods.roadbuilder.preset.RoadPresetDisplay.DEFAULT,
+                new com.cookiecraftmods.roadbuilder.preset.RoadClassification(
+                        com.cookiecraftmods.roadbuilder.preset.RoadClass.HIGHWAY, 15, 120),
+                com.cookiecraftmods.roadbuilder.preset.RoadIntersectionStyle.defaults(pavement));
+    }
+
     @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 100)
     public void parallelTogglePlacesBothRoadsInOneOperation(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();

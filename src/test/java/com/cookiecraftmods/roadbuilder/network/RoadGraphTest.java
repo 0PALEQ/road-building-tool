@@ -739,6 +739,23 @@ class RoadGraphTest {
     }
 
     @Test
+    void connectingJustInsideAnEndCapReusesTheNodeInsteadOfCreatingAShortStub() {
+        RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+        PreparedRoadAddition existing = graph.prepareStraightRoad(
+                EASTBOUND, PRESET_ID, PRESET, TrafficHandedness.RHT);
+        graph.applyAddition(existing);
+        RoadPoint port = new RoadPoint(10.0, 64.0, 3.5);
+        PreparedRoadNetworkMutation connection = graph.prepareStraightRoadNetwork(
+                new StraightGeometry(port, new RoadPoint(60.5, 64.0, 3.5)),
+                NARROW_PRESET_ID, NARROW_PRESET, TrafficHandedness.RHT);
+        assertTrue(connection.segmentSplits().isEmpty());
+        assertEquals(existing.segment().endNodeId(),
+                connection.placedSegments().get(0).startNodeId());
+        assertEquals(port, connection.placedSegments().get(0).referenceGeometry().start());
+        assertDoesNotThrow(() -> graph.applyNetworkMutation(connection));
+    }
+
+    @Test
     void doesNotJoinAPointThatIsOnlyFartherAlongAnEndpointGuide() {
         RoadGraph graph = new RoadGraph(Level.OVERWORLD);
         PreparedRoadAddition existing = graph.prepareStraightRoad(

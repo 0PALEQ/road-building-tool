@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.networking;
 
+import com.cookiecraftmods.roadbuilder.placement.BlockPositionSets;
 import com.cookiecraftmods.roadbuilder.RoadBuilder;
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation;
@@ -172,7 +173,7 @@ public final class StraightRoadPlacementEndpoint {
                     world,
                     graph,
                     ledger,
-                    Set.copyOf(clearedRoad.plan().positions())
+                    BlockPositionSets.copyOf(clearedRoad.plan().positions())
             );
         } catch (IntersectionPlanningFailure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));
@@ -551,9 +552,14 @@ public final class StraightRoadPlacementEndpoint {
                     .stream()
                     .map(segment -> new RoadStructurePlanner.StructureSpan(
                             segment.referenceGeometry(),
-                            segment.presetSnapshot().surfaceBlockWidth()
+                            segment.presetSnapshot().surfaceBlockWidth(),
+                            segment.presetSnapshot().surfaceBands()
                     ))
                     .toList();
+            decoratedSurface = structurePlanner.prepareRailingSurface(
+                    decoratedSurface, structureSpans, world,
+                    position -> ledger.isMaterializedRoadPosition(position)
+                            || proposedRoadPositions.contains(position));
             BlockPlanResult structuredResult = structurePlanner.addStructures(
                     decoratedSurface,
                     world,
@@ -568,7 +574,7 @@ public final class StraightRoadPlacementEndpoint {
                         ((BlockPlanResult.Failure) structuredResult).code()
                 );
             }
-            Set<BlockPos> structurePositions = Set.copyOf(
+            Set<BlockPos> structurePositions = BlockPositionSets.copyOf(
                     structured.plan().positions()
             );
             BlockPlanResult clearedResult = clearancePlanner.addClearance(

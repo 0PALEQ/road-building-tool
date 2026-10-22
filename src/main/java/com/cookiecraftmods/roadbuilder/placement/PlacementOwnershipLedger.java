@@ -7,6 +7,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -196,7 +197,9 @@ public final class PlacementOwnershipLedger {
         for (BlockPos position : orderedPositions) {
             copy.put(position, positions.get(position));
         }
-        return Map.copyOf(copy);
+        // Keep the detached, ordered snapshot. Map.copyOf rehashes BlockPos keys
+        // into a probing table, which is expensive for dense road footprints.
+        return Collections.unmodifiableMap(copy);
     }
 
     public Optional<PositionChangeStack> stack(BlockPos position) {
@@ -244,11 +247,12 @@ public final class PlacementOwnershipLedger {
             }
             source.materializationOwner().ifPresent(candidateMaterializations::remove);
 
-            Set<BlockPos> sourcePositions = Set.copyOf(source.positions());
+            Set<BlockPos> sourcePositions = BlockPositionSets.copyOf(source.positions());
             Set<BlockPos> covered = new HashSet<>();
             Set<PlacementOperationId> partitionIds = new HashSet<>();
             Set<RoadMaterializationOwner> partitionOwners = new HashSet<>();
             int replacementLayerCount = 0;
+            Map<PlacementOperationId, Set<BlockPos>> partitionPositions = new HashMap<>();
             for (MaterializationPartition partition : repartition.partitions()) {
                 if (!partitionIds.add(partition.operationId())
                         || candidateOperations.containsKey(partition.operationId())) {
@@ -263,6 +267,7 @@ public final class PlacementOwnershipLedger {
                     );
                 }
                 Set<BlockPos> uniquePositions = new HashSet<>(partition.positions());
+                partitionPositions.put(partition.operationId(), uniquePositions);
                 if (uniquePositions.size() != partition.positions().size()
                         || !sourcePositions.containsAll(uniquePositions)) {
                     throw new IllegalArgumentException(
@@ -293,7 +298,7 @@ public final class PlacementOwnershipLedger {
                 }
                 List<BlockChangeLayer> replacementLayers = new ArrayList<>();
                 for (MaterializationPartition partition : repartition.partitions()) {
-                    if (!partition.positions().contains(position)) {
+                    if (!partitionPositions.get(partition.operationId()).contains(position)) {
                         continue;
                     }
                     BlockState before = replacementLayers.isEmpty()
@@ -429,7 +434,7 @@ public final class PlacementOwnershipLedger {
         }
 
         candidateOperations.remove(overlayOperationId);
-        Set<BlockPos> overlayPositions = Set.copyOf(overlay.positions());
+        Set<BlockPos> overlayPositions = BlockPositionSets.copyOf(overlay.positions());
         Set<PlacementOperationId> partitionIds = new HashSet<>();
         Set<RoadMaterializationOwner> partitionOwners = new HashSet<>();
         Map<BlockPos, List<MaterializationPartition>> partitionsByPosition =

@@ -76,14 +76,12 @@ public final class JunctionSolver {
                     automaticFork ? MAXIMUM_FORK_TRIM : MAXIMUM_TRIM,
                     maximumSurfaceHalfWidth(frames) / angleFactor
             );
-            double maximumForSegment =
-                    frame.segment.referenceGeometry().length() / 2.0
-                            - END_CLEARANCE;
+            double length = frame.segment.referenceGeometry().length();
+            // Closely spaced junctions can leave short but valid arms. Keep
+            // disjoint trim intervals at both ends instead of rejecting them.
+            double maximumForSegment = length / 2.0 - END_CLEARANCE;
             if (maximumForSegment < 1.0) {
-                return new JunctionSolveResult.Failure(
-                        "segment " + frame.segment.id()
-                                + " is too short for a valid junction trim"
-                );
+                maximumForSegment = length * 0.49;
             }
             double trim = Math.min(desiredTrim, maximumForSegment);
             boolean isPrimary = primary.contains(frame.key);

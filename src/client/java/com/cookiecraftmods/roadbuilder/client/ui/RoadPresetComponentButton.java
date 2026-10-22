@@ -137,6 +137,14 @@ final class RoadPresetComponentButton extends AbstractButton {
             case VEHICLE_LANE, BUS_LANE -> renderLane(graphics, swatch);
             case PAVEMENT -> renderPavement(graphics, swatch);
             case SIDEWALK -> renderSidewalk(graphics, swatch);
+            case RAILING -> {
+                renderPavement(graphics, swatch);
+                int x = swatch.x() + swatch.width() / 2;
+                graphics.fill(x - 1, swatch.y() + 2, x + 1, swatch.bottom() - 2, 0xFFD0D0D0);
+                for (int y = swatch.y() + 3; y < swatch.bottom() - 2; y += 6) {
+                    graphics.fill(x - 3, y, x + 3, y + 2, 0xFF777777);
+                }
+            }
             case GRASS_MEDIAN, CONCRETE_MEDIAN -> renderPavement(
                     graphics,
                     swatch

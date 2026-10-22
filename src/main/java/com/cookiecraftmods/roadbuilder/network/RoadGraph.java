@@ -1073,12 +1073,23 @@ public final class RoadGraph {
         Objects.requireNonNull(preset, "preset");
         Objects.requireNonNull(handedness, "handedness");
 
+        Optional<RoadNode> startPort = findNodeAt(geometry.start());
+        Optional<RoadNode> endPort = findNodeAt(geometry.end());
         List<RoadCrossingCandidate> crossings = new RoadPathCrossingAnalyzer().analyze(
                 geometry,
                 segments.values(),
                 JUNCTION_MAXIMUM_VERTICAL_GAP,
                 RoadPathCrossingAnalyzer.DEFAULT_MAXIMUM_CHORD_LENGTH
-        );
+        ).stream().filter(crossing -> {
+            Optional<RoadNode> port = crossing.proposedPathFraction() == 0.0
+                    ? startPort : crossing.proposedPathFraction() == 1.0
+                    ? endPort : Optional.empty();
+            RoadSegment crossed = segments.get(crossing.crossedSegmentId());
+            // End-cap snapping wins over a projection slightly inside the same
+            // arm. Splitting that arm would create a tiny, redundant junction.
+            return port.isEmpty() || !(crossed.startNodeId().equals(port.get().id())
+                    || crossed.endNodeId().equals(port.get().id()));
+        }).toList();
         if (crossings.isEmpty()) {
             PreparedRoadAddition addition = prepareStraightRoad(
                     geometry,

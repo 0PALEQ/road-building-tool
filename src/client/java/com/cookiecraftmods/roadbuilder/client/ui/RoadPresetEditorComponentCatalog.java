@@ -76,6 +76,11 @@ final class RoadPresetEditorComponentCatalog {
                             3,
                             marking
                     );
+            case RAILING -> RoadPresetEditorComponent.inheritedSurface(
+                    RoadPresetEditorComponent.Kind.RAILING, 1,
+                    draft.materialPalette().blockFor(
+                            com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.RAILING)
+            );
             case SIDEWALK -> RoadPresetEditorComponent.inheritedSurface(
                     RoadPresetEditorComponent.Kind.SIDEWALK,
                     1,
@@ -112,6 +117,7 @@ final class RoadPresetEditorComponentCatalog {
                         "double_marking",
                         "three_blocks_wide"
                 ),
+                entry(Kind.RAILING, "railing", "drag_to_add"),
                 entry(Kind.SIDEWALK, "sidewalk", "drag_to_add"),
                 entry(Kind.GRASS_MEDIAN, "grass_median", "median"),
                 entry(Kind.CONCRETE_MEDIAN, "concrete_median", "median")
@@ -135,6 +141,7 @@ final class RoadPresetEditorComponentCatalog {
         DASHED_MARKING,
         DOUBLE_CONTINUOUS_MARKING,
         SIDEWALK,
+        RAILING,
         GRASS_MEDIAN,
         CONCRETE_MEDIAN
     }

@@ -139,6 +139,17 @@ final class RoadPresetThumbnailRenderer {
                     bottom,
                     materialColor(component.block())
             );
+            case RAILING -> {
+                fillRows(graphics, road, top, bottom, materialColor(component.block()));
+                int middle = (top + bottom) / 2;
+                fillRows(graphics, road, middle, Math.min(middle + 1, bottom), 0xFFD0D0D0);
+                for (int x = road.left() + 3; x < road.right(); x += 7) {
+                    for (int y = top; y < bottom; y++) {
+                        int shifted = x + road.shiftAt(y);
+                        graphics.fill(shifted, y, shifted + 1, y + 1, 0xFF777777);
+                    }
+                }
+            }
             case SIDEWALK -> drawSidewalk(
                     graphics,
                     road,
