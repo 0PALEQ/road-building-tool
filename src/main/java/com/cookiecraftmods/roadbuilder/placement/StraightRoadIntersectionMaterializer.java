@@ -142,7 +142,7 @@ public final class StraightRoadIntersectionMaterializer {
                     BlockPlanFailureCode.INVALID_GEOMETRY
             );
         }
-        List<CornerFillet> fillets = cornerFillets(approaches);
+        List<CornerFillet> fillets = cornerFillets(approaches, maximumFootprintRadius);
 
         double maximumWidth = approaches.stream()
                 .mapToDouble(Approach::width)
@@ -534,7 +534,8 @@ public final class StraightRoadIntersectionMaterializer {
     }
 
     private static List<CornerFillet> cornerFillets(
-            List<Approach> approaches
+            List<Approach> approaches,
+            double maximumFootprintRadius
     ) {
         if (approaches.size() < 2) {
             return List.of();
@@ -552,7 +553,7 @@ public final class StraightRoadIntersectionMaterializer {
                             < MINIMUM_DISTINCT_AXIS_CROSS) {
                 continue;
             }
-            CornerFillet.create(first, second, angle)
+            CornerFillet.create(first, second, angle, maximumFootprintRadius)
                     .ifPresent(fillets::add);
         }
         return List.copyOf(fillets);
@@ -1008,7 +1009,8 @@ public final class StraightRoadIntersectionMaterializer {
         static Optional<CornerFillet> create(
                 Approach first,
                 Approach second,
-                double angle
+                double angle,
+                double maximumFootprintRadius
         ) {
             double sine = Math.sin(angle);
             double tangentFactor = 1.0 / Math.tan(angle / 2.0);
@@ -1034,22 +1036,6 @@ public final class StraightRoadIntersectionMaterializer {
                             )
                     )
             );
-            double maximumTangent = Math.min(
-                    MAXIMUM_FILLET_TANGENT,
-                    Math.min(
-                            first.availableLength(),
-                            second.availableLength()
-                    )
-            );
-            double radius = Math.min(
-                    desiredRadius,
-                    maximumTangent / tangentFactor
-            );
-            if (radius < 0.5) {
-                return Optional.empty();
-            }
-            double tangentLength = radius * tangentFactor;
-
             double firstRightX = -first.unitZ();
             double firstRightZ = first.unitX();
             double secondLeftX = second.unitZ();
@@ -1080,6 +1066,23 @@ public final class StraightRoadIntersectionMaterializer {
                     first.unitX(),
                     first.unitZ()
             ) / lineCross;
+            // The offset edge intersection can lie far beyond a short arm
+            // at an acute angle. Tangency must fit AFTER that intersection,
+            // not merely within a distance measured from the junction node.
+            double firstRemaining = Math.min(first.availableLength(), maximumFootprintRadius)
+                    - firstDistance;
+            double secondRemaining = Math.min(second.availableLength(), maximumFootprintRadius)
+                    - secondDistance;
+            double maximumTangent = Math.min(MAXIMUM_FILLET_TANGENT,
+                    Math.min(firstRemaining, secondRemaining));
+            double radius = Math.min(desiredRadius, maximumTangent / tangentFactor);
+            if (radius < 0.5) {
+                // No rounded corner fits. Keep the overlapping arm surfaces;
+                // do not create a detached patch on extended boundary lines.
+                return Optional.empty();
+            }
+            double tangentLength = radius * tangentFactor;
+
             double cornerX = firstLineX
                     + first.unitX() * firstDistance;
             double cornerZ = firstLineZ
@@ -1176,8 +1179,13 @@ public final class StraightRoadIntersectionMaterializer {
                     relativeX,
                     relativeZ
             ) / cross;
+            // Only the triangle between the corner and the two tangent
+            // attachments belongs to this fillet. The rest of their
+            // parallelogram produces a second lobe at acute angles.
             if (firstCoefficient < -FOOTPRINT_TOLERANCE
                     || secondCoefficient < -FOOTPRINT_TOLERANCE
+                    || firstCoefficient + secondCoefficient
+                    > tangentLength + FOOTPRINT_TOLERANCE
                     || firstCoefficient
                     > tangentLength + FOOTPRINT_TOLERANCE
                     || secondCoefficient
@@ -1406,6 +1414,8 @@ public final class StraightRoadIntersectionMaterializer {
             ) / cross;
             if (firstCoefficient > FOOTPRINT_TOLERANCE
                     || secondCoefficient > FOOTPRINT_TOLERANCE
+                    || firstCoefficient + secondCoefficient
+                    < -conflictTangentLength - FOOTPRINT_TOLERANCE
                     || firstCoefficient
                     < -conflictTangentLength - FOOTPRINT_TOLERANCE
                     || secondCoefficient

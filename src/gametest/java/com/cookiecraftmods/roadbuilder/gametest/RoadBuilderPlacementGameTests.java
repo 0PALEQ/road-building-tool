@@ -1385,28 +1385,17 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
         );
         for (int xDirection : List.of(-1, 1)) {
             for (int zDirection : List.of(-1, 1)) {
-                helper.assertTrue(
-                        level.getBlockState(intersectionSurface.offset(
-                                xDirection * 5,
-                                0,
-                                zDirection * 6
-                        )).is(Blocks.SMOOTH_STONE)
-                                && level.getBlockState(
-                                        intersectionSurface.offset(
-                                                xDirection * 6,
-                                                0,
-                                                zDirection * 5
-                                        )
-                                ).is(Blocks.SMOOTH_STONE)
-                                && level.getBlockState(
-                                        intersectionSurface.offset(
-                                                xDirection * 5,
-                                                0,
-                                                zDirection * 5
-                                        )
-                                ).is(Blocks.GRAY_CONCRETE),
-                        "junction curb returns should curve outside the original conflict square"
-                );
+                // Each arm is only five blocks long: the old curb-return
+                // assertions required geometry beyond both road end caps.
+                for (BlockPos offset : List.of(new BlockPos(5, 0, 6),
+                        new BlockPos(6, 0, 5), new BlockPos(5, 0, 5))) {
+                    BlockPos position = intersectionSurface.offset(
+                            xDirection * offset.getX(), 0, zDirection * offset.getZ());
+                    BlockState state = level.getBlockState(position);
+                    helper.assertTrue(!state.is(Blocks.SMOOTH_STONE)
+                                    && !state.is(Blocks.GRAY_CONCRETE),
+                            "short junction must not leak past road ends at " + position);
+                }
             }
         }
         helper.assertTrue(
