@@ -892,7 +892,11 @@ public final class RoadGraph {
                 segments.values(), connectors.values(), junctionDefinitions.values(), limits, () -> { });
         PreparedRoadNetworkMutation first = staged.prepareRoadNetwork(primary, presetId, preset, handedness);
         staged.applyNetworkMutation(first);
-        PreparedRoadNetworkMutation second = staged.prepareRoadNetwork(parallel, presetId, preset, handedness);
+        PreparedRoadNetworkMutation second = parallel instanceof RoundaboutGeometry ring
+                ? staged.prepareRoundaboutNetwork(ring, presetId, preset, handedness, true)
+                : staged.prepareRoadNetwork(
+                        com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometryReverser.reverse(parallel),
+                        presetId, preset, handedness);
         if (second.createsRoad()) {
             // The pair is one road operation; keep its disconnected segments under one road ID.
             List<RoadSegment> pairedSegments = second.placedSegments().stream().map(segment ->
@@ -939,6 +943,16 @@ public final class RoadGraph {
             RoadPreset preset,
             TrafficHandedness handedness
     ) {
+        return prepareRoundaboutNetwork(geometry, presetId, preset, handedness, false);
+    }
+
+    private PreparedRoadNetworkMutation prepareRoundaboutNetwork(
+            RoundaboutGeometry geometry,
+            ResourceLocation presetId,
+            RoadPreset preset,
+            TrafficHandedness handedness,
+            boolean reverseTraversal
+    ) {
         Objects.requireNonNull(geometry, "geometry");
         Objects.requireNonNull(presetId, "presetId");
         Objects.requireNonNull(preset, "preset");
@@ -957,7 +971,7 @@ public final class RoadGraph {
         // clockwise. A roundabout is one-way even when made from a two-way
         // road preset, so all selected lanes follow the ring traversal.
         var traversalSpans = geometry.spans(
-                handedness == TrafficHandedness.LHT
+                (handedness == TrafficHandedness.LHT) != reverseTraversal
         );
         RoadPresetSnapshot roundaboutSnapshot = roundaboutSnapshot(preset);
 

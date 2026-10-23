@@ -66,10 +66,20 @@ public final class RoadMaterializationPlanner {
             PlacementOwnershipLedger ledger,
             ConstructionLimits limits
     ) {
+        return plan(dimension, segments, world, ledger::isMaterializedRoadPosition, limits);
+    }
+
+    public BlockPlanResult plan(
+            ResourceKey<Level> dimension,
+            List<RoadSegment> segments,
+            PlacementBlockWorld world,
+            java.util.function.Predicate<BlockPos> existingRoadPosition,
+            ConstructionLimits limits
+    ) {
         Objects.requireNonNull(dimension, "dimension");
         segments = List.copyOf(Objects.requireNonNull(segments, "segments"));
         Objects.requireNonNull(world, "world");
-        Objects.requireNonNull(ledger, "ledger");
+        Objects.requireNonNull(existingRoadPosition, "existingRoadPosition");
         Objects.requireNonNull(limits, "limits");
         if (segments.isEmpty()) {
             throw new IllegalArgumentException("segments must not be empty");
@@ -109,12 +119,12 @@ public final class RoadMaterializationPlanner {
                 ))
                 .toList();
         mergedSurface = structurePlanner.prepareRailingSurface(
-                mergedSurface, structureSpans, world, ledger::isMaterializedRoadPosition);
+                mergedSurface, structureSpans, world, existingRoadPosition);
         BlockPlanResult structures = structurePlanner.addStructures(
                 mergedSurface,
                 world,
                 structureSpans,
-                ledger::isMaterializedRoadPosition,
+                existingRoadPosition,
                 limits.maximumAffectedBlocks()
         );
         if (!(structures instanceof BlockPlanResult.Success structured)) {
@@ -133,7 +143,7 @@ public final class RoadMaterializationPlanner {
                 mergedSurface,
                 segments,
                 world,
-                ledger::isMaterializedRoadPosition,
+                existingRoadPosition,
                 limits.maximumAffectedBlocks()
         );
         if (tunnels.plan().isEmpty()) {
@@ -144,7 +154,7 @@ public final class RoadMaterializationPlanner {
         BlockPlanResult clearance = clearancePlanner.addClearance(
                 mergedSurface,
                 world,
-                position -> ledger.isMaterializedRoadPosition(position)
+                position -> existingRoadPosition.test(position)
                         || tunnels.protectedRoofPositions().contains(position)
                         || structurePositions.contains(position),
                 limits.maximumAffectedBlocks()

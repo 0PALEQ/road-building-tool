@@ -88,7 +88,8 @@ class RoadGraphTest {
         graph.applyNetworkMutation(mutation);
         assertEquals(1, graph.snapshot().revision());
         assertEquals(2, graph.snapshot().segments().size());
-        assertTrue(graph.snapshot().segments().values().stream().anyMatch(segment -> segment.referenceGeometry().equals(parallel)));
+        var reversed = com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometryReverser.reverse(parallel);
+        assertTrue(graph.snapshot().segments().values().stream().anyMatch(segment -> segment.referenceGeometry().equals(reversed)));
     }
 
     @Test
@@ -736,6 +737,52 @@ class RoadGraphTest {
                 restored.segment(placed.id()).orElseThrow()
                         .referenceGeometry().start()
         );
+    }
+
+    @Test
+    void parallelOneWayLanesRunInOppositeDirectionsOnEitherSide() {
+        var curve = new CubicBezierGeometry(new RoadPoint(0, 64, 0),
+                new RoadPoint(25, 64, 0), new RoadPoint(35, 64, 10), new RoadPoint(60, 64, 10));
+        for (var source : List.of(EASTBOUND, curve)) {
+            for (double offset : new double[]{-16, 16}) {
+                for (var handedness : TrafficHandedness.values()) {
+                    var graph = new RoadGraph(Level.OVERWORLD);
+                    var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(source, offset);
+                    var mutation = graph.prepareParallelRoadNetwork(source, parallel,
+                            NARROW_PRESET_ID, NARROW_PRESET, handedness);
+                    graph.applyNetworkMutation(mutation);
+                    var second = mutation.placedSegments().stream()
+                            .filter(segment -> segment.referenceGeometry().start().equals(parallel.end()))
+                            .findFirst().orElseThrow();
+                    var lane = second.lanes().get(0).geometry();
+                    assertEquals(parallel.end(), lane.start());
+                    assertEquals(parallel.start(), lane.end());
+                    assertTrue(lane.sample(0).tangent().dot(parallel.sample(parallel.length()).tangent()) < -0.999);
+                }
+            }
+        }
+    }
+
+    @Test
+    void parallelRoundaboutsHaveOppositeCirculationWithoutChangingHandedness() {
+        var source = new com.cookiecraftmods.roadbuilder.geometry.RoundaboutGeometry(
+                new RoadPoint(0, 64, 0), new RoadPoint(30, 64, 0));
+        for (var handedness : TrafficHandedness.values()) {
+            var graph = new RoadGraph(Level.OVERWORLD);
+            var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(source, 16);
+            var mutation = graph.prepareParallelRoadNetwork(source, parallel,
+                    NARROW_PRESET_ID, NARROW_PRESET, handedness);
+            graph.applyNetworkMutation(mutation);
+            var first = mutation.placedSegments().stream()
+                    .filter(segment -> segment.referenceGeometry().start().equals(source.start()))
+                    .findFirst().orElseThrow();
+            var second = mutation.placedSegments().stream()
+                    .filter(segment -> segment.referenceGeometry().start().equals(parallel.start()))
+                    .findFirst().orElseThrow();
+            assertTrue(first.lanes().get(0).geometry().sample(0).tangent()
+                    .dot(second.lanes().get(0).geometry().sample(0).tangent()) < -0.999);
+            assertEquals(handedness, second.trafficHandedness());
+        }
     }
 
     @Test

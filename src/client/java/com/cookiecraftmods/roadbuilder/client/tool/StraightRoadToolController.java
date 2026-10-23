@@ -627,6 +627,10 @@ public final class StraightRoadToolController {
                         "status.roadbuilder.crosswalk_unsupported"
                 );
             }
+            if (hoveredRemovalSegment != null && hoveredRemovalSegment.presetSnapshot()
+                    .classification().roadClass() == com.cookiecraftmods.roadbuilder.preset.RoadClass.HIGHWAY) {
+                return Component.translatable("status.roadbuilder.crosswalk_highway");
+            }
             return hoveredRemovalSegment == null
                     ? Component.translatable(
                             "status.roadbuilder.crosswalk_hover"
@@ -1073,7 +1077,11 @@ public final class StraightRoadToolController {
         rawPreview = new RawRoadPreview(geometry, width);
         if (parallelEnabled) {
             try {
-                parallelPreview = new RawRoadPreview(ParallelRoadGeometry.create(geometry, parallelOffset), width);
+                var parallel = ParallelRoadGeometry.create(geometry, parallelOffset);
+                if (!(parallel instanceof RoundaboutGeometry)) {
+                    parallel = com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometryReverser.reverse(parallel);
+                }
+                parallelPreview = new RawRoadPreview(parallel, width);
             } catch (IllegalArgumentException invalid) {
                 parallelPreviewInvalid = true;
                 previewGeometry = null;
@@ -2282,6 +2290,8 @@ public final class StraightRoadToolController {
     private void requestCrosswalkToggle(Minecraft client) {
         if (client.level == null
                 || hoveredRemovalSegment == null
+                || hoveredRemovalSegment.presetSnapshot().classification().roadClass()
+                        == com.cookiecraftmods.roadbuilder.preset.RoadClass.HIGHWAY
                 || pendingPlacementRequestId != null
                 || placementJob.isActive()) {
             return;

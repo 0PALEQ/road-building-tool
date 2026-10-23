@@ -6,10 +6,10 @@ import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import net.minecraft.core.BlockPos;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.OptionalInt;
-import java.util.Set;
 
 public final class RoadPathPlanner {
     public static final double MAXIMUM_PATH_STEP = 0.25;
@@ -84,7 +84,7 @@ public final class RoadPathPlanner {
         }
 
         List<PlannedBlock> blocks = new ArrayList<>();
-        Set<BlockPos> occupiedPositions = new HashSet<>();
+        Map<BlockPos, CellCandidate> occupiedPositions = new HashMap<>();
         WorkBudget work = new WorkBudget(
                 maximumPlanningCandidates,
                 baseSampleWork
@@ -150,7 +150,7 @@ public final class RoadPathPlanner {
             int maximumAffectedBlocks,
             WorkBudget work,
             List<PlannedBlock> blocks,
-            Set<BlockPos> occupiedPositions
+            Map<BlockPos, CellCandidate> occupiedPositions
     ) {
         OptionalInt startX = floorToInt(start.x());
         OptionalInt startZ = floorToInt(start.z());
@@ -264,7 +264,7 @@ public final class RoadPathPlanner {
             int maximumAffectedBlocks,
             WorkBudget work,
             List<PlannedBlock> blocks,
-            Set<BlockPos> occupiedPositions
+            Map<BlockPos, CellCandidate> occupiedPositions
     ) {
         if (!work.consume()) {
             return false;
@@ -290,7 +290,7 @@ public final class RoadPathPlanner {
             return false;
         }
         double pathDistance = startDistance
-                + (endDistance - startDistance) * projectedParameter;
+                + (endDistance - startDistance) * elevationParameter;
         pathDistance = Math.max(
                 0.0,
                 Math.min(maximumPathDistance, pathDistance)
@@ -304,16 +304,29 @@ public final class RoadPathPlanner {
                 verticalLevel
         );
         BlockPos position = target.position();
-        if (!occupiedPositions.add(position)) {
+        // Adjacent swept columns overlap on the voxel grid. Assign the cell
+        // to the nearest column span, rather than the first column visited.
+        double dx = blockX + 0.5
+                - (start.x() + (end.x() - start.x()) * elevationParameter);
+        double dz = blockZ + 0.5
+                - (start.z() + (end.z() - start.z()) * elevationParameter);
+        double distanceSquared = dx * dx + dz * dz;
+        CellCandidate previous = occupiedPositions.get(position);
+        if (previous != null
+                && previous.distanceSquared() <= distanceSquared + 1.0e-12) {
             return true;
         }
-        if (blocks.size() >= maximumAffectedBlocks) {
-            return false;
+        PlannedBlock block = new PlannedBlock(position, target.state());
+        if (previous == null) {
+            if (blocks.size() >= maximumAffectedBlocks) {
+                return false;
+            }
+            occupiedPositions.put(position, new CellCandidate(blocks.size(), distanceSquared));
+            blocks.add(block);
+        } else {
+            occupiedPositions.put(position, new CellCandidate(previous.index(), distanceSquared));
+            blocks.set(previous.index(), block);
         }
-        blocks.add(new PlannedBlock(
-                position,
-                target.state()
-        ));
         return true;
     }
 
@@ -406,6 +419,8 @@ public final class RoadPathPlanner {
     ) {
         return new BlockPlanResult.Failure(code);
     }
+
+    private record CellCandidate(int index, double distanceSquared) {}
 
     private static final class WorkBudget {
         private final long maximum;

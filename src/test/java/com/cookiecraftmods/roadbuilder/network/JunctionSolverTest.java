@@ -362,6 +362,22 @@ class JunctionSolverTest {
         assertFalse(result.approaches().stream()
                 .filter(approach -> approach.segment().id().equals(stem.id()))
                 .findFirst().orElseThrow().crosswalk());
+        for (JunctionCrossingPolicy policy : JunctionCrossingPolicy.values()) {
+            var definition = new JunctionDefinition(NODE_ID, JunctionStrategy.AUTO,
+                    JunctionPriorityPolicy.RIGHT_OF_WAY, List.of(), policy,
+                    Map.of(ApproachKey.at(stem, NODE_ID),
+                            new JunctionApproachOverride(IntersectionControl.FREE, true)), 1);
+            var overridden = assertInstanceOf(JunctionSolveResult.Success.class,
+                    new JunctionSolver().solve(node, List.of(stem, east, west), definition));
+            assertFalse(overridden.approaches().stream()
+                    .filter(approach -> approach.segment().id().equals(stem.id()))
+                    .findFirst().orElseThrow().crosswalk(), "highway crosswalk under " + policy);
+            if (policy == JunctionCrossingPolicy.ALL_APPROACHES) {
+                assertTrue(overridden.approaches().stream()
+                        .filter(approach -> approach.segment().id().equals(west.id()))
+                        .findFirst().orElseThrow().crosswalk());
+            }
+        }
     }
 
     private static RoadSegment segment(

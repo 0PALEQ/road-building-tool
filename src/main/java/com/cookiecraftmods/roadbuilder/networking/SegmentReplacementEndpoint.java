@@ -11,6 +11,7 @@ import com.cookiecraftmods.roadbuilder.network.RoadNodeId;
 import com.cookiecraftmods.roadbuilder.network.RoadSegment;
 import com.cookiecraftmods.roadbuilder.network.RoadSegmentId;
 import com.cookiecraftmods.roadbuilder.placement.BlockPlacementPlan;
+import com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld;
 import com.cookiecraftmods.roadbuilder.placement.BlockPlacementPlans;
 import com.cookiecraftmods.roadbuilder.placement.BlockPlanCommitter;
 import com.cookiecraftmods.roadbuilder.placement.BlockPlanResult;
@@ -112,11 +113,21 @@ public final class SegmentReplacementEndpoint {
         );
         ServerLevelPlacementBlockWorld world =
                 new ServerLevelPlacementBlockWorld(player.serverLevel());
+        List<PlacementOperationId> replacedIds = new ArrayList<>();
+        replacedIds.add(oldSegment.id());
+        for (RoadNodeId nodeId : List.of(selected.startNodeId(), selected.endNodeId())) {
+            ledger.operation(RoadMaterializationOwner.node(nodeId))
+                    .map(PlacementOperation::id)
+                    .filter(id -> !replacedIds.contains(id))
+                    .ifPresent(replacedIds::add);
+        }
+        MaterializationRebuildWorld planningWorld = new MaterializationRebuildWorld(
+                world, ledger, replacedIds);
         BlockPlanResult roadResult = new RoadMaterializationPlanner().plan(
                 graph.dimension(),
                 List.of(replacement.replacement()),
-                world,
-                ledger,
+                planningWorld,
+                planningWorld::isMaterializedRoadPosition,
                 limits
         );
         if (!(roadResult instanceof BlockPlanResult.Success road)) {
@@ -129,21 +140,12 @@ public final class SegmentReplacementEndpoint {
                     replacement.original(),
                     replacement.replacement(),
                     graph.snapshot().junctionDefinitions(),
-                    world,
-                    ledger
+                    planningWorld
             );
         } catch (RuntimeException failure) {
             return rejected(packet, PlacementResultCode.MUTATION_FAILED);
         }
 
-        List<PlacementOperationId> replacedIds = new ArrayList<>();
-        replacedIds.add(oldSegment.id());
-        for (RoadNodeId nodeId : List.of(selected.startNodeId(), selected.endNodeId())) {
-            ledger.operation(RoadMaterializationOwner.node(nodeId))
-                    .map(PlacementOperation::id)
-                    .filter(id -> !replacedIds.contains(id))
-                    .ifPresent(replacedIds::add);
-        }
         List<BlockPlacementPlan> newPlans = new ArrayList<>();
         newPlans.add(road.plan());
         newPlans.addAll(junctions.values());
@@ -231,11 +233,24 @@ public final class SegmentReplacementEndpoint {
                 .prepareSegmentDirectionInversion(selected.id());
         ServerLevelPlacementBlockWorld world =
                 new ServerLevelPlacementBlockWorld(player.serverLevel());
+        List<PlacementOperationId> replacedIds = new ArrayList<>();
+        replacedIds.add(oldSegment.id());
+        for (RoadNodeId nodeId : List.of(
+                selected.startNodeId(),
+                selected.endNodeId()
+        )) {
+            ledger.operation(RoadMaterializationOwner.node(nodeId))
+                    .map(PlacementOperation::id)
+                    .filter(id -> !replacedIds.contains(id))
+                    .ifPresent(replacedIds::add);
+        }
+        MaterializationRebuildWorld planningWorld = new MaterializationRebuildWorld(
+                world, ledger, replacedIds);
         BlockPlanResult roadResult = new RoadMaterializationPlanner().plan(
                 graph.dimension(),
                 List.of(inversion.replacement()),
-                world,
-                ledger,
+                planningWorld,
+                planningWorld::isMaterializedRoadPosition,
                 limits
         );
         if (!(roadResult instanceof BlockPlanResult.Success road)) {
@@ -251,24 +266,12 @@ public final class SegmentReplacementEndpoint {
                     inversion.original(),
                     inversion.replacement(),
                     inversion.junctionDefinitions(),
-                    world,
-                    ledger
+                    planningWorld
             );
         } catch (RuntimeException failure) {
             return rejected(packet, PlacementResultCode.MUTATION_FAILED);
         }
 
-        List<PlacementOperationId> replacedIds = new ArrayList<>();
-        replacedIds.add(oldSegment.id());
-        for (RoadNodeId nodeId : List.of(
-                selected.startNodeId(),
-                selected.endNodeId()
-        )) {
-            ledger.operation(RoadMaterializationOwner.node(nodeId))
-                    .map(PlacementOperation::id)
-                    .filter(id -> !replacedIds.contains(id))
-                    .ifPresent(replacedIds::add);
-        }
         List<BlockPlacementPlan> newPlans = new ArrayList<>();
         newPlans.add(road.plan());
         newPlans.addAll(junctions.values());
@@ -330,8 +333,7 @@ public final class SegmentReplacementEndpoint {
             RoadSegment original,
             RoadSegment replacement,
             Map<RoadNodeId, JunctionDefinition> definitions,
-            ServerLevelPlacementBlockWorld world,
-            PlacementOwnershipLedger ledger
+            MaterializationRebuildWorld world
     ) {
         LinkedHashMap<RoadNodeId, BlockPlacementPlan> result = new LinkedHashMap<>();
         for (RoadNodeId nodeId : List.of(
@@ -344,13 +346,31 @@ public final class SegmentReplacementEndpoint {
                             || segment.endNodeId().equals(nodeId))
                     .toList();
             RoadNode node = graph.node(nodeId).orElseThrow();
+            JunctionDefinition definition = definitions.getOrDefault(
+                    nodeId, JunctionDefinition.automatic(nodeId));
+            if (incident.size() == 1) {
+                var override = definition.approachOverrides().get(
+                        com.cookiecraftmods.roadbuilder.network.ApproachKey.at(replacement, nodeId));
+                if (override != null && override.crosswalk()
+                        && replacement.presetSnapshot().classification().roadClass()
+                        != com.cookiecraftmods.roadbuilder.preset.RoadClass.HIGHWAY) {
+                    BlockPlanResult markings = new JunctionMarkingMaterializer()
+                            .planTerminalCrosswalk(graph.dimension(), node, replacement,
+                                    limits.maximumAffectedBlocks());
+                    if (!(markings instanceof BlockPlanResult.Success success)) {
+                        throw new IllegalStateException("replacement terminal crosswalk failed");
+                    }
+                    result.put(nodeId, success.plan());
+                }
+                continue;
+            }
             if (SmoothRoadTransitionMaterializer.supports(node, incident)) {
                 BlockPlanResult transition = new RoadTransitionPlanPreparer().plan(
                         graph.dimension(),
                         node,
                         incident,
                         world,
-                        ledger::isMaterializedRoadPosition,
+                        world::isMaterializedRoadPosition,
                         limits
                 );
                 if (!(transition instanceof BlockPlanResult.Success success)) {
@@ -358,16 +378,25 @@ public final class SegmentReplacementEndpoint {
                             "replacement transition could not be materialized"
                     );
                 }
-                result.put(nodeId, success.plan());
+                BlockPlacementPlan transitionPlan = success.plan();
+                if (definitions.containsKey(nodeId)) {
+                    BlockPlanResult markings = new JunctionMarkingMaterializer().plan(
+                            graph.dimension(), node, incident, definition,
+                            limits.maximumAffectedBlocks());
+                    if (markings instanceof BlockPlanResult.Success marked) {
+                        transitionPlan = BlockPlacementPlans.mergeLayered(graph.dimension(), List.of(
+                                new LayeredBlockPlan(transitionPlan, MaterialLayer.JUNCTION_SURFACE,
+                                        "node", nodeId.toString()),
+                                new LayeredBlockPlan(marked.plan(), MaterialLayer.JUNCTION_MARKING,
+                                        "node-marking", nodeId.toString())));
+                    }
+                }
+                result.put(nodeId, transitionPlan);
                 continue;
             }
-            if (!isJunction(nodeId, incident)) {
+            if (!isJunction(nodeId, incident) && !definitions.containsKey(nodeId)) {
                 continue;
             }
-            JunctionDefinition definition = definitions.getOrDefault(
-                    nodeId,
-                    JunctionDefinition.automatic(nodeId)
-            );
             JunctionSolveResult solved = new JunctionSolver().solve(
                     node, incident, definition
             );

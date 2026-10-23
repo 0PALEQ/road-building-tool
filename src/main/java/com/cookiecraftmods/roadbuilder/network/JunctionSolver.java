@@ -207,15 +207,15 @@ public final class JunctionSolver {
             Frame frame,
             JunctionApproachOverride override
     ) {
+        if (frame.segment.presetSnapshot().classification().roadClass() == RoadClass.HIGHWAY) {
+            return false;
+        }
         return switch (definition.crossingPolicy()) {
             case NONE -> false;
             case ALL_APPROACHES -> true;
             case MANUAL -> override != null && override.crosswalk();
             case AUTO -> override != null
                     ? override.crosswalk()
-                    : frame.segment.presetSnapshot().classification()
-                            .roadClass() == RoadClass.HIGHWAY
-                    ? false
                     : frame.segment.presetSnapshot()
                             .intersectionStyle().defaultCrosswalks();
         };

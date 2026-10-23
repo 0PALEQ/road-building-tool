@@ -94,6 +94,10 @@ public final class CrosswalkToggleEndpoint {
                 && !selected.endNodeId().equals(nodeId)) {
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
+        if (selected.presetSnapshot().classification().roadClass()
+                == com.cookiecraftmods.roadbuilder.preset.RoadClass.HIGHWAY) {
+            return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
+        }
         List<RoadSegment> incident = graph.snapshot().segments().values().stream()
                 .filter(segment -> segment.startNodeId().equals(nodeId)
                         || segment.endNodeId().equals(nodeId))

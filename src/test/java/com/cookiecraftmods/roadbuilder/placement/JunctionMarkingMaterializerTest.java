@@ -7,6 +7,7 @@ import com.cookiecraftmods.roadbuilder.network.JunctionSolveResult;
 import com.cookiecraftmods.roadbuilder.network.JunctionSolver;
 import com.cookiecraftmods.roadbuilder.network.RoadId;
 import com.cookiecraftmods.roadbuilder.network.RoadLaneId;
+import com.cookiecraftmods.roadbuilder.network.RoadLane;
 import com.cookiecraftmods.roadbuilder.network.RoadNode;
 import com.cookiecraftmods.roadbuilder.network.RoadNodeId;
 import com.cookiecraftmods.roadbuilder.network.RoadPresetSnapshot;
@@ -262,6 +263,81 @@ class JunctionMarkingMaterializerTest {
 
         assertTrue(markings.blocks().stream().anyMatch(block ->
                 block.targetState().is(Blocks.WHITE_CONCRETE)));
+    }
+
+    @Test
+    void highwayTerminalRejectsExplicitCrosswalks() {
+        RoadSegment highway = segment(610, id(RoadId::new, 61), 24.5, 0.5,
+                new RoadClassification(com.cookiecraftmods.roadbuilder.preset.RoadClass.HIGHWAY, 15, 120));
+        assertInstanceOf(BlockPlanResult.Failure.class,
+                new JunctionMarkingMaterializer().planTerminalCrosswalk(
+                        Level.OVERWORLD, NODE, highway, 10_000));
+    }
+
+    @Test
+    void curvedCrosswalksFollowTheRoadElevationAtBothEnds() {
+        var geometry = new com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry(
+                new RoadPoint(0.5, 64, 0.5),
+                new RoadPoint(0.5, 70, 8.5),
+                new RoadPoint(18.5, 76, 8.5));
+        RoadSegment template = segment(620, id(RoadId::new, 62), 24.5, 0.5,
+                RoadClassification.DEFAULT);
+        RoadSegment curve = RoadSegment.path(template.id(), template.roadId(),
+                template.startNodeId(), template.endNodeId(), geometry,
+                template.presetId(), template.presetRevision(), template.presetSnapshot(),
+                TrafficHandedness.RHT, template.lanes().stream().map(RoadLane::id).toList());
+        for (boolean atStart : List.of(true, false)) {
+            RoadNode node = new RoadNode(atStart ? curve.startNodeId() : curve.endNodeId(),
+                    atStart ? geometry.start() : geometry.end());
+            BlockPlacementPlan plan = assertInstanceOf(BlockPlanResult.Success.class,
+                    new JunctionMarkingMaterializer().planTerminalCrosswalk(
+                            Level.OVERWORLD, node, curve, 10_000)).plan();
+            assertTrue(plan.blocks().stream().noneMatch(block ->
+                    block.position().getY() == (int) node.position().y()),
+                    "A sloping curve must not be painted on the endpoint's horizontal plane");
+            for (int distance = 2; distance <= 4; distance++) {
+                RoadPoint center = geometry.sample(atStart ? distance
+                        : geometry.length() - distance).position();
+                BlockPos expected = BlockPos.containing(center.x(),
+                        Math.floor(center.y() + 0.5), center.z());
+                assertTrue(plan.blocks().stream().anyMatch(block -> block.position().equals(expected)),
+                        "Crosswalk must cover the actual curved centerline at " + expected);
+            }
+        }
+    }
+
+    @Test
+    void junctionCrosswalkUsesTheCurveBeyondTheTrimInsteadOfTheEndpointTangent() {
+        var geometry = new com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry(
+                new RoadPoint(0.5, 64, 0.5),
+                new RoadPoint(0.5, 70, 8.5),
+                new RoadPoint(18.5, 76, 8.5));
+        RoadSegment template = segment(630, id(RoadId::new, 63), 24.5, 0.5,
+                RoadClassification.DEFAULT);
+        RoadSegment curve = RoadSegment.path(template.id(), template.roadId(),
+                template.startNodeId(), template.endNodeId(), geometry,
+                template.presetId(), template.presetRevision(), template.presetSnapshot(),
+                TrafficHandedness.RHT, template.lanes().stream().map(RoadLane::id).toList());
+        List<RoadSegment> arms = List.of(curve,
+                segment(640, id(RoadId::new, 64), -30.5, 0.5, RoadClassification.DEFAULT),
+                segment(650, id(RoadId::new, 65), 0.5, -30.5, RoadClassification.DEFAULT));
+        JunctionDefinition definition = JunctionDefinition.automatic(NODE_ID);
+        var solved = assertInstanceOf(JunctionSolveResult.Success.class,
+                new JunctionSolver().solve(NODE, arms, definition));
+        SolvedJunctionApproach approach = solved.approaches().stream()
+                .filter(value -> value.segment().id().equals(curve.id())).findFirst().orElseThrow();
+        assertTrue(approach.crosswalk());
+        int start = (int) Math.ceil(approach.trimDistance()) + 1;
+        BlockPlacementPlan plan = assertInstanceOf(BlockPlanResult.Success.class,
+                new JunctionMarkingMaterializer().plan(
+                        Level.OVERWORLD, NODE, arms, definition, 10_000)).plan();
+        for (int distance = start; distance <= start + 4; distance++) {
+            RoadPoint center = geometry.sample(distance).position();
+            BlockPos expected = BlockPos.containing(center.x(),
+                    Math.floor(center.y() + 0.5), center.z());
+            assertTrue(plan.blocks().stream().anyMatch(block -> block.position().equals(expected)),
+                    "Junction crossing must follow its curved arm at " + expected);
+        }
     }
 
     private static BlockPos position(

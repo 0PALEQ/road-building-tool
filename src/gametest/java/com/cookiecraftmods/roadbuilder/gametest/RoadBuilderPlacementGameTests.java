@@ -73,6 +73,86 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
     private static final int UPDATE_FLAGS = Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS;
 
     @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 400)
+    public void replacingCurvedBridgeRepeatedlyKeepsTheCompleteGeometry(GameTestHelper helper) {
+        var level = helper.getLevel();
+        var origin = helper.absolutePos(new BlockPos(7000, 0, 7000));
+        for (int x = -12; x <= 40; x++) {
+            for (int z = -12; z <= 30; z++) {
+                level.setBlock(new BlockPos(origin.getX() + x, 60, origin.getZ() + z),
+                        Blocks.STONE.defaultBlockState(), UPDATE_FLAGS);
+            }
+        }
+        var geometry = new com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry(
+                new RoadPoint(origin.getX() + 0.5, 67, origin.getZ() + 0.5),
+                new RoadPoint(origin.getX() + 12.5, 67, origin.getZ() + 20.5),
+                new RoadPoint(origin.getX() + 24.5, 67, origin.getZ() + 0.5));
+        var presetId = new ResourceLocation("roadbuilder", "replace_curve_test");
+        var preset = new com.cookiecraftmods.roadbuilder.preset.RoadPreset(
+                com.cookiecraftmods.roadbuilder.preset.RoadPreset.CURRENT_SCHEMA_VERSION, 1, 5,
+                new ResourceLocation("minecraft", "gray_concrete"),
+                List.of(new com.cookiecraftmods.roadbuilder.preset.LaneComponent(
+                        com.cookiecraftmods.roadbuilder.preset.LaneType.VEHICLE, 5, 0,
+                        com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.FORWARD)));
+        var graph = new RoadGraph(level.dimension());
+        var ledger = new PlacementOwnershipLedger(level.dimension());
+        var addition = graph.prepareStraightRoad(geometry, presetId, preset, TrafficHandedness.RHT);
+        graph.applyAddition(addition);
+        var world = new ServerLevelPlacementBlockWorld(level);
+        var plan = requireType(helper, new com.cookiecraftmods.roadbuilder.placement.RoadMaterializationPlanner()
+                .plan(level.dimension(), List.of(addition.segment()), world, ledger,
+                        ConstructionLimits.defaults()), BlockPlanResult.Success.class,
+                "initial curved bridge should plan").plan();
+        var committer = new BlockPlanCommitter();
+        requireType(helper, committer.commitOwned(
+                com.cookiecraftmods.roadbuilder.placement.RoadMaterializationOwner.segment(addition.segment().id()),
+                plan, world, ledger), PlacementCommitResult.Success.class, "initial bridge should commit");
+        var expected = new java.util.HashMap<BlockPos, BlockState>();
+        plan.positions().forEach(pos -> expected.put(pos, world.blockState(pos)));
+        helper.assertTrue(expected.keySet().stream().anyMatch(pos -> pos.getY() < 66),
+                "fixture must include bridge supports");
+        var endpoint = new com.cookiecraftmods.roadbuilder.networking.SegmentReplacementEndpoint(
+                id -> java.util.Optional.of(preset), ConstructionAuthorizer.creativeOnly(),
+                ConstructionLimits.defaults(), committer);
+        var player = testPlayer(level, true);
+        player.setPos(origin.getX() + 12, 69, origin.getZ() + 8);
+        var crosswalk = new com.cookiecraftmods.roadbuilder.networking.CrosswalkToggleEndpoint(
+                ConstructionAuthorizer.creativeOnly(), ConstructionLimits.defaults(), committer);
+        var toggled = crosswalk.handle(
+                com.cookiecraftmods.roadbuilder.networking.CrosswalkToggleIntentC2SPacket.current(
+                        UUID.randomUUID(), level.dimension().location(), addition.segment().id().value(),
+                        addition.segment().startNodeId().value(), graph.revision()), player, ledger, graph);
+        helper.assertTrue(toggled.resultCode() == PlacementResultCode.ACCEPTED,
+                "terminal crosswalk must be enabled before replacement");
+        var crosswalkOwner = com.cookiecraftmods.roadbuilder.placement.RoadMaterializationOwner.node(
+                addition.segment().startNodeId());
+        ledger.operation(crosswalkOwner).orElseThrow().positions()
+                .forEach(pos -> expected.put(pos, world.blockState(pos)));
+        var repairPosition = plan.blocks().stream().filter(block ->
+                block.position().getY() == 67 && block.targetState().is(Blocks.GRAY_CONCRETE))
+                .findFirst().orElseThrow().position();
+        for (int click = 1; click <= 3; click++) {
+            // Even an unchanged preset must actually rematerialize the surface.
+            world.setBlockState(repairPosition, Blocks.GOLD_BLOCK.defaultBlockState());
+            var response = endpoint.handle(
+                    com.cookiecraftmods.roadbuilder.networking.SegmentReplaceIntentC2SPacket.current(
+                            UUID.randomUUID(), level.dimension().location(), addition.segment().id().value(),
+                            graph.revision(), presetId, preset.revision()), player, ledger, graph);
+            helper.assertTrue(response.resultCode() == PlacementResultCode.ACCEPTED,
+                    "replace click " + click + " must succeed: " + response.resultCode());
+            helper.assertTrue(ledger.operation(crosswalkOwner).isPresent(),
+                    "replacement must rebuild the enabled endpoint crosswalk");
+            helper.assertTrue(graph.segment(addition.segment().id()).orElseThrow().referenceGeometry() == geometry,
+                    "replacement must retain the exact curve and elevation");
+            expected.forEach((pos, state) -> helper.assertTrue(world.blockState(pos).equals(state),
+                    "replacement must retain the bridge at " + pos + "; expected " + state
+                            + ", got " + world.blockState(pos)));
+            helper.assertTrue(RoadGraphMaterializationConsistency.validate(graph, ledger).isEmpty(),
+                    "replacement must keep graph and materialization ownership consistent");
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 400)
     public void dividedHighwayBranchesConnectToWiderOneWayRoadsAndRamp(GameTestHelper helper) {
         var level = helper.getLevel();
         var origin = helper.absolutePos(new BlockPos(4096, 0, 4096));
@@ -173,7 +253,8 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
         var planner = new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanningService(
                 RoadPresetResources.repository(), new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanner());
         List<BlockPlacementPlan> surfaces = new ArrayList<>();
-        for (var geometry : List.of(source, parallel)) {
+        for (var geometry : List.of(source,
+                com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometryReverser.reverse(parallel))) {
             var result = planner.resolve(new com.cookiecraftmods.roadbuilder.placement.RoadPathIntent(
                     level.dimension(), geometry, presetId, testPresetRevision(presetId)), limits);
             var planned = requireType(helper, result,
@@ -198,6 +279,10 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
         helper.assertTrue(result.resultCode() == PlacementResultCode.ACCEPTED, "parallel pair should be accepted: " + result.resultCode());
         helper.assertTrue(graph.revision() == 1 && graph.snapshot().segments().size() == 2,
                 "one placement should publish both road segments at one revision");
+        helper.assertTrue(graph.snapshot().segments().values().stream().anyMatch(segment ->
+                        segment.referenceGeometry().start().equals(parallel.end())
+                                && segment.referenceGeometry().end().equals(parallel.start())),
+                "the server must reverse the second parallel road");
         for (BlockPlacementPlan surface : surfaces) {
             for (PlannedBlock block : surface.blocks()) {
                 helper.assertTrue(level.getBlockState(block.position()).equals(block.targetState()),

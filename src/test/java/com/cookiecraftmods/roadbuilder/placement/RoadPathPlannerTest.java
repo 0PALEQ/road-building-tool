@@ -143,6 +143,50 @@ class RoadPathPlannerTest {
         }
     }
 
+    @Test
+    void curvedSurfaceMaterialsFollowTheNearestColumnInsteadOfIterationOrder() {
+        QuadraticBezierGeometry geometry = new QuadraticBezierGeometry(
+                new RoadPoint(0.5, 64, 0.5),
+                new RoadPoint(20.5, 64, 30.5),
+                new RoadPoint(40.5, 64, 0.5));
+        ResolvedRoadSurface surface = new ResolvedRoadSurface(List.of(
+                Blocks.RED_CONCRETE.defaultBlockState(),
+                Blocks.WHITE_CONCRETE.defaultBlockState(),
+                Blocks.BLUE_CONCRETE.defaultBlockState()));
+        BlockPlacementPlan plan = assertInstanceOf(BlockPlanResult.Success.class,
+                PLANNER.plan(new RoadPathPlanRequest(Level.OVERWORLD, geometry, surface),
+                        10_000, 100_000)).plan();
+        int checked = 0;
+        for (PlannedBlock block : plan.blocks()) {
+            double best = Double.POSITIVE_INFINITY;
+            double next = Double.POSITIVE_INFINITY;
+            int nearest = -1;
+            for (int column = 0; column < 3; column++) {
+                double columnDistance = Double.POSITIVE_INFINITY;
+                for (double distance = 0; distance <= geometry.length(); distance += 0.05) {
+                    RoadPoint point = geometry.sample(distance, 1 - column).position();
+                    double dx = block.position().getX() + 0.5 - point.x();
+                    double dz = block.position().getZ() + 0.5 - point.z();
+                    columnDistance = Math.min(columnDistance, dx * dx + dz * dz);
+                }
+                if (columnDistance < best) {
+                    next = best;
+                    best = columnDistance;
+                    nearest = column;
+                } else {
+                    next = Math.min(next, columnDistance);
+                }
+            }
+            // Ignore voxel-boundary ties and boundary-only supercover cells.
+            if (best < 0.20 && next - best > 0.15) {
+                assertEquals(surface.targetState(nearest), block.targetState(),
+                        "Wrong surface band at " + block.position());
+                checked++;
+            }
+        }
+        assertTrue(checked > 50);
+    }
+
     private static BlockPlacementPlan success(
             com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometry geometry
     ) {
