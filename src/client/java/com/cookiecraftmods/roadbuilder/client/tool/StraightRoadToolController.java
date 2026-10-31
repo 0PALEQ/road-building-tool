@@ -780,15 +780,32 @@ public final class StraightRoadToolController {
             activateCrosswalkTool();
             return;
         }
-        if (layout.elevationDisplay().contains(guiX, guiY)) {
+        if (layout.roundaboutButton().contains(guiX, guiY)) {
+            activateRoadTool(RoadBuilderTool.ROUNDABOUT);
+            return;
+        }
+        if (selectedGroup == RoadBuilderToolGroup.ROADS
+                && (layout.parallelLowerButton().contains(guiX, guiY)
+                || layout.parallelRaiseButton().contains(guiX, guiY))) {
+            if (pendingPlacementRequestId == null) {
+                int direction = layout.parallelRaiseButton().contains(guiX, guiY) ? 1 : -1;
+                parallelOffset = Integer.signum(parallelOffset) * Math.max(1, Math.min(256, Math.abs(parallelOffset) + direction));
+                rebuildPreview(client);
+            }
+            return;
+        }
+        if (selectedGroup == RoadBuilderToolGroup.ROADS
+                && layout.elevationDisplay().contains(guiX, guiY)) {
             resetElevation(client);
             return;
         }
-        if (layout.elevationLowerButton().contains(guiX, guiY)) {
+        if (selectedGroup == RoadBuilderToolGroup.ROADS
+                && layout.elevationLowerButton().contains(guiX, guiY)) {
             adjustElevation(client, -1);
             return;
         }
-        if (layout.elevationRaiseButton().contains(guiX, guiY)) {
+        if (selectedGroup == RoadBuilderToolGroup.ROADS
+                && layout.elevationRaiseButton().contains(guiX, guiY)) {
             adjustElevation(client, 1);
             return;
         }
@@ -798,10 +815,6 @@ public final class StraightRoadToolController {
                 selectGroup(client, group);
                 return;
             }
-        }
-        if (layout.cancelButton().contains(guiX, guiY)) {
-            cancelCurrentStep(client);
-            return;
         }
         if (selectedGroup == RoadBuilderToolGroup.ROADS) {
             if (layout.parallelToggleButton().contains(guiX, guiY)) {

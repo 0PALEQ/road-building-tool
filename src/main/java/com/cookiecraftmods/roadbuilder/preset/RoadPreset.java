@@ -167,6 +167,16 @@ public record RoadPreset(
                 surfaceBands);
         display = Objects.requireNonNull(display, "display");
         classification = Objects.requireNonNull(classification, "classification");
+        // Category-only presets must carry highway semantics into the network
+        // snapshot, where display metadata is no longer available.
+        if (RoadCategory.fromDisplayCategory(display.category()) == RoadCategory.HIGHWAY
+                && classification.roadClass() != RoadClass.HIGHWAY) {
+            classification = new RoadClassification(
+                    RoadClass.HIGHWAY,
+                    classification.priorityRank(),
+                    classification.nominalSpeed()
+            );
+        }
         intersectionStyle = Objects.requireNonNull(
                 intersectionStyle,
                 "intersectionStyle"

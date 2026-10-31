@@ -478,7 +478,7 @@ public final class StraightRoadPlacementEndpoint {
                 plans.put(node.id(), success.plan());
                 continue;
             }
-            if (incident.size() < 3) {
+            if (!StraightRoadIntersectionMaterializer.requiresJunctionSurface(node, incident)) {
                 continue;
             }
             var definition = graph.junctionDefinition(node.id())

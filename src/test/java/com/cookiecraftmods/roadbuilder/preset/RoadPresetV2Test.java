@@ -10,6 +10,35 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadPresetV2Test {
     @Test
+    void highwayCategoriesCarryTheirClassIntoNetworkSnapshots() {
+        for (String category : java.util.List.of("highway", "highways")) {
+            RoadPreset preset = RoadPreset.CODEC.parse(JsonOps.INSTANCE,
+                    JsonParser.parseString("""
+                            {
+                              "schema_version": 4,
+                              "revision": 1,
+                              "surface_width": 3,
+                              "surface_block": "minecraft:stone",
+                              "display": {"category": "%s"},
+                              "lanes": [{
+                                "type": "vehicle", "width": 2,
+                                "offset": 0, "direction": "forward"
+                              }]
+                            }
+                            """.formatted(category))).result().orElseThrow();
+            var snapshot = com.cookiecraftmods.roadbuilder.network.RoadPresetSnapshot.from(preset);
+            assertEquals(RoadClass.HIGHWAY, snapshot.classification().roadClass());
+            assertEquals(RoadClassification.DEFAULT.priorityRank(),
+                    snapshot.classification().priorityRank());
+            assertEquals(RoadClassification.DEFAULT.nominalSpeed(),
+                    snapshot.classification().nominalSpeed());
+            assertEquals(preset, RoadPreset.CODEC.parse(JsonOps.INSTANCE,
+                    RoadPreset.CODEC.encodeStart(JsonOps.INSTANCE, preset)
+                            .result().orElseThrow()).result().orElseThrow());
+        }
+    }
+
+    @Test
     void migratesV1DefaultsAndRoundTripsV2JunctionFields() {
         RoadPreset migrated = RoadPreset.CODEC.parse(
                 JsonOps.INSTANCE,

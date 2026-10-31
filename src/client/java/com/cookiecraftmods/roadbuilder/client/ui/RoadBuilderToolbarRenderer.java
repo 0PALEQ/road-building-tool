@@ -51,12 +51,6 @@ public final class RoadBuilderToolbarRenderer {
             new ResourceLocation("roadbuilder", "textures/gui/snap_angle.png");
     private static final ResourceLocation PARALLEL_ICON =
             new ResourceLocation("roadbuilder", "textures/gui/parallel.png");
-    private static final ResourceLocation UNDO_ICON =
-            new ResourceLocation("roadbuilder", "textures/gui/undo.png");
-    private static final ResourceLocation REDO_ICON =
-            new ResourceLocation("roadbuilder", "textures/gui/redo.png");
-    private static final ResourceLocation CANCEL_ICON =
-            new ResourceLocation("roadbuilder", "textures/gui/cancel.png");
     private static final ResourceLocation PAGE_BULLET_ICON =
             new ResourceLocation("roadbuilder", "textures/gui/page_bullet.png");
     private static final ResourceLocation PAGE_BULLET_ACTIVE_ICON =
@@ -242,8 +236,6 @@ public final class RoadBuilderToolbarRenderer {
                 RoadBuilderTool.COMPLEX_CURVE);
         roadToolButton(graphics, layout, tool, cursor, highContrast,
                 RoadBuilderTool.FREEHAND_DRAW);
-        roadToolButton(graphics, layout, tool, cursor, highContrast,
-                RoadBuilderTool.ROUNDABOUT);
         roadToolButton(graphics, layout, tool, cursor, highContrast,
                 RoadBuilderTool.REPLACE);
     }
@@ -678,14 +670,6 @@ public final class RoadBuilderToolbarRenderer {
             CursorPosition cursor,
             boolean highContrast
     ) {
-        renderModeUtilities(
-                graphics,
-                client,
-                tool,
-                layout,
-                cursor,
-                highContrast
-        );
         panel(graphics, layout.panel(), BACKGROUND_PANEL, BORDER_PANEL_HIGHLIGHT);
         for (RoadBuilderToolGroup group : RoadBuilderToolGroup.values()) {
             UiRectangle button = layout.groupButton(group);
@@ -724,30 +708,8 @@ public final class RoadBuilderToolbarRenderer {
             }
         }
 
-        utilityButton(
-                graphics,
-                layout.undoButton(),
-                cursor,
-                false,
-                UNDO_ICON,
-                highContrast
-        );
-        utilityButton(
-                graphics,
-                layout.redoButton(),
-                cursor,
-                false,
-                REDO_ICON,
-                highContrast
-        );
-        utilityButton(
-                graphics,
-                layout.cancelButton(),
-                cursor,
-                tool.cancelButtonEnabled(),
-                CANCEL_ICON,
-                highContrast
-        );
+        renderModeUtilities(graphics, client, tool, layout, cursor, highContrast);
+        roadToolButton(graphics, layout, tool, cursor, highContrast, RoadBuilderTool.ROUNDABOUT);
     }
 
     private static void renderModeUtilities(
@@ -761,18 +723,6 @@ public final class RoadBuilderToolbarRenderer {
         if (layout.lanePathVisibilityButton().width() == 0) {
             return;
         }
-        UiRectangle panelBounds = new UiRectangle(
-                layout.toolModePanel().x(),
-                layout.panel().y(),
-                layout.toolModePanel().width(),
-                layout.panel().height()
-        );
-        panel(
-                graphics,
-                panelBounds,
-                BACKGROUND_PANEL,
-                BORDER_PANEL_HIGHLIGHT
-        );
         UiRectangle lanes = layout.lanePathVisibilityButton();
         boolean lanesHovered = lanes.contains(cursor.x(), cursor.y());
         fillButton(
@@ -819,6 +769,11 @@ public final class RoadBuilderToolbarRenderer {
                         : TEXT_SECONDARY
         );
 
+        if (tool.selectedGroup() != RoadBuilderToolGroup.ROADS) return;
+        contextButton(graphics, client, layout.parallelDisplay(),
+                Component.literal(Integer.toString(Math.abs(tool.parallelOffset()))), true, true, cursor, highContrast);
+        elevationArrowButton(graphics, layout.parallelLowerButton(), cursor, false, highContrast);
+        elevationArrowButton(graphics, layout.parallelRaiseButton(), cursor, true, highContrast);
         UiRectangle elevation = layout.elevationDisplay();
         fillButton(
                 graphics,
@@ -884,26 +839,6 @@ public final class RoadBuilderToolbarRenderer {
                 centerX - radius, baseY, 0, TEXT_PRIMARY);
         thickLine(graphics, centerX, tipY,
                 centerX + radius, baseY, 0, TEXT_PRIMARY);
-    }
-
-    private static void utilityButton(
-            GuiGraphics graphics,
-            UiRectangle button,
-            CursorPosition cursor,
-            boolean enabled,
-            ResourceLocation icon,
-            boolean highContrast
-    ) {
-        int background = enabled && button.contains(cursor.x(), cursor.y())
-                ? CONTROL_HOVERED
-                : enabled ? CONTROL_BACKGROUND : CONTROL_DISABLED;
-        fillButton(
-                graphics,
-                button,
-                background,
-                enabled && highContrast ? BORDER_HIGH_CONTRAST : BORDER_PANEL_HIGHLIGHT
-        );
-        drawTextureIcon(graphics, button, icon, 0xFFFFFF);
     }
 
     private static void contextButton(
@@ -1385,8 +1320,7 @@ public final class RoadBuilderToolbarRenderer {
                 && layout.roadToolButton(RoadBuilderTool.FREEHAND_DRAW)
                 .contains(cursor.x(), cursor.y())) {
             tooltip = Component.translatable("tooltip.roadbuilder.freehand_draw");
-        } else if (tool.selectedGroup() == RoadBuilderToolGroup.ROADS
-                && layout.roadToolButton(RoadBuilderTool.ROUNDABOUT)
+        } else if (layout.roadToolButton(RoadBuilderTool.ROUNDABOUT)
                 .contains(cursor.x(), cursor.y())) {
             tooltip = Component.translatable(
                     "tooltip.roadbuilder.roundabout"
@@ -1401,6 +1335,11 @@ public final class RoadBuilderToolbarRenderer {
                 && layout.parallelToggleButton().contains(cursor.x(), cursor.y())) {
             tooltip = Component.translatable("tooltip.roadbuilder.parallel", Math.abs(tool.parallelOffset()),
                     Component.translatable(tool.parallelOffset() > 0 ? "toolbar.roadbuilder.left" : "toolbar.roadbuilder.right"));
+        } else if (tool.selectedGroup() == RoadBuilderToolGroup.ROADS
+                && (layout.parallelDisplay().contains(cursor.x(), cursor.y())
+                || layout.parallelLowerButton().contains(cursor.x(), cursor.y())
+                || layout.parallelRaiseButton().contains(cursor.x(), cursor.y()))) {
+            tooltip = Component.translatable("tooltip.roadbuilder.parallel_spacing");
         } else if (layout.primaryActionButton().contains(cursor.x(), cursor.y())) {
             tooltip = switch (tool.selectedGroup()) {
                 case ROADS -> null;
@@ -1411,12 +1350,6 @@ public final class RoadBuilderToolbarRenderer {
                         "tooltip.roadbuilder.lane_connector"
                 );
             };
-        } else if (layout.undoButton().contains(cursor.x(), cursor.y())) {
-            tooltip = Component.translatable("tooltip.roadbuilder.undo_planned");
-        } else if (layout.redoButton().contains(cursor.x(), cursor.y())) {
-            tooltip = Component.translatable("tooltip.roadbuilder.redo_planned");
-        } else if (layout.cancelButton().contains(cursor.x(), cursor.y())) {
-            tooltip = Component.translatable("tooltip.roadbuilder.cancel");
         }
         if (tooltip != null) {
             graphics.renderTooltip(

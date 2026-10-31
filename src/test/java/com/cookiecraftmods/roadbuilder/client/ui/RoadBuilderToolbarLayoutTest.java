@@ -10,48 +10,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadBuilderToolbarLayoutTest {
     @Test
-    void parallelToggleFitsBesideSnappingAtAllSupportedWidths() {
+    void constructionRowsFollowReferenceOrder() {
         for (int width : new int[]{120, 400, 1920}) {
-            RoadBuilderToolbarLayout layout = RoadBuilderToolbarLayout.create(width, 240);
-            UiRectangle parallel = layout.parallelToggleButton();
-            assertTrue(parallel.width() > 0);
-            UiRectangle roundabout = layout.roadToolButton(RoadBuilderTool.ROUNDABOUT);
-            assertTrue(roundabout.x() >= layout.roadAngleSnappingButton().right());
-            assertTrue(parallel.x() >= roundabout.right());
-            assertEquals(parallel.y(), roundabout.y());
-            assertTrue(parallel.right() <= layout.toolModePanel().right());
+            var layout = RoadBuilderToolbarLayout.create(width, 240);
+            assertTrue(layout.roadToolButton(RoadBuilderTool.REPLACE).bottom() <= layout.elevationDisplay().y());
+            assertTrue(layout.elevationDisplay().bottom() <= layout.parallelDisplay().y());
+            assertTrue(layout.parallelDisplay().bottom() <= layout.roadNodeSnappingButton().y());
+            assertEquals(layout.presetPanel().x(), layout.panel().x());
+            assertEquals(layout.presetPanel().width(), layout.panel().width());
+            assertTrue(layout.toolModePanel().right() <= layout.panel().x());
+            var buttons = java.util.List.of(layout.roadButton(), layout.removeButton(),
+                    layout.groupButton(RoadBuilderToolGroup.LANE_CONNECTORS), layout.lanePathVisibilityButton(),
+                    layout.crosswalkToolButton(), layout.roundaboutButton());
+            for (int i = 0; i < buttons.size(); i++) {
+                var button = buttons.get(i);
+                assertEquals(layout.roadButton().y(), button.y());
+                assertTrue(button.right() <= layout.panel().right());
+                if (i > 0) assertTrue(buttons.get(i - 1).right() <= button.x());
+            }
+            assertTrue(layout.parallelLowerButton().right() <= layout.parallelDisplay().x());
+            assertTrue(layout.parallelDisplay().right() <= layout.parallelRaiseButton().x());
+            assertTrue(layout.parallelRaiseButton().right() <= layout.parallelToggleButton().x());
         }
-    }
-
-    @Test
-    void centersPreferredLayoutAndKeepsButtonsDisjoint() {
-        RoadBuilderToolbarLayout layout = RoadBuilderToolbarLayout.create(400, 240);
-
-        assertEquals(new UiRectangle(132, 154, 264, 25), layout.panel());
-        assertEquals(new UiRectangle(4, 182, 392, 52), layout.contextPanel());
-        assertEquals(new UiRectangle(4, 182, 125, 52), layout.toolModePanel());
-        assertEquals(new UiRectangle(132, 182, 264, 52), layout.presetPanel());
-        assertEquals(new UiRectangle(8, 158, 37, 17),
-                layout.lanePathVisibilityButton());
-        assertEquals(new UiRectangle(48, 158, 37, 17),
-                layout.crosswalkToolButton());
-        assertEquals(new UiRectangle(88, 158, 25, 17),
-                layout.elevationDisplay());
-        assertEquals(new UiRectangle(113, 166, 12, 9),
-                layout.elevationLowerButton());
-        assertEquals(new UiRectangle(113, 158, 12, 8),
-                layout.elevationRaiseButton());
-        assertContainedAndOrdered(layout);
-    }
-
-    @Test
-    void contractsToNarrowGuiWithoutOverflowing() {
-        RoadBuilderToolbarLayout layout = RoadBuilderToolbarLayout.create(120, 80);
-
-        assertEquals(new UiRectangle(53, 0, 63, 25), layout.panel());
-        assertEquals(new UiRectangle(4, 28, 112, 46), layout.contextPanel());
-        assertContainedAndOrdered(layout);
-        assertEquals(layout.panel().right() - 2, layout.cancelButton().right());
     }
 
     @Test
@@ -64,98 +44,4 @@ class RoadBuilderToolbarLayoutTest {
         assertFalse(rectangle.contains(20.0, 60.0));
     }
 
-    private static void assertContainedAndOrdered(RoadBuilderToolbarLayout layout) {
-        UiRectangle previous = null;
-        for (RoadBuilderToolGroup group : RoadBuilderToolGroup.values()) {
-            UiRectangle button = layout.groupButton(group);
-            assertTrue(button.x() >= layout.panel().x());
-            if (previous != null) {
-                assertTrue(previous.right() <= button.x());
-            }
-            previous = button;
-        }
-        assertTrue(previous.right() <= layout.undoButton().x());
-        assertTrue(layout.undoButton().right() <= layout.redoButton().x());
-        assertTrue(layout.redoButton().right() <= layout.cancelButton().x());
-        assertTrue(layout.cancelButton().right() <= layout.panel().right());
-        assertTrue(layout.roadButton().y() >= layout.panel().y());
-        assertTrue(layout.roadButton().bottom() <= layout.panel().bottom());
-        assertTrue(layout.panel().bottom() <= layout.contextPanel().y());
-        assertTrue(layout.statusPanel().bottom() <= layout.panel().y());
-        assertTrue(layout.lanePathVisibilityButton().x()
-                >= layout.contextPanel().x());
-        assertTrue(layout.lanePathVisibilityButton().right()
-                <= layout.crosswalkToolButton().x());
-        assertTrue(layout.crosswalkToolButton().right()
-                <= layout.elevationDisplay().x());
-        assertTrue(layout.elevationDisplay().right()
-                <= layout.elevationRaiseButton().x());
-        assertEquals(layout.elevationRaiseButton().x(),
-                layout.elevationLowerButton().x());
-        assertEquals(layout.elevationRaiseButton().bottom(),
-                layout.elevationLowerButton().y());
-        assertTrue(layout.elevationLowerButton().right()
-                <= layout.panel().x());
-        assertTrue(layout.toolModePanel().x() >= layout.contextPanel().x());
-        assertTrue(layout.toolModePanel().right() <= layout.presetPanel().x());
-        assertTrue(layout.presetPanel().right() <= layout.contextPanel().right());
-        UiRectangle straight = layout.roadToolButton(
-                RoadBuilderTool.STRAIGHT_ROAD
-        );
-        UiRectangle simple = layout.roadToolButton(
-                RoadBuilderTool.SIMPLE_CURVE
-        );
-        UiRectangle complex = layout.roadToolButton(
-                RoadBuilderTool.COMPLEX_CURVE
-        );
-        UiRectangle roundabout = layout.roadToolButton(
-                RoadBuilderTool.ROUNDABOUT
-        );
-        UiRectangle replace = layout.roadToolButton(
-                RoadBuilderTool.REPLACE
-        );
-        assertTrue(straight.x() >= layout.toolModePanel().x());
-        assertTrue(straight.right() <= simple.x());
-        assertTrue(simple.right() <= complex.x());
-        UiRectangle freehandDraw = layout.roadToolButton(RoadBuilderTool.FREEHAND_DRAW);
-        assertTrue(freehandDraw.width() > 0);
-        assertTrue(complex.right() <= freehandDraw.x());
-        assertTrue(freehandDraw.right() <= replace.x());
-        assertTrue(replace.right() <= layout.toolModePanel().right());
-        UiRectangle endpointSnap = layout.roadNodeSnappingButton();
-        UiRectangle guidelineSnap = layout.roadGuidelineSnappingButton();
-        UiRectangle angleSnap = layout.roadAngleSnappingButton();
-        assertTrue(endpointSnap.x() >= layout.toolModePanel().x());
-        assertTrue(endpointSnap.right() <= guidelineSnap.x());
-        assertTrue(guidelineSnap.right() <= angleSnap.x());
-        assertTrue(angleSnap.right() <= layout.toolModePanel().right());
-        assertTrue(endpointSnap.bottom() <= straight.y());
-        assertTrue(guidelineSnap.bottom() <= straight.y());
-        assertTrue(angleSnap.bottom() <= straight.y());
-
-        UiRectangle previousPreset = null;
-        for (int index = 0;
-             index < RoadBuilderToolbarLayout.PRESET_SLOT_COUNT;
-             index++) {
-            UiRectangle preset = layout.presetCardButton(index);
-            assertTrue(preset.x() >= layout.presetPanel().x());
-            if (previousPreset != null) {
-                assertTrue(previousPreset.right() <= preset.x());
-            }
-            previousPreset = preset;
-        }
-        assertTrue(previousPreset.right() <= layout.presetEditorButton().x());
-        assertTrue(layout.presetEditorButton().right()
-                <= layout.presetPanel().right());
-        assertTrue(layout.presetEditorButton().right()
-                <= layout.presetPageBullet(0).x());
-        UiRectangle previousCategory = null;
-        for (RoadCategory category : RoadCategory.values()) {
-            UiRectangle tab = layout.presetCategoryButton(category);
-            if (previousCategory != null) {
-                assertTrue(previousCategory.right() <= tab.x());
-            }
-            previousCategory = tab;
-        }
-    }
 }

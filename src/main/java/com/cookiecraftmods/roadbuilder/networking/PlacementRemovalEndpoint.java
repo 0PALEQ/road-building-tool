@@ -913,6 +913,8 @@ public final class PlacementRemovalEndpoint {
         if (remaining.size() >= 3) {
             return true;
         }
+        if (!com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts
+                .attachments(nodeId, remaining).isEmpty()) return true;
         if (remaining.size() != 2) {
             return false;
         }

@@ -401,6 +401,8 @@ public final class LaneConnectorEditEndpoint {
         if (incident.size() >= 3) {
             return true;
         }
+        if (!com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts
+                .attachments(nodeId, incident).isEmpty()) return true;
         if (incident.size() != 2) {
             return false;
         }

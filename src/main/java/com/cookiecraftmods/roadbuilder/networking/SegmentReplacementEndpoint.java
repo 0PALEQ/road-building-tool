@@ -446,6 +446,8 @@ public final class SegmentReplacementEndpoint {
 
     private static boolean isJunction(RoadNodeId nodeId, List<RoadSegment> incident) {
         if (incident.size() >= 3) return true;
+        if (!com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts
+                .attachments(nodeId, incident).isEmpty()) return true;
         if (incident.size() != 2) return false;
         var first = outwardTangent(incident.get(0), nodeId);
         var second = outwardTangent(incident.get(1), nodeId);

@@ -38,6 +38,13 @@ import java.util.Optional;
 import java.util.Set;
 
 public final class StraightRoadIntersectionMaterializer {
+    public static boolean requiresJunctionSurface(RoadNode node, List<RoadSegment> incident) {
+        return incident.size() >= 3 || (incident.size() == 2
+                && incident.stream().anyMatch(segment ->
+                        !com.cookiecraftmods.roadbuilder.network.RoadNodePortResolver
+                                .isCenteredBoundary(node, segment)));
+    }
+
     private static final double PARALLEL_TOLERANCE = 1.0e-6;
     private static final double MINIMUM_DISTINCT_AXIS_CROSS =
             Math.sin(Math.toRadians(10.0));
@@ -128,7 +135,13 @@ public final class StraightRoadIntersectionMaterializer {
                 node,
                 incidentSegments
         );
-        double maximumFootprintRadius = RoadForkJunction.isFork(
+        boolean auxiliary = !com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts
+                .attachments(node.id(), incidentSegments).isEmpty();
+        List<Approach> branchApproaches = auxiliary ? distinctApproaches(node,
+                com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts
+                        .attachments(node.id(), incidentSegments).stream()
+                        .map(attachment -> attachment.branch()).toList()) : List.of();
+        double maximumFootprintRadius = !auxiliary && RoadForkJunction.isFork(
                 node,
                 List.copyOf(incidentSegments)
         ) ? MAXIMUM_FORK_FOOTPRINT_RADIUS
@@ -142,8 +155,6 @@ public final class StraightRoadIntersectionMaterializer {
                     BlockPlanFailureCode.INVALID_GEOMETRY
             );
         }
-        boolean auxiliary = !com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts
-                .attachments(node.id(), incidentSegments).isEmpty();
         List<CornerFillet> fillets = auxiliary ? List.of()
                 : cornerFillets(approaches, maximumFootprintRadius);
 
@@ -155,7 +166,7 @@ public final class StraightRoadIntersectionMaterializer {
                 maximumFootprintRadius,
                 1.0 + BLOCK_CELL_RADIUS
         );
-        double boundReach = axes.size() < 2
+        double boundReach = auxiliary || axes.size() < 2
                 ? maximumFootprintRadius : approachReach;
         double bound = approaches.stream()
                 .mapToDouble(approach ->
@@ -219,9 +230,22 @@ public final class StraightRoadIntersectionMaterializer {
                         && marking.isPresent()) {
                     targetState = marking.orElseThrow();
                 } else if (auxiliary) {
-                    // Keep the trunk's surface, medians and markings. Only the ramp's lane
-                    // connection needs junction pavement; no full-width conflict box.
-                    continue;
+                    if (branchApproaches.stream().noneMatch(approach ->
+                            approach.contains(offsetX, offsetZ, maximumFootprintRadius))) {
+                        continue;
+                    }
+                    List<Approach> overlapping = approaches.stream()
+                            .filter(approach -> approach.contains(offsetX, offsetZ,
+                                    maximumFootprintRadius))
+                            .toList();
+                    if (overlapping.size() < 2
+                            || overlapping.stream().anyMatch(approach ->
+                                    approach.isMedian(offsetX, offsetZ))
+                            || overlapping.stream().allMatch(approach ->
+                                    approach.isSidewalk(offsetX, offsetZ))) {
+                        continue;
+                    }
+                    targetState = pavement;
                 } else {
                     targetState = intersectionState(
                             offsetX,
