@@ -15,7 +15,10 @@ class RoadBuilderToolbarLayoutTest {
             RoadBuilderToolbarLayout layout = RoadBuilderToolbarLayout.create(width, 240);
             UiRectangle parallel = layout.parallelToggleButton();
             assertTrue(parallel.width() > 0);
-            assertTrue(parallel.x() >= layout.roadAngleSnappingButton().right());
+            UiRectangle roundabout = layout.roadToolButton(RoadBuilderTool.ROUNDABOUT);
+            assertTrue(roundabout.x() >= layout.roadAngleSnappingButton().right());
+            assertTrue(parallel.x() >= roundabout.right());
+            assertEquals(parallel.y(), roundabout.y());
             assertTrue(parallel.right() <= layout.toolModePanel().right());
         }
     }
@@ -117,8 +120,7 @@ class RoadBuilderToolbarLayoutTest {
         UiRectangle freehandDraw = layout.roadToolButton(RoadBuilderTool.FREEHAND_DRAW);
         assertTrue(freehandDraw.width() > 0);
         assertTrue(complex.right() <= freehandDraw.x());
-        assertTrue(freehandDraw.right() <= roundabout.x());
-        assertTrue(roundabout.right() <= replace.x());
+        assertTrue(freehandDraw.right() <= replace.x());
         assertTrue(replace.right() <= layout.toolModePanel().right());
         UiRectangle endpointSnap = layout.roadNodeSnappingButton();
         UiRectangle guidelineSnap = layout.roadGuidelineSnappingButton();

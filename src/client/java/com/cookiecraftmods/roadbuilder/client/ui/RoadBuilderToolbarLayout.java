@@ -40,7 +40,7 @@ public record RoadBuilderToolbarLayout(
     private static final int MAXIMUM_TOOL_MODE_WIDTH = 132;
     private static final int MINIMUM_TOOL_MODE_WIDTH = 46;
     private static final int UTILITY_BUTTON_COUNT = 3;
-    private static final int ROAD_TOOL_BUTTON_COUNT = 6;
+    private static final int ROAD_TOOL_BUTTON_COUNT = 5;
 
     public RoadBuilderToolbarLayout {
         groupButtons = Collections.unmodifiableMap(
@@ -325,13 +325,15 @@ public record RoadBuilderToolbarLayout(
     }
 
     public UiRectangle roadToolButton(RoadBuilderTool tool) {
+        if (tool == RoadBuilderTool.ROUNDABOUT) {
+            return roadSnappingButton(3);
+        }
         int index = switch (tool) {
             case STRAIGHT_ROAD -> 0;
             case SIMPLE_CURVE -> 1;
             case COMPLEX_CURVE -> 2;
             case FREEHAND_DRAW -> 3;
-            case ROUNDABOUT -> 4;
-            case REPLACE -> 5;
+            case REPLACE -> 4;
             default -> throw new IllegalArgumentException(
                     "not a road placement tool: " + tool
             );
@@ -375,17 +377,17 @@ public record RoadBuilderToolbarLayout(
         return roadSnappingButton(2);
     }
 
-    public UiRectangle parallelToggleButton() { return roadSnappingButton(3); }
+    public UiRectangle parallelToggleButton() { return roadSnappingButton(4); }
 
     private UiRectangle roadSnappingButton(int index) {
         int padding = toolModePanel.width() < 70 ? 3 : PADDING;
         int gap = toolModePanel.width() < 70 ? 1 : GAP;
         int availableWidth = Math.max(
-                4,
-                toolModePanel.width() - padding * 2 - gap * 3
+                5,
+                toolModePanel.width() - padding * 2 - gap * 4
         );
-        int baseWidth = availableWidth / 4;
-        int remainder = availableWidth - baseWidth * 4;
+        int baseWidth = availableWidth / 5;
+        int remainder = availableWidth - baseWidth * 5;
         int availableHeight = Math.max(
                 2,
                 toolModePanel.height() - padding * 2 - gap
