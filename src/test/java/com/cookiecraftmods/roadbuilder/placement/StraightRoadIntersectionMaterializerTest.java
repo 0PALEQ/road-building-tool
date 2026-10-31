@@ -72,6 +72,55 @@ class StraightRoadIntersectionMaterializerTest {
     }
 
     @Test
+    void leavesUncrossedGrassAtAnApproachForTheSegmentLayer() {
+        var gray = new ResourceLocation("minecraft", "gray_concrete");
+        var grass = new ResourceLocation("minecraft", "grass_block");
+        RoadNodeId centerId = new RoadNodeId(UUID.randomUUID());
+        RoadPoint point = new RoadPoint(0.5, 64, 0.5);
+        RoadNode center = new RoadNode(centerId, point);
+        var lane = new LaneComponent(LaneType.VEHICLE, 3, 0, LaneTravelDirection.FORWARD);
+        var preset = new RoadPresetSnapshot(9, gray, List.of(lane), List.of(
+                new RoadSurfaceBand(RoadSurfaceRole.GRASS_MEDIAN, 3, grass),
+                new RoadSurfaceBand(RoadSurfaceRole.PAVEMENT, 3, gray),
+                new RoadSurfaceBand(RoadSurfaceRole.GRASS_MEDIAN, 3, grass)));
+        var arms = new java.util.ArrayList<RoadSegment>();
+        for (RoadPoint end : List.of(new RoadPoint(30.5, 64, 0.5), new RoadPoint(0.5, 64, 30.5))) {
+            arms.add(RoadSegment.path(new RoadSegmentId(UUID.randomUUID()), new RoadId(UUID.randomUUID()),
+                    centerId, new RoadNodeId(UUID.randomUUID()), new StraightGeometry(point, end),
+                    PRESET_ID, 1, preset, TrafficHandedness.RHT, List.of(new RoadLaneId(UUID.randomUUID()))));
+        }
+        var plan = assertInstanceOf(BlockPlanResult.Success.class,
+                new StraightRoadIntersectionMaterializer().plan(Level.OVERWORLD, center, arms,
+                        gray, new ResourceLocation("minecraft", "smooth_stone"), 5000, 100000)).plan();
+        BlockPos verge = new BlockPos(1, 64, -3);
+        org.junit.jupiter.api.Assertions.assertFalse(plan.positions().contains(verge));
+        var segmentPlan = assertInstanceOf(BlockPlanResult.Success.class,
+                new StraightRoadSegmentMaterializer().plan(Level.OVERWORLD, arms.get(0),
+                        new ConstructionLimits(512, 131072))).plan();
+        assertTrue(segmentPlan.blocks().stream().anyMatch(block -> block.position().equals(verge)
+                && block.targetState().is(Blocks.GRASS_BLOCK)));
+    }
+
+    @Test
+    void angledHalfHeightJunctionUsesTheSameBottomSlabsAsItsApproaches() {
+        RoadNodeId centerId = new RoadNodeId(UUID.randomUUID());
+        RoadPoint point = new RoadPoint(0.5, 64.5, 0.5);
+        RoadNode center = new RoadNode(centerId, point);
+        List<RoadSegment> arms = List.of(
+                segment(point, new RoadPoint(20.5, 64.5, 10.5), centerId, new RoadNodeId(UUID.randomUUID())),
+                segment(point, new RoadPoint(-20.5, 64.5, -10.5), centerId, new RoadNodeId(UUID.randomUUID())),
+                segment(point, new RoadPoint(-10.5, 64.5, 20.5), centerId, new RoadNodeId(UUID.randomUUID())));
+        BlockPlacementPlan plan = assertInstanceOf(BlockPlanResult.Success.class,
+                new StraightRoadIntersectionMaterializer().plan(Level.OVERWORLD, center, arms,
+                        new ResourceLocation("minecraft", "smooth_stone_slab"),
+                        new ResourceLocation("minecraft", "stone_brick_slab"), 5000, 100000)).plan();
+        assertTrue(plan.positions().contains(new BlockPos(0, 65, 0)));
+        assertTrue(plan.blocks().stream().allMatch(block -> block.position().getY() == 65
+                && block.targetState().getValue(net.minecraft.world.level.block.SlabBlock.TYPE)
+                == net.minecraft.world.level.block.state.properties.SlabType.BOTTOM));
+    }
+
+    @Test
     void pavesShallowHighwayExitsAndTheirLaneConnections() {
         for (double angle : new double[]{2.0, 5.0, 9.0}) {
             RoadNodeId centerId = new RoadNodeId(UUID.randomUUID());

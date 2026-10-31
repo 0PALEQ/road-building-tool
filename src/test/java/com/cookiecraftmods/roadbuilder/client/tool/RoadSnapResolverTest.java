@@ -30,6 +30,84 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadSnapResolverTest {
+    @org.junit.jupiter.api.BeforeAll
+    static void bootstrapMinecraft() {
+        com.cookiecraftmods.roadbuilder.test.MinecraftBootstrap.bootstrap();
+    }
+
+    @Test
+    void nodeAngleGuidesRespectTheConfiguredGuidelineRange() {
+        RoadNode anchor = node(50, new RoadPoint(0.5, 64, 0.5));
+        RoadSegment arm = sharedSegment(50, anchor.id(), anchor.position(),
+                new RoadPoint(10.5, 64, 0.5), 7);
+        var settings = new RoadSnapSettings(2.5, 1, RoadSnapPriority.ANGLE_TANGENT_GRID,
+                false, false, 20);
+        CursorTarget raw = target(40.5, 64, 0.6);
+        var result = RoadSnapResolver.resolve(raw, null, List.of(anchor), List.of(arm),
+                RoadSnappingMode.ANGLES, settings, false);
+        assertEquals(raw, result.target());
+        assertTrue(result.guides().isEmpty());
+    }
+
+    @Test
+    void repeatedSnappingDoesNotSampleDistantCurves() {
+        var samples = new java.util.concurrent.atomic.AtomicInteger();
+        ReferenceGeometry remoteGeometry = new ReferenceGeometry() {
+            public RoadPoint start() { return new RoadPoint(10000, 64, 10000); }
+            public RoadPoint end() { return new RoadPoint(11000, 64, 10000); }
+            public double length() { return 1000; }
+            public PathSample sample(double distance) {
+                samples.incrementAndGet();
+                return new PathSample(distance, new RoadPoint(10000 + distance, 64, 10000),
+                        new RoadVector(1, 0, 0));
+            }
+        };
+        RoadSegment remote = segment(42, remoteGeometry, 8,
+                List.of(lane(0, LaneTravelDirection.FORWARD)));
+        var snapshot = new com.cookiecraftmods.roadbuilder.network.RoadGraphSnapshot(
+                net.minecraft.world.level.Level.OVERWORLD, 0, java.util.Map.of(), java.util.Map.of(),
+                java.util.Map.of(remote.id(), remote), java.util.Map.of(), java.util.Map.of());
+        RoadSnapIndex index = new RoadSnapIndex(snapshot);
+        samples.set(0);
+        for (int i = 0; i < 100; i++) {
+            CursorTarget cursor = target(i, 64, 0);
+            RoadSnapResolver.resolve(cursor, null, index.nodesNear(cursor.roadPoint()),
+                    index.segmentsNear(cursor.roadPoint(), null, 150), RoadSnappingMode.ALL,
+                    RoadSnapSettings.DEFAULTS, false);
+        }
+        assertEquals(0, samples.get());
+    }
+
+    @Test
+    void spatialLookupFindsTheMiddleOfACurveWithRemoteEndpoints() {
+        var geometry = new QuadraticBezierGeometry(new RoadPoint(-500, 64, 500),
+                new RoadPoint(0, 64, -500), new RoadPoint(500, 64, 500));
+        RoadSegment curved = segment(43, geometry, 8, List.of(lane(0, LaneTravelDirection.FORWARD)));
+        var snapshot = new com.cookiecraftmods.roadbuilder.network.RoadGraphSnapshot(
+                net.minecraft.world.level.Level.OVERWORLD, 0, java.util.Map.of(), java.util.Map.of(),
+                java.util.Map.of(curved.id(), curved), java.util.Map.of(), java.util.Map.of());
+        var point = geometry.sample(geometry.length() / 2).position();
+        assertEquals(List.of(curved), new RoadSnapIndex(snapshot).segmentsNear(point, null, 2.5));
+    }
+
+    @Test
+    void spatialLookupExcludesDistantRoadsAndKeepsStartGuides() {
+        RoadSegment local = segment(1, new RoadPoint(-200, 64, 0),
+                new RoadPoint(200, 64, 0), 8, List.of(lane(0, LaneTravelDirection.FORWARD)));
+        RoadSegment remote = segment(2, new RoadPoint(10000, 64, 0),
+                new RoadPoint(10200, 64, 0), 8, List.of(lane(0, LaneTravelDirection.FORWARD)));
+        var snapshot = new com.cookiecraftmods.roadbuilder.network.RoadGraphSnapshot(
+                net.minecraft.world.level.Level.OVERWORLD, 0, java.util.Map.of(),
+                java.util.Map.of(), java.util.Map.of(local.id(), local, remote.id(), remote),
+                java.util.Map.of(), java.util.Map.of());
+        RoadSnapIndex index = new RoadSnapIndex(snapshot);
+        assertEquals(List.of(local), index.segmentsNear(new RoadPoint(0, 64, 0), null, 150));
+        assertTrue(index.segmentsNear(new RoadPoint(0, 64, 0),
+                new RoadPoint(10000, 64, 0), 150).contains(remote));
+        assertTrue(index.segmentsNear(new RoadPoint(-10000, 64, 0), null, 150).isEmpty());
+        assertTrue(new RoadSnapIndex(null).segmentsNear(new RoadPoint(0, 64, 0), null, 150).isEmpty());
+    }
+
     @Test
     void guidelinesReachBothSidesAndBothEndsOfRotatedRoads() {
         RoadPoint anchor = new RoadPoint(10, 64, 10);
@@ -738,7 +816,7 @@ class RoadSnapResolverTest {
     }
 
     @Test
-    void aMultiArmJunctionKeepsACompactSelectableHitTarget() {
+    void aMultiArmJunctionKeepsPreciseNodeTargetsSeparate() {
         RoadNodeId junctionId = new RoadNodeId(new UUID(9, 1));
         RoadPoint center = new RoadPoint(0.5, 64.0, 0.5);
         RoadNode junction = new RoadNode(junctionId, center);
@@ -783,6 +861,15 @@ class RoadSnapResolverTest {
                 incident
         ) > RoadSnapSettings.DEFAULTS.range());
         assertEquals(raw, snapped.target());
+        RoadNode nearby = new RoadNode(new RoadNodeId(new UUID(9, 2)), raw.roadPoint());
+        RoadSnapResult precise = RoadSnapResolver.resolve(raw, null,
+                List.of(junction, nearby), incident, RoadSnappingMode.NODES,
+                snappingWithoutOptionalGuides(), false);
+        assertEquals(raw, precise.target());
+        RoadSnapResult elevated = RoadSnapResolver.resolve(target(0.5, 80, -9.2), null,
+                List.of(junction), incident, RoadSnappingMode.NODES,
+                snappingWithoutOptionalGuides(), false);
+        assertEquals(80, elevated.target().roadPoint().y());
     }
 
     @Test

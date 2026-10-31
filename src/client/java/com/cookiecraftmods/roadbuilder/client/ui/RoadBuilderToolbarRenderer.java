@@ -35,6 +35,8 @@ public final class RoadBuilderToolbarRenderer {
             new ResourceLocation("roadbuilder", "textures/gui/simple_curve.png");
     private static final ResourceLocation COMPLEX_CURVE_ICON =
             new ResourceLocation("roadbuilder", "textures/gui/complex_curve.png");
+    private static final ResourceLocation FREEHAND_ICON =
+            new ResourceLocation("roadbuilder", "textures/gui/freehand.png");
     private static final ResourceLocation ROUNDABOUT_ICON =
             new ResourceLocation("roadbuilder", "textures/gui/roundabout.png");
     private static final ResourceLocation LANE_PATHS_ICON =
@@ -238,6 +240,8 @@ public final class RoadBuilderToolbarRenderer {
                 RoadBuilderTool.SIMPLE_CURVE);
         roadToolButton(graphics, layout, tool, cursor, highContrast,
                 RoadBuilderTool.COMPLEX_CURVE);
+        roadToolButton(graphics, layout, tool, cursor, highContrast,
+                RoadBuilderTool.FREEHAND_DRAW);
         roadToolButton(graphics, layout, tool, cursor, highContrast,
                 RoadBuilderTool.ROUNDABOUT);
         roadToolButton(graphics, layout, tool, cursor, highContrast,
@@ -486,8 +490,8 @@ public final class RoadBuilderToolbarRenderer {
             drawTextureIcon(graphics, button, ROAD_REPLACE_ICON, color);
             return;
         }
-        if (roadTool == RoadBuilderTool.FREEHAND) {
-            drawFreehandIcon(graphics, button, color);
+        if (roadTool == RoadBuilderTool.FREEHAND || roadTool == RoadBuilderTool.FREEHAND_DRAW) {
+            drawTextureIcon(graphics, button, FREEHAND_ICON, color);
             return;
         }
         if (roadTool == RoadBuilderTool.ROUNDABOUT) {
@@ -503,39 +507,6 @@ public final class RoadBuilderToolbarRenderer {
             );
         };
         drawTextureIcon(graphics, button, texture, color);
-    }
-
-    private static void drawFreehandIcon(
-            GuiGraphics graphics,
-            UiRectangle button,
-            int color
-    ) {
-        int inset = Math.max(3, Math.min(button.width(), button.height()) / 5);
-        int left = button.x() + inset;
-        int right = button.right() - inset - 1;
-        int top = button.y() + inset;
-        int bottom = button.bottom() - inset - 1;
-        int firstX = left + Math.max(1, (right - left) / 3);
-        int secondX = left + Math.max(2, (right - left) * 2 / 3);
-        thickLine(graphics, left, bottom, firstX, top, 0, color);
-        thickLine(
-                graphics,
-                firstX,
-                top,
-                secondX,
-                bottom - Math.max(1, (bottom - top) / 3),
-                0,
-                color
-        );
-        thickLine(
-                graphics,
-                secondX,
-                bottom - Math.max(1, (bottom - top) / 3),
-                right,
-                top,
-                0,
-                color
-        );
     }
 
     private static void drawRoadModePath(
@@ -1410,6 +1381,10 @@ public final class RoadBuilderToolbarRenderer {
             tooltip = Component.translatable(
                     "tooltip.roadbuilder.complex_curve"
             );
+        } else if (tool.selectedGroup() == RoadBuilderToolGroup.ROADS
+                && layout.roadToolButton(RoadBuilderTool.FREEHAND_DRAW)
+                .contains(cursor.x(), cursor.y())) {
+            tooltip = Component.translatable("tooltip.roadbuilder.freehand_draw");
         } else if (tool.selectedGroup() == RoadBuilderToolGroup.ROADS
                 && layout.roadToolButton(RoadBuilderTool.ROUNDABOUT)
                 .contains(cursor.x(), cursor.y())) {

@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Set;
 
 public final class RoadSegment {
+    public static final double MINIMUM_BUILD_LENGTH = 2.0;
     private final RoadSegmentId id;
     private final RoadId roadId;
     private final RoadNodeId startNodeId;

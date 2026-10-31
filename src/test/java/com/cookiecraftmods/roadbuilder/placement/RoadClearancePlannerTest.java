@@ -94,6 +94,52 @@ class RoadClearancePlannerTest {
                 block.position().equals(crossedRoad)));
     }
 
+    @Test
+    void clearsEdgeTrunksTallRemnantsAndConnectedCanopyWithoutExcavatingTheMargin() {
+        BlockPos road = new BlockPos(0, 64, 0);
+        var surface = BlockPlacementPlan.create(Level.OVERWORLD,
+                List.of(new PlannedBlock(road, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        MapWorld world = new MapWorld();
+        BlockPos trunk = road.offset(3, 0, 0);
+        for (int y = 0; y <= 19; y++) world.states.put(trunk.above(y), Blocks.ACACIA_LOG.defaultBlockState());
+        for (int x = 3; x <= 8; x++) world.states.put(road.offset(x, 20, 0), Blocks.ACACIA_LEAVES.defaultBlockState());
+        world.states.put(trunk.above(20), Blocks.ACACIA_LEAVES.defaultBlockState());
+        BlockPos terrain = road.offset(-2, 1, 0);
+        BlockPos building = road.offset(2, 1, 2);
+        BlockPos water = road.offset(1, 1, 2);
+        BlockPos neighboringTree = road.offset(8, 1, 2);
+        world.states.put(terrain, Blocks.STONE.defaultBlockState());
+        world.states.put(building, Blocks.BRICKS.defaultBlockState());
+        world.states.put(water, Blocks.WATER.defaultBlockState());
+        world.states.put(neighboringTree, Blocks.OAK_LOG.defaultBlockState());
+        var result = assertInstanceOf(BlockPlanResult.Success.class,
+                new RoadClearancePlanner().addClearance(surface, world, 1000)).plan();
+        var removed = result.blocks().stream().filter(block -> block.targetState().isAir())
+                .map(PlannedBlock::position).collect(java.util.stream.Collectors.toSet());
+        assertTrue(removed.contains(trunk));
+        assertTrue(removed.contains(trunk.above(18)));
+        assertTrue(removed.contains(road.offset(8, 20, 0)));
+        assertTrue(!removed.contains(terrain));
+        assertTrue(!removed.contains(building));
+        assertTrue(!removed.contains(water));
+        assertTrue(!removed.contains(neighboringTree));
+    }
+
+    @Test
+    void vegetationMarginRespectsPreservedBlocksAndThePlanBudget() {
+        BlockPos road = new BlockPos(0, 64, 0);
+        var surface = BlockPlacementPlan.create(Level.OVERWORLD,
+                List.of(new PlannedBlock(road, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        MapWorld world = new MapWorld();
+        BlockPos protectedTree = road.offset(3, 1, 0);
+        world.states.put(protectedTree, Blocks.OAK_LOG.defaultBlockState());
+        var protectedPlan = assertInstanceOf(BlockPlanResult.Success.class,
+                new RoadClearancePlanner().addClearance(surface, world, protectedTree::equals, 100)).plan();
+        assertTrue(protectedPlan.blocks().stream().noneMatch(block -> block.position().equals(protectedTree)));
+        assertEquals(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED, assertInstanceOf(BlockPlanResult.Failure.class,
+                new RoadClearancePlanner().addClearance(surface, world, 1)).code());
+    }
+
     private static final class MapWorld implements PlacementBlockWorld {
         private final Map<BlockPos, BlockState> states = new HashMap<>();
 

@@ -114,7 +114,10 @@ class RoadBuilderToolbarLayoutTest {
         assertTrue(straight.x() >= layout.toolModePanel().x());
         assertTrue(straight.right() <= simple.x());
         assertTrue(simple.right() <= complex.x());
-        assertTrue(complex.right() <= roundabout.x());
+        UiRectangle freehandDraw = layout.roadToolButton(RoadBuilderTool.FREEHAND_DRAW);
+        assertTrue(freehandDraw.width() > 0);
+        assertTrue(complex.right() <= freehandDraw.x());
+        assertTrue(freehandDraw.right() <= roundabout.x());
         assertTrue(roundabout.right() <= replace.x());
         assertTrue(replace.right() <= layout.toolModePanel().right());
         UiRectangle endpointSnap = layout.roadNodeSnappingButton();

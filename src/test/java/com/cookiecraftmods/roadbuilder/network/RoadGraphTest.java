@@ -78,6 +78,54 @@ class RoadGraphTest {
     }
 
     @Test
+    void tunnelPortalsSplitRoadAndKeepLaneConnectivity() {
+        RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+        var world = new com.cookiecraftmods.roadbuilder.placement.PlacementBlockWorld() {
+            public net.minecraft.resources.ResourceKey<Level> dimension() { return Level.OVERWORLD; }
+            public net.minecraft.world.level.block.state.BlockState blockState(net.minecraft.core.BlockPos pos) {
+                return (pos.getX() >= 30 && pos.getX() < 70 && pos.getY() == 71
+                        ? net.minecraft.world.level.block.Blocks.STONE : net.minecraft.world.level.block.Blocks.AIR).defaultBlockState();
+            }
+            public boolean hasBlockEntity(net.minecraft.core.BlockPos pos) { return false; }
+            public boolean setBlockState(net.minecraft.core.BlockPos pos, net.minecraft.world.level.block.state.BlockState state) { return true; }
+        };
+        var mutation = graph.withTunnelPortals(graph.prepareRoadNetwork(
+                new StraightGeometry(new RoadPoint(0.5,64,0.5),new RoadPoint(100.5,64,0.5)),
+                PRESET_ID, PRESET, TrafficHandedness.RHT), world);
+        assertEquals(3, mutation.placedSegments().size());
+        assertEquals(4, mutation.addedNodes().size());
+        assertTrue(mutation.addedConnectors().size() >= 4);
+        assertDoesNotThrow(() -> graph.applyNetworkMutation(mutation));
+    }
+
+    @Test
+    void crossingPreservesLaneTravelDirectionsForBothDrawingDirectionsAndTrafficSides() {
+        for (TrafficHandedness handedness : TrafficHandedness.values()) {
+            for (boolean reverse : new boolean[]{false, true}) {
+                RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+                var left = new RoadPoint(-30.5, 64, 0.5);
+                var right = new RoadPoint(30.5, 64, 0.5);
+                var geometry = new StraightGeometry(reverse ? right : left, reverse ? left : right);
+                var original = graph.prepareStraightRoad(geometry, PRESET_ID, PRESET, handedness);
+                graph.applyAddition(original);
+                var crossing = graph.prepareStraightRoadNetwork(new StraightGeometry(
+                        new RoadPoint(0.5, 64, -30.5), new RoadPoint(0.5, 64, 30.5)),
+                        PRESET_ID, PRESET, handedness);
+                assertEquals(1, crossing.segmentSplits().size());
+                for (var replacement : crossing.segmentSplits().get(0).replacements()) {
+                    assertEquals(original.segment().presetSnapshot(), replacement.presetSnapshot());
+                    for (int i = 0; i < replacement.lanes().size(); i++) {
+                        var before = original.segment().lanes().get(i).geometry();
+                        var after = replacement.lanes().get(i).geometry();
+                        assertTrue(before.sample(before.length() / 2).tangent()
+                                .dot(after.sample(after.length() / 2).tangent()) > 0.999);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void parallelPairPreparesWithoutMutatingAndCommitsAtOneRevision() {
         RoadGraph graph = new RoadGraph(Level.OVERWORLD);
         var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(EASTBOUND, 16);

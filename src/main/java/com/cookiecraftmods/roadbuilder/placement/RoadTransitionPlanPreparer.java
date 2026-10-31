@@ -43,7 +43,7 @@ public final class RoadTransitionPlanPreparer {
                 ))
                 .toList();
         RoadStructurePlanner structurePlanner = new RoadStructurePlanner();
-        surfacePlan = structurePlanner.prepareRailingSurface(
+        surfacePlan = structurePlanner.prepareStructureSurface(
                 surfacePlan, structureSpans, world, protectedPosition);
         BlockPlanResult structures = structurePlanner.addStructures(
                 surfacePlan,

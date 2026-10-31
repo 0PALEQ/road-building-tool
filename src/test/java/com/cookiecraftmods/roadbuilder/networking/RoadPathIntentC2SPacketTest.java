@@ -26,6 +26,25 @@ class RoadPathIntentC2SPacketTest {
             new ResourceLocation("roadbuilder", "two_way");
 
     @Test
+    void laneAttachedCurveUsesOrdinaryCubicPacket() {
+        var geometry = new com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry(
+                new RoadPoint(0, 64, 3), new RoadPoint(10, 64, 3),
+                new RoadPoint(20, 65, 15), new RoadPoint(30, 65, 20));
+        var packet = RoadPathIntentC2SPacket.current(REQUEST_ID, DIMENSION, PRESET, 2, 19L,
+                RoadPathIntentC2SPacket.PathType.CUBIC, geometry.controlPoints());
+        FriendlyByteBuf buffer = PacketByteBufs.create();
+        try {
+            packet.write(buffer);
+            var decoded = RoadPathIntentC2SPacket.TYPE.read(buffer);
+            assertEquals(RoadPathIntentC2SPacket.PathType.CUBIC, decoded.pathType());
+            assertEquals(geometry, decoded.geometry());
+            assertEquals(0, buffer.readableBytes());
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @Test
     void parallelPreviewSurvivesThePlacementPacketUnchanged() {
         var source = new com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry(
                 new RoadPoint(0, 64, 0), new RoadPoint(30, 64, 0),

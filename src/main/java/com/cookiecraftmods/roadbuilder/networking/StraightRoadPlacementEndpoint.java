@@ -141,15 +141,26 @@ public final class StraightRoadPlacementEndpoint {
 
         ResolvedStraightRoadPlan planned = ((StraightRoadPlanningResult.Success) planningResult)
                 .roadPlan();
-        PreparedRoadNetworkMutation graphMutation = graph.prepareStraightRoadNetwork(
-                planned.geometry(),
+        PreparedRoadNetworkMutation graphMutation;
+        try {
+            graphMutation = graph.prepareRoadNetwork(
+                new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(
+                        planned.geometry(), planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values()),
                 planned.presetId(),
                 planned.preset(),
                 trafficHandedness
         );
+        } catch (IllegalArgumentException invalid) {
+            return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
+        }
         ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(
                 player.serverLevel()
         );
+        graphMutation = graph.withTunnelPortals(graphMutation, world, ledger::isMaterializedRoadPosition);
+        if (graphMutation.allUpsertedSegments().stream().anyMatch(segment ->
+                segment.referenceGeometry().length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)) {
+            return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
+        }
         BlockPlanResult clearedRoadResult = new RoadMaterializationPlanner().plan(
                 dimension,
                 graphMutation.placedSegments(),
@@ -556,7 +567,7 @@ public final class StraightRoadPlacementEndpoint {
                             segment.presetSnapshot().surfaceBands()
                     ))
                     .toList();
-            decoratedSurface = structurePlanner.prepareRailingSurface(
+            decoratedSurface = structurePlanner.prepareStructureSurface(
                     decoratedSurface, structureSpans, world,
                     position -> ledger.isMaterializedRoadPosition(position)
                             || proposedRoadPositions.contains(position));
@@ -686,6 +697,8 @@ public final class StraightRoadPlacementEndpoint {
         return switch (code) {
             case UNKNOWN_PRESET -> PlacementResultCode.UNKNOWN_PRESET;
             case PRESET_REVISION_MISMATCH -> PlacementResultCode.PRESET_REVISION_MISMATCH;
+            case TOO_SHARP_TURN -> PlacementResultCode.TOO_SHARP_TURN;
+            case SELF_INTERSECTION -> PlacementResultCode.SELF_INTERSECTION;
             case INVALID_GEOMETRY, COORDINATE_OUT_OF_RANGE ->
                     PlacementResultCode.INVALID_GEOMETRY;
             case BLOCK_LIMIT_EXCEEDED, RASTERIZATION_WORK_LIMIT_EXCEEDED,

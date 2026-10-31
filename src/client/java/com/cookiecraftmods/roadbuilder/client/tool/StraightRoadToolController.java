@@ -7,7 +7,10 @@ import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderToolbarPresetWindow;
 import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderToolGroup;
 import com.cookiecraftmods.roadbuilder.client.ui.RoadPresetEditorScreen;
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
+import com.cookiecraftmods.roadbuilder.geometry.RoadVector;
 import com.cookiecraftmods.roadbuilder.geometry.FreehandGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.FreeformGeometry;
+import com.cookiecraftmods.roadbuilder.placement.RoadCurveValidation;
 import com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.MultiCurveGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry;
@@ -16,10 +19,13 @@ import com.cookiecraftmods.roadbuilder.geometry.StraightGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.RoundaboutGeometry;
 import com.cookiecraftmods.roadbuilder.network.RoadGraphSnapshot;
+import com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts;
+import com.cookiecraftmods.roadbuilder.geometry.LaneConnectionGeometry;
 import com.cookiecraftmods.roadbuilder.network.RoadLaneGraph;
 import com.cookiecraftmods.roadbuilder.network.RoadNode;
 import com.cookiecraftmods.roadbuilder.network.RoadNodeId;
 import com.cookiecraftmods.roadbuilder.network.RoadSegment;
+import com.cookiecraftmods.roadbuilder.network.RoadSegmentId;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetCatalogEntry;
 import com.cookiecraftmods.roadbuilder.preset.RoadCategory;
 import com.cookiecraftmods.roadbuilder.networking.AcceptedPlacement;
@@ -96,6 +102,14 @@ public final class StraightRoadToolController {
     private boolean pendingCrosswalkToggle;
     private boolean pendingDirectionInversion;
     private RoadSnappingMode snappingMode = RoadSnappingMode.ALL;
+    private RoadGraphSnapshot lanePortGraph;
+    private Map<RoadSegmentId, List<AuxiliaryLanePorts.Port>> lanePorts = Map.of();
+    private List<AuxiliaryLanePorts.Port> visibleLanePorts = List.of();
+    private AuxiliaryLanePorts.Port hoveredLanePort;
+    private AuxiliaryLanePorts.Port startLanePort;
+    private RoadGraphSnapshot markerGraph;
+    private RoadGraphSnapshot indexedGraph;
+    private RoadSnapIndex snapIndex = new RoadSnapIndex(null);
     private List<RoadNode> visibleNodes = List.of();
     private List<RoadNodeMarker> visibleNodeMarkers = List.of();
     private List<RoadSnapGuide> snapGuides = List.of();
@@ -145,39 +159,42 @@ public final class StraightRoadToolController {
         client.options.keyUse.setDown(false);
         updatePointer(client);
         RoadGraphSnapshot visibleGraph = currentGraph(client).orElse(null);
-        visibleNodes = visibleGraph == null
-                ? List.of()
-                : List.copyOf(visibleGraph.nodes().values());
-        if (visibleGraph == null) {
-            visibleNodeMarkers = List.of();
-        } else {
-            Map<RoadNodeId, List<RoadSegment>> incidentByNode =
-                    new HashMap<>();
-            visibleGraph.segments().values().forEach(segment -> {
-                incidentByNode.computeIfAbsent(
-                        segment.startNodeId(),
-                        ignored -> new ArrayList<>()
-                ).add(segment);
-                incidentByNode.computeIfAbsent(
-                        segment.endNodeId(),
-                        ignored -> new ArrayList<>()
-                ).add(segment);
-            });
-            visibleNodeMarkers = visibleNodes.stream().map(node -> {
-                    List<RoadSegment> incident = incidentByNode.getOrDefault(
-                            node.id(),
-                            List.of()
-                    );
-                    boolean junction = RoadSnapResolver.hasJunctionFootprint(
-                            node,
-                            incident
-                    );
-                     return new RoadNodeMarker(
-                             node,
-                             junction ? 0.44 : 0.32,
-                             junction
-                     );
-            }).toList();
+        if (visibleGraph != markerGraph) {
+            markerGraph = visibleGraph;
+            visibleNodes = visibleGraph == null
+                    ? List.of()
+                    : List.copyOf(visibleGraph.nodes().values());
+            if (visibleGraph == null) {
+                visibleNodeMarkers = List.of();
+            } else {
+                Map<RoadNodeId, List<RoadSegment>> incidentByNode =
+                        new HashMap<>();
+                visibleGraph.segments().values().forEach(segment -> {
+                    incidentByNode.computeIfAbsent(
+                            segment.startNodeId(),
+                            ignored -> new ArrayList<>()
+                    ).add(segment);
+                    incidentByNode.computeIfAbsent(
+                            segment.endNodeId(),
+                            ignored -> new ArrayList<>()
+                    ).add(segment);
+                });
+                visibleNodeMarkers = visibleNodes.stream().map(node -> {
+                        List<RoadSegment> incident = incidentByNode.getOrDefault(
+                                node.id(),
+                                List.of()
+                        );
+                        boolean junction = RoadSnapResolver.hasJunctionFootprint(
+                                node,
+                                incident
+                        );
+                         return new RoadNodeMarker(
+                                 node,
+                                 junction ? 0.44 : 0.32,
+                                 junction
+                         );
+                }).toList();
+            }
         }
         validateRemovalTarget(client);
         refreshRemovalAvailability(client);
@@ -285,6 +302,7 @@ public final class StraightRoadToolController {
                 RoadBuilderTool.STRAIGHT_ROAD,
                 RoadBuilderTool.SIMPLE_CURVE,
                 RoadBuilderTool.COMPLEX_CURVE,
+                RoadBuilderTool.FREEHAND_DRAW,
                 RoadBuilderTool.ROUNDABOUT,
                 RoadBuilderTool.REPLACE
         );
@@ -292,8 +310,9 @@ public final class StraightRoadToolController {
 
     public void updatePointer(Minecraft client) {
         Objects.requireNonNull(client, "client");
+        AuxiliaryLanePorts.Port previousPort = hoveredLanePort;
         CursorTargetResult nextResult = applySnapping(client, CursorRaycaster.cast(client));
-        if (!nextResult.equals(cursorResult)) {
+        if (!nextResult.equals(cursorResult) || !Objects.equals(previousPort, hoveredLanePort)) {
             cursorResult = nextResult;
             if (isRoadPlacementTool()) {
                 captureFreehandPoint();
@@ -387,6 +406,10 @@ public final class StraightRoadToolController {
 
     public boolean parallelEnabled() { return parallelEnabled; }
 
+    public boolean previewInvalid() {
+        return previewProblem.kind() != StraightRoadPreviewProblem.Kind.NONE;
+    }
+
     public int parallelOffset() { return parallelOffset; }
 
     public List<RawRoadPreview> rawPreviews() {
@@ -419,15 +442,31 @@ public final class StraightRoadToolController {
         return visibleNodes;
     }
 
+    public List<AuxiliaryLanePorts.Port> visibleLanePorts() {
+        return isRoadPlacementTool() ? visibleLanePorts : List.of();
+    }
+
     public List<RoadNodeMarker> visibleNodeMarkers() {
         return visibleNodeMarkers;
     }
 
     public List<RoadSnapGuide> snapGuides() {
-        if (activeTool != RoadBuilderTool.COMPLEX_CURVE || startTarget == null) {
+        if ((activeTool != RoadBuilderTool.COMPLEX_CURVE && activeTool != RoadBuilderTool.FREEHAND_DRAW) || startTarget == null) {
             return snapGuides;
         }
         List<RoadSnapGuide> guides = new ArrayList<>(snapGuides);
+        if (activeTool == RoadBuilderTool.FREEHAND_DRAW
+                && previewGeometry instanceof CubicBezierGeometry cubic) {
+            // Display the actual handles, including lane-tangent constraints.
+            List<RoadPoint> points = cubic.controlPoints();
+            for (int index = 1; index < points.size(); index++) {
+                if (horizontalDistance(points.get(index - 1), points.get(index)) > 0.05) {
+                    guides.add(new RoadSnapGuide(points.get(index - 1), points.get(index),
+                            RoadSnapGuide.Kind.NODE_ANGLE));
+                }
+            }
+            return List.copyOf(guides);
+        }
         RoadPoint previous = startTarget.roadPoint();
         List<CursorTarget> controls = new ArrayList<>(pathPoints);
         cursorResult.target().ifPresent(controls::add);
@@ -703,6 +742,13 @@ public final class StraightRoadToolController {
                     "status.roadbuilder.curve_select_end"
             );
         }
+        if (activeTool == RoadBuilderTool.FREEHAND_DRAW) {
+            if (!pathPoints.isEmpty()
+                    && previewProblem.kind() != StraightRoadPreviewProblem.Kind.NONE) return endpointInstruction();
+            return Component.translatable(pathPoints.isEmpty()
+                    ? "status.roadbuilder.freehand_draw_entry"
+                    : "status.roadbuilder.freehand_draw_end");
+        }
         if (activeTool == RoadBuilderTool.COMPLEX_CURVE) {
             return Component.translatable(
                     pathPoints.isEmpty()
@@ -873,6 +919,9 @@ public final class StraightRoadToolController {
             return;
         }
         if (pendingPlacementRequestId != null) {
+            if (activeTool == RoadBuilderTool.FREEHAND_DRAW) {
+                return;
+            }
             queueNextPlacementTarget(client);
             return;
         }
@@ -892,6 +941,7 @@ public final class StraightRoadToolController {
 
         if (startTarget == null) {
             startTarget = target;
+            startLanePort = hoveredLanePort;
             pathPoints.clear();
             if (activeTool == RoadBuilderTool.FREEHAND) {
                 pathPoints.add(target);
@@ -902,8 +952,17 @@ public final class StraightRoadToolController {
         }
         switch (activeTool) {
             case STRAIGHT_ROAD, ROUNDABOUT -> submitPreview(client);
+            case FREEHAND_DRAW -> {
+                if (pathPoints.isEmpty()) {
+                    if (horizontalDistance(startTarget.roadPoint(), target.roadPoint()) < 0.05) return;
+                    pathPoints.add(target);
+                    rebuildPreview(client);
+                } else {
+                    submitPreview(client);
+                }
+            }
             case SIMPLE_CURVE, COMPLEX_CURVE -> {
-                if (pathPoints.size() < (activeTool == RoadBuilderTool.COMPLEX_CURVE ? 2 : 1)) {
+                if (pathPoints.size() < (activeTool == RoadBuilderTool.SIMPLE_CURVE ? 1 : 2)) {
                     CursorTarget previous = pathPoints.isEmpty()
                             ? startTarget : pathPoints.get(pathPoints.size() - 1);
                     if (horizontalDistance(previous.roadPoint(), target.roadPoint()) < 0.05) {
@@ -922,8 +981,12 @@ public final class StraightRoadToolController {
     }
 
     private void submitPreview(Minecraft client) {
+        if (activeTool == RoadBuilderTool.FREEHAND_DRAW && pathPoints.isEmpty()) {
+            return;
+        }
         if (previewGeometry == null
-                || client.level == null
+                || previewProblem.kind() != StraightRoadPreviewProblem.Kind.NONE
+                || client == null || client.level == null
                 || pendingPlacementRequestId != null
                 || placementJob.isActive()) {
             return;
@@ -1048,6 +1111,11 @@ public final class StraightRoadToolController {
         ReferenceGeometry geometry;
         try {
             geometry = buildPreviewGeometry(endpoint);
+            if (!parallelEnabled && snapSettings.tangentEnabled()) {
+                RoadVector exit = hoveredLanePort == null ? null : hoveredLanePort.direction();
+                geometry = LaneConnectionGeometry.align(geometry,
+                        startLanePort == null ? null : startLanePort.direction(), exit);
+            }
         } catch (IllegalArgumentException invalid) {
             previewProblem = StraightRoadPreviewProblem.of(
                     StraightRoadPreviewProblem.Kind.NO_HORIZONTAL_DIRECTION
@@ -1074,14 +1142,38 @@ public final class StraightRoadToolController {
         double width = RoadBuilderClientNetworking.selectedPreset()
                 .map(RoadPresetCatalogEntry::surfaceWidth)
                 .orElse(FALLBACK_PREVIEW_WIDTH);
-        rawPreview = new RawRoadPreview(geometry, width);
+        ReferenceGeometry displayGeometry = geometry;
+        try {
+            var graph = currentGraph(client);
+            if (graph.isPresent()) displayGeometry = new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner()
+                    .adjust(geometry, (int)Math.ceil(width), graph.get().segments().values());
+        } catch (IllegalArgumentException invalid) {
+            previewProblem = StraightRoadPreviewProblem.planningFailure(
+                    com.cookiecraftmods.roadbuilder.placement.BlockPlanFailureCode.INVALID_GEOMETRY);
+            return;
+        }
+        rawPreview = new RawRoadPreview(displayGeometry, width);
+        if (geometry.length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)
+            previewProblem = StraightRoadPreviewProblem.planningFailure(
+                    com.cookiecraftmods.roadbuilder.placement.BlockPlanFailureCode.INVALID_GEOMETRY);
+        double radius = RoadCurveValidation.minimumRadius(width,
+                RoadBuilderClientNetworking.selectedPreset().map(RoadPresetCatalogEntry::roadClass)
+                        .orElse(com.cookiecraftmods.roadbuilder.preset.RoadClass.LOCAL));
+        var curveFailure = RoadCurveValidation.validate(geometry, radius);
+        if (curveFailure != null) previewProblem = StraightRoadPreviewProblem.planningFailure(curveFailure);
         if (parallelEnabled) {
             try {
                 var parallel = ParallelRoadGeometry.create(geometry, parallelOffset);
                 if (!(parallel instanceof RoundaboutGeometry)) {
                     parallel = com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometryReverser.reverse(parallel);
                 }
-                parallelPreview = new RawRoadPreview(parallel, width);
+                var graph = currentGraph(client);
+                ReferenceGeometry parallelDisplay = graph.isEmpty() ? parallel
+                        : new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(
+                                parallel, (int)Math.ceil(width), graph.get().segments().values());
+                parallelPreview = new RawRoadPreview(parallelDisplay, width);
+                var parallelFailure = RoadCurveValidation.validate(parallel, radius);
+                if (parallelFailure != null) previewProblem = StraightRoadPreviewProblem.planningFailure(parallelFailure);
             } catch (IllegalArgumentException invalid) {
                 parallelPreviewInvalid = true;
                 previewGeometry = null;
@@ -1125,6 +1217,14 @@ public final class StraightRoadToolController {
                         start, pathPoints.get(0).roadPoint(),
                         pathPoints.get(1).roadPoint(), cursor.roadPoint()
                 );
+            }
+            case FREEHAND_DRAW -> {
+                requireDifferentEndpoint(startTarget, cursor);
+                if (pathPoints.isEmpty()) {
+                    yield new StraightGeometry(start, cursor.roadPoint());
+                }
+                RoadVector entry = start.vectorTo(pathPoints.get(0).roadPoint());
+                yield FreeformGeometry.createBalanced(start, cursor.roadPoint(), entry);
             }
             case FREEHAND -> {
                 List<RoadPoint> stroke = pathPoints.stream()
@@ -1711,6 +1811,9 @@ public final class StraightRoadToolController {
 
     private void clearSelection() {
         startTarget = null;
+        startLanePort = null;
+        hoveredLanePort = null;
+        visibleLanePorts = List.of();
         pathPoints.clear();
         freehandDrawing = false;
         previewEndTarget = null;
@@ -1725,7 +1828,7 @@ public final class StraightRoadToolController {
     }
 
     private void cancelCurrentStep(Minecraft client) {
-        if (activeTool == RoadBuilderTool.COMPLEX_CURVE
+        if ((activeTool == RoadBuilderTool.COMPLEX_CURVE || activeTool == RoadBuilderTool.FREEHAND_DRAW)
                 && pendingPlacementRequestId == null && !pathPoints.isEmpty()) {
             pathPoints.remove(pathPoints.size() - 1);
             updatePointer(client);
@@ -1750,6 +1853,8 @@ public final class StraightRoadToolController {
         CursorTarget raw = rawResult.target().orElse(null);
         if (raw == null || !isRoadPlacementTool()) {
             snapGuides = List.of();
+            hoveredLanePort = null;
+            visibleLanePorts = List.of();
             return rawResult;
         }
 
@@ -1774,6 +1879,40 @@ public final class StraightRoadToolController {
                 ),
                 elevatedPoint
         );
+        if (graph != indexedGraph) {
+            indexedGraph = graph;
+            snapIndex = new RoadSnapIndex(graph);
+        }
+        hoveredLanePort = null;
+        visibleLanePorts = List.of();
+        boolean selectingEndpoint = LaneConnectionSnapping.selectingEndpoint(
+                activeTool, snapStart != null, pathPoints.size());
+        if (selectingEndpoint && snappingMode.snapsNodes() && !parallelEnabled
+                && activeTool != RoadBuilderTool.ROUNDABOUT) {
+            if (graph != lanePortGraph) {
+                lanePortGraph = graph;
+                lanePorts = graph == null ? Map.of()
+                        : AuxiliaryLanePorts.ports(graph.segments().values()).stream()
+                                .collect(java.util.stream.Collectors.groupingBy(AuxiliaryLanePorts.Port::segmentId));
+            }
+            int width = RoadBuilderClientNetworking.selectedPreset().map(RoadPresetCatalogEntry::surfaceWidth)
+                    .orElse(Integer.MAX_VALUE);
+            visibleLanePorts = snapIndex.segmentsNear(elevatedPoint, null, snapSettings.guidelineRange()).stream()
+                    .flatMap(segment -> lanePorts.getOrDefault(segment.id(), List.of()).stream())
+                    .filter(port -> port.roadWidth() > width)
+                    .filter(port -> port.incoming() == (snapStart == null))
+                    .filter(port -> port.position().distanceTo(elevatedPoint) <= snapSettings.guidelineRange())
+                    .toList();
+            hoveredLanePort = temporaryOverride ? null : LaneConnectionSnapping.nearest(
+                    elevatedPoint, visibleLanePorts, snapIndex.nodesNear(elevatedPoint),
+                    snapSettings.range()).orElse(null);
+            snapGuides = List.of();
+            if (hoveredLanePort != null) {
+                RoadPoint position = hoveredLanePort.position();
+                return CursorTargetResult.success(new CursorTarget(BlockPos.containing(
+                        position.x(), position.y(), position.z()), position));
+            }
+        }
         RoadSnapResolver.CurveAngleContext curveAngleContext =
                 activeTool == RoadBuilderTool.SIMPLE_CURVE
                         && startTarget != null
@@ -1799,12 +1938,13 @@ public final class StraightRoadToolController {
         RoadSnapResult snap = RoadSnapResolver.resolve(
                 elevated,
                 snapStart,
-                Optional.ofNullable(graph)
-                        .map(snapshot -> snapshot.nodes().values())
-                        .orElseGet(List::of),
-                Optional.ofNullable(graph)
-                        .map(snapshot -> snapshot.segments().values())
-                        .orElseGet(List::of),
+                snapIndex.nodesNear(elevated.roadPoint(), snappingMode.snapsAngles()
+                        ? snapSettings.guidelineRange() + snapSettings.range() : 32.0),
+                snapIndex.segmentsNear(elevated.roadPoint(),
+                        snapStart == null ? null : snapStart.roadPoint(),
+                        snappingMode.snapsGuidelines() || snappingMode.snapsAngles()
+                                ? snapSettings.guidelineRange()
+                                + snapSettings.range() : snapSettings.range()),
                 snappingMode,
                 snapSettings,
                 temporaryOverride || activeTool == RoadBuilderTool.FREEHAND
@@ -1884,10 +2024,16 @@ public final class StraightRoadToolController {
             );
             case PLANNING_FAILED -> Component.translatable(
                     "status.roadbuilder.preview_rejected",
-                    Component.literal(
-                            previewProblem.planningFailure().orElseThrow().name()
-                    )
+                    planningFailureLabel(previewProblem.planningFailure().orElseThrow())
             );
+        };
+    }
+
+    private static Component planningFailureLabel(com.cookiecraftmods.roadbuilder.placement.BlockPlanFailureCode code) {
+        return switch (code) {
+            case TOO_SHARP_TURN -> placementResultLabel(PlacementResultCode.TOO_SHARP_TURN);
+            case SELF_INTERSECTION -> placementResultLabel(PlacementResultCode.SELF_INTERSECTION);
+            default -> Component.literal(code.name());
         };
     }
 
@@ -1974,6 +2120,7 @@ public final class StraightRoadToolController {
         if (tool != RoadBuilderTool.STRAIGHT_ROAD
                 && tool != RoadBuilderTool.SIMPLE_CURVE
                 && tool != RoadBuilderTool.COMPLEX_CURVE
+                && tool != RoadBuilderTool.FREEHAND_DRAW
                 && tool != RoadBuilderTool.REPLACE
                 && tool != RoadBuilderTool.FREEHAND
                 && tool != RoadBuilderTool.ROUNDABOUT) {
@@ -1995,6 +2142,7 @@ public final class StraightRoadToolController {
         return activeTool == RoadBuilderTool.STRAIGHT_ROAD
                 || activeTool == RoadBuilderTool.SIMPLE_CURVE
                 || activeTool == RoadBuilderTool.COMPLEX_CURVE
+                || activeTool == RoadBuilderTool.FREEHAND_DRAW
                 || activeTool == RoadBuilderTool.FREEHAND
                 || activeTool == RoadBuilderTool.ROUNDABOUT;
     }
@@ -2032,10 +2180,13 @@ public final class StraightRoadToolController {
     }
 
     private RoadPathIntentC2SPacket.PathType pathType() {
+        if (previewGeometry instanceof CubicBezierGeometry) {
+            return RoadPathIntentC2SPacket.PathType.CUBIC;
+        }
         return switch (activeTool) {
             case SIMPLE_CURVE ->
                     RoadPathIntentC2SPacket.PathType.QUADRATIC;
-            case COMPLEX_CURVE ->
+            case COMPLEX_CURVE, FREEHAND_DRAW ->
                     RoadPathIntentC2SPacket.PathType.CUBIC;
             case STRAIGHT_ROAD -> RoadPathIntentC2SPacket.PathType.STRAIGHT;
             case FREEHAND -> RoadPathIntentC2SPacket.PathType.FREEHAND;

@@ -40,3 +40,27 @@ does not have focus. Escape cancels a drag before closing the editor.
 Run `gradlew.bat test` (or `./gradlew test`) with a supported Gradle JVM. Editor
 tests cover responsive geometry, small-screen scrolling, material inheritance,
 classification/junction round trips, drag geometry, selection and request state.
+
+## Freehand Draw
+
+Select **Freehand Draw** beside **Complex Curve** in the road toolbar.
+
+1. Click the start of the road.
+2. Click to choose the departure angle. The distance of this click from the start
+   does not control the bend and does not place a control point.
+3. Move to the endpoint and click to build the live preview.
+
+The tool calculates both cubic Bezier control points automatically. The exit
+angle mirrors the entry angle about the start-to-end chord, and both tangent
+handles have equal lengths. This gives a balanced arc; a cubic approximation
+is not an exact constant-curvature circle. Elevation is interpolated linearly.
+When tangent snapping is enabled, connecting to a lane attachment point aligns
+that end's automatic handle with the existing lane's travel direction, including
+its slope. Handle lengths stay equal. At a connected start, the lane direction
+similarly constrains the departure tangent. Three clicks still select the start,
+departure angle and endpoint; unattached ends use the balanced construction.
+
+Right-click backs up the direction choice. After placing a segment its endpoint
+becomes the next start; choose the next departure angle and endpoint. Complex
+Curve retains its existing manual control-point workflow. The server receives
+the same cubic control points used in the preview.

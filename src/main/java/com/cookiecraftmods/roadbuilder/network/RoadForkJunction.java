@@ -30,6 +30,9 @@ public final class RoadForkJunction {
                 incidentSegments,
                 "incidentSegments"
         ));
+        if (!AuxiliaryLanePorts.attachments(node.id(), incident).isEmpty()) {
+            return true;
+        }
         if (incident.size() != 3) {
             return false;
         }

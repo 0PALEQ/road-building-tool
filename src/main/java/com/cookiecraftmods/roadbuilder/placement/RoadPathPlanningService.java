@@ -36,6 +36,10 @@ public final class RoadPathPlanningService {
             return failure(BlockPlanFailureCode.PRESET_REVISION_MISMATCH);
         }
 
+        BlockPlanFailureCode curveFailure = RoadCurveValidation.validate(intent.geometry(),
+                RoadCurveValidation.minimumRadius(preset.surfaceBlockWidth(), preset.classification().roadClass()));
+        if (curveFailure != null) return failure(curveFailure);
+
         RoadSurfaceResolver.Result resolvedSurface =
                 RoadSurfaceResolver.resolve(preset.surfaceColumns());
         if (resolvedSurface instanceof RoadSurfaceResolver.Result.Failure failure) {

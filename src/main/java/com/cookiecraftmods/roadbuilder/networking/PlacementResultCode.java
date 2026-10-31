@@ -23,7 +23,9 @@ public enum PlacementResultCode {
     PERSISTENCE_INCOMPATIBLE(14),
     RATE_LIMITED(15),
     GRAPH_REVISION_MISMATCH(16),
-    CONSTRUCTION_BUSY(17);
+    CONSTRUCTION_BUSY(17),
+    TOO_SHARP_TURN(18),
+    SELF_INTERSECTION(19);
 
     private static final Map<Integer, PlacementResultCode> BY_WIRE_ID = createLookup();
 

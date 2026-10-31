@@ -111,7 +111,7 @@ public final class RoadStructurePlanner {
             );
         }
 
-        surfacePlan = prepareRailingSurface(surfacePlan, spans, world, existingRoadPosition);
+        surfacePlan = prepareStructureSurface(surfacePlan, spans, world, existingRoadPosition);
         Map<BlockPos, PlannedBlock> targets = new LinkedHashMap<>();
         Set<BlockPos> surfacePositions = new HashSet<>();
         Set<BlockPos> roadSurfacePositions = new HashSet<>();
@@ -265,7 +265,7 @@ public final class RoadStructurePlanner {
                     }
                     bandPositions.removeIf(position -> {
                         PlannedBlock base = targets.get(position);
-                        return base == null || !isRailingMaterial(base.targetState(), band);
+                        return base == null || !matchesBandMaterial(base.targetState(), band);
                     });
                     presetBarriers.addAll(bandPositions);
                 }
@@ -328,11 +328,12 @@ public final class RoadStructurePlanner {
         ));
     }
 
-    /** Replaces buried railing foundations with pavement and gives exposed bars a full-height base. */
-    public BlockPlacementPlan prepareRailingSurface(
+    /** Adapts median and railing surfaces to their supporting structures before layer merging. */
+    public BlockPlacementPlan prepareStructureSurface(
             BlockPlacementPlan surface, List<StructureSpan> spans,
             PlacementBlockWorld world, Predicate<BlockPos> existingRoadPosition
     ) {
+        surface = prepareBridgeMedians(surface, spans, world, existingRoadPosition);
         Map<BlockPos, PlannedBlock> blocks = new LinkedHashMap<>();
         surface.blocks().forEach(block -> blocks.put(block.position(), block));
         Set<BlockPos> footprint = surface.blocks().stream()
@@ -356,12 +357,12 @@ public final class RoadStructurePlanner {
                     boolean edge = column == 0 || column + band.width() == span.roadWidth();
                     for (BlockPos position : positions) {
                         PlannedBlock base = blocks.get(position);
-                        if (base == null || !isRailingMaterial(base.targetState(), band)) {
+                        if (base == null || !matchesBandMaterial(base.targetState(), band)) {
                             continue;
                         }
                         BlockState old = world.blockState(position);
                         boolean existingPavement = existingRoadPosition.test(position)
-                                && !old.isAir() && !isRailingMaterial(old, band);
+                                && !old.isAir() && !matchesBandMaterial(old, band);
                         boolean buriedEdge = edge && !isExposedHorizontalEdge(
                                 position, footprint, existingRoadPosition);
                         BlockState state = base.targetState();
@@ -388,7 +389,62 @@ public final class RoadStructurePlanner {
         return BlockPlacementPlan.create(surface.dimension(), blocks.values());
     }
 
-    private static boolean isRailingMaterial(BlockState state, RoadSurfaceBand band) {
+    private BlockPlacementPlan prepareBridgeMedians(
+            BlockPlacementPlan surface, List<StructureSpan> spans,
+            PlacementBlockWorld world, Predicate<BlockPos> existingRoadPosition
+    ) {
+        if (spans.stream().flatMap(span -> span.surfaceBands().stream())
+                .noneMatch(band -> band.role() == RoadSurfaceRole.GRASS_MEDIAN)) {
+            return surface;
+        }
+        Map<BlockPos, PlannedBlock> blocks = new LinkedHashMap<>();
+        surface.blocks().forEach(block -> blocks.put(block.position(), block));
+        Map<GroundKey, Ground> groundCache = new HashMap<>();
+        List<EndpointDeckZone> zones = endpointDeckZones(spans, world, existingRoadPosition, groundCache);
+        for (StructureSpan span : spans) {
+            BlockState replacement = span.surfaceBands().stream()
+                    .filter(band -> band.role() == RoadSurfaceRole.CONCRETE_MEDIAN)
+                    .findFirst().map(band -> RoadBlockStateFactory.solid(
+                            BuiltInRegistries.BLOCK.get(band.block())))
+                    .orElse(materials.deckFascia());
+            int column = 0;
+            for (RoadSurfaceBand band : span.surfaceBands()) {
+                if (band.role() == RoadSurfaceRole.GRASS_MEDIAN) {
+                    Set<BlockPos> candidates = new HashSet<>();
+                    for (int index = 0; index < band.width(); index++) {
+                        addBarrierPath(candidates, span.geometry(),
+                                (span.roadWidth() - 1) / 2.0 - column - index);
+                    }
+                    for (BlockPos position : candidates) {
+                        PlannedBlock block = blocks.get(position);
+                        if (block == null || !matchesBandMaterial(block.targetState(), band)) {
+                            continue;
+                        }
+                        Ground ground = groundBelow(position, world, existingRoadPosition, groundCache);
+                        int gap = position.getY() - ground.position().getY();
+                        boolean deck = zones.stream().anyMatch(zone -> zone.contains(position))
+                                || ground.fluidEncountered() || gap > MAXIMUM_SOLID_BASE_HEIGHT
+                                || ground.solid() && gap > AT_GRADE_ROAD_GAP
+                                        && existingRoadPosition.test(ground.position());
+                        if (deck) {
+                            BlockState state = replacement;
+                            if (block.targetState().getBlock() instanceof SlabBlock
+                                    && block.targetState().getValue(SlabBlock.TYPE) == SlabType.BOTTOM) {
+                                state = RoadBlockStateFactory.slabCompanion(state)
+                                        .map(slab -> slab.setValue(SlabBlock.TYPE, SlabType.BOTTOM))
+                                        .orElse(state);
+                            }
+                            blocks.put(position, new PlannedBlock(position, state));
+                        }
+                    }
+                }
+                column += band.width();
+            }
+        }
+        return BlockPlacementPlan.create(surface.dimension(), blocks.values());
+    }
+
+    private static boolean matchesBandMaterial(BlockState state, RoadSurfaceBand band) {
         return band.blockSet().stream().anyMatch(id -> {
             BlockState material = BuiltInRegistries.BLOCK.get(id).defaultBlockState();
             return state.is(material.getBlock()) || RoadBlockStateFactory.slabCompanion(material)

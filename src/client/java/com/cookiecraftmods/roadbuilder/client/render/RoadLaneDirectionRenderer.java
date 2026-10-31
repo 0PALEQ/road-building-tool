@@ -3,6 +3,13 @@ package com.cookiecraftmods.roadbuilder.client.render;
 import com.cookiecraftmods.roadbuilder.client.networking.RoadBuilderClientNetworking;
 import com.cookiecraftmods.roadbuilder.client.tool.RoadSnapSettings;
 import com.cookiecraftmods.roadbuilder.geometry.PathSample;
+import com.cookiecraftmods.roadbuilder.geometry.OffsetGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.MultiCurveGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.RoundaboutGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.StraightGeometry;
+import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import com.cookiecraftmods.roadbuilder.network.LaneConnector;
 import com.cookiecraftmods.roadbuilder.network.LaneConnectorGeometryPlanner;
 import com.cookiecraftmods.roadbuilder.network.LaneConnectorId;
@@ -22,6 +29,9 @@ import net.minecraft.client.renderer.debug.DebugRenderer;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.Map;
+import java.util.List;
+import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,6 +44,7 @@ public final class RoadLaneDirectionRenderer {
     private static final int CONNECTION_POINT_SEGMENTS = 24;
     private final double maximumRenderDistanceSquared;
     private RoadLaneGraph cachedGraph;
+    private final Map<ReferenceGeometry, AABB> pathBounds = new IdentityHashMap<>();
 
     public RoadLaneDirectionRenderer() {
         this(RoadSnapSettings.DEFAULT_GUIDELINE_RANGE);
@@ -88,13 +99,17 @@ public final class RoadLaneDirectionRenderer {
                 .roadGraph(client.level.dimension())
                 .orElse(null);
         if (snapshot == null || snapshot.lanes().isEmpty()) {
+            cachedGraph = null;
+            pathBounds.clear();
             return;
         }
-        if (cachedGraph == null
-                || cachedGraph.snapshot().revision() != snapshot.revision()
-                || !cachedGraph.snapshot().dimension()
-                        .equals(snapshot.dimension())) {
+        if (cachedGraph == null || cachedGraph.snapshot() != snapshot) {
             cachedGraph = RoadLaneGraph.from(snapshot);
+            pathBounds.clear();
+            cachedGraph.lanePaths().values().forEach(path -> pathBounds.put(
+                    path.lane().geometry(), geometryBounds(path.lane().geometry())));
+            cachedGraph.connectorPaths().values().forEach(path -> path.geometry().ifPresent(
+                    geometry -> pathBounds.put(geometry, geometryBounds(geometry))));
         }
 
         PoseStack matrices = context.matrixStack();
@@ -211,6 +226,10 @@ public final class RoadLaneDirectionRenderer {
             float blue,
             float alpha
     ) {
+        AABB bounds = pathBounds.get(geometry);
+        if (bounds != null && !bounds.inflate(Math.sqrt(maximumRenderDistanceSquared)).contains(camera)) {
+            return;
+        }
         double length = endDistance - startDistance;
         if (length <= 1.0e-9) {
             return;
@@ -248,6 +267,35 @@ public final class RoadLaneDirectionRenderer {
                     alpha
             );
         }
+    }
+
+    static AABB geometryBounds(ReferenceGeometry geometry) {
+        if (geometry instanceof OffsetGeometry offset) {
+            return geometryBounds(offset.reference()).inflate(Math.abs(offset.lateralOffset()));
+        }
+        List<RoadPoint> points;
+        if (geometry instanceof QuadraticBezierGeometry curve) {
+            points = curve.controlPoints();
+        } else if (geometry instanceof CubicBezierGeometry curve) {
+            points = List.of(curve.start(), curve.startControl(), curve.endControl(), curve.end());
+        } else if (geometry instanceof MultiCurveGeometry curve) {
+            return curve.spans().stream().map(RoadLaneDirectionRenderer::geometryBounds)
+                    .reduce(AABB::minmax).orElseThrow();
+        } else if (geometry instanceof RoundaboutGeometry ring) {
+            var center = ring.center();
+            return new AABB(center.x(), center.y(), center.z(), center.x(), center.y(), center.z())
+                    .inflate(ring.radius() + 1.0);
+        } else {
+            points = List.of(geometry.start(), geometry.end());
+        }
+        var first = points.get(0);
+        AABB result = new AABB(first.x(), first.y(), first.z(), first.x(), first.y(), first.z());
+        for (var point : points) {
+            result = result.minmax(new AABB(point.x(), point.y(), point.z(), point.x(), point.y(), point.z()));
+        }
+        // Unknown/freehand geometry may bow outside its endpoint box.
+        return result.inflate(geometry instanceof StraightGeometry
+                || points.size() > 2 ? 1.0 : geometry.length() + 1.0);
     }
 
     static double pathSampleDistance(
@@ -319,6 +367,10 @@ public final class RoadLaneDirectionRenderer {
             double endDistance,
             LaneTravelDirection travelDirection
     ) {
+        AABB bounds = pathBounds.get(geometry);
+        if (bounds != null && !bounds.inflate(Math.sqrt(maximumRenderDistanceSquared)).contains(camera)) {
+            return;
+        }
         double length = endDistance - startDistance;
         if (length <= 1.0e-9) {
             return;
@@ -443,7 +495,7 @@ public final class RoadLaneDirectionRenderer {
             PoseStack matrices,
             VertexConsumer lines,
             Vec3 camera,
-            com.cookiecraftmods.roadbuilder.geometry.RoadPoint point,
+            RoadPoint point,
             float red,
             float green,
             float blue

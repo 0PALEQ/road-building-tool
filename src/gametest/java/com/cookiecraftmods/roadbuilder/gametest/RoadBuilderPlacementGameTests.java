@@ -72,14 +72,102 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class RoadBuilderPlacementGameTests implements FabricGameTest {
     private static final int UPDATE_FLAGS = Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS;
 
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 200)
+    public void complexCurveConnectsToLaneAtSharedNodeAndPreservesThroughRoad(GameTestHelper helper) {
+        var level = helper.getLevel();
+        var origin = helper.absolutePos(new BlockPos(12000, 0, 12000));
+        var pavement = new ResourceLocation("minecraft", "gray_concrete");
+        var mainId = new ResourceLocation("roadbuilder", "port_main_test");
+        var rampId = new ResourceLocation("roadbuilder", "port_ramp_test");
+        var main = new com.cookiecraftmods.roadbuilder.preset.RoadPreset(
+                com.cookiecraftmods.roadbuilder.preset.RoadPreset.CURRENT_SCHEMA_VERSION, 1, 9, pavement,
+                List.of(new com.cookiecraftmods.roadbuilder.preset.LaneComponent(
+                        com.cookiecraftmods.roadbuilder.preset.LaneType.VEHICLE, 3, -2,
+                        com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.FORWARD),
+                        new com.cookiecraftmods.roadbuilder.preset.LaneComponent(
+                        com.cookiecraftmods.roadbuilder.preset.LaneType.VEHICLE, 3, 2,
+                        com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.FORWARD)));
+        var ramp = new com.cookiecraftmods.roadbuilder.preset.RoadPreset(
+                com.cookiecraftmods.roadbuilder.preset.RoadPreset.CURRENT_SCHEMA_VERSION, 1, 3, pavement,
+                List.of(new com.cookiecraftmods.roadbuilder.preset.LaneComponent(
+                        com.cookiecraftmods.roadbuilder.preset.LaneType.VEHICLE, 3, 0,
+                        com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.FORWARD)));
+        com.cookiecraftmods.roadbuilder.preset.RoadPresetLookup presets = id ->
+                java.util.Optional.of(id.equals(mainId) ? main : ramp);
+        for (int x = -25; x <= 35; x++) {
+            for (int z = -8; z <= 25; z++) {
+                level.setBlock(new BlockPos(origin.getX() + x, 63, origin.getZ() + z),
+                        Blocks.STONE.defaultBlockState(), UPDATE_FLAGS);
+            }
+        }
+        var graph = new RoadGraph(level.dimension());
+        var ledger = new PlacementOwnershipLedger(level.dimension());
+        var player = testPlayer(level, true);
+        player.setPos(origin.getX(), 66, origin.getZ());
+        var straight = new StraightRoadPlacementEndpoint(new StraightRoadPlanningService(presets,
+                new StraightRoadPlanner()), ConstructionAuthorizer.creativeOnly(),
+                ConstructionLimits.defaults(), new BlockPlanCommitter());
+        for (int i = 0; i < 2; i++) {
+            var result = straight.handle(StraightRoadIntentC2SPacket.current(UUID.randomUUID(),
+                    level.dimension().location(), mainId, 1,
+                    origin.getX() - 20 + 20 * i + 0.5, 64, origin.getZ() + 0.5,
+                    origin.getX() + 20 * i + 0.5, 64, origin.getZ() + 0.5), player, ledger, graph);
+            helper.assertTrue(result.resultCode() == PlacementResultCode.ACCEPTED,
+                    "main road fixture must build: " + result.resultCode());
+        }
+        var before = graph.snapshot();
+        var port = com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts.ports(before.segments().values())
+                .stream().filter(candidate -> candidate.incoming()
+                        && Math.abs(candidate.position().x() - origin.getX() - 0.5) < 0.001)
+                .max(java.util.Comparator.comparingDouble(candidate -> candidate.position().z())).orElseThrow();
+        var end = new RoadPoint(origin.getX() + 24.5, 64, origin.getZ() + 20.5);
+        var geometry = (com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry)
+                com.cookiecraftmods.roadbuilder.geometry.LaneConnectionGeometry.align(
+                        new com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry(port.position(),
+                                port.position().add(port.direction().scale(9)),
+                                end.subtract(port.direction().scale(9)), end), port.direction(), null);
+        var endpoint = new com.cookiecraftmods.roadbuilder.networking.RoadPathPlacementEndpoint(
+                new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanningService(presets,
+                        new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanner()),
+                ConstructionAuthorizer.creativeOnly(), ConstructionLimits.defaults(),
+                new BlockPlanCommitter(), TrafficHandedness.RHT);
+        var packet = com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket.current(
+                UUID.randomUUID(), level.dimension().location(), rampId, 1, graph.revision(),
+                com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket.PathType.CUBIC,
+                geometry.controlPoints());
+        var result = endpoint.handle(packet, player, ledger, graph, null);
+        helper.assertTrue(result.resultCode() == PlacementResultCode.ACCEPTED,
+                "lane-attached ramp must build: " + result.resultCode());
+        before.segments().forEach((id, segment) -> helper.assertTrue(
+                segment.equals(graph.snapshot().segments().get(id)), "main road geometry must stay unchanged"));
+        before.connectors().forEach((id, connector) -> helper.assertTrue(
+                connector.equals(graph.snapshot().connectors().get(id)), "through lane connectors must survive"));
+        for (int x = -18; x <= 18; x++) {
+            helper.assertTrue(level.getBlockState(new BlockPos(origin.getX() + x, 64, origin.getZ() - 2))
+                    .is(Blocks.GRAY_CONCRETE), "the other main-road lane must remain paved");
+        }
+        helper.assertTrue(RoadGraphMaterializationConsistency.validate(graph, ledger).isEmpty(),
+                "ramp placement must preserve graph/materialization ownership");
+        helper.succeed();
+    }
+
     @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 400)
     public void replacingCurvedBridgeRepeatedlyKeepsTheCompleteGeometry(GameTestHelper helper) {
         var level = helper.getLevel();
         var origin = helper.absolutePos(new BlockPos(7000, 0, 7000));
+        // The test server generates terrain independently of this fixture. Clear it
+        // explicitly so ground scanning cannot find a higher surface (or an old road).
+        int roadY = 67;
+        int groundY = roadY - com.cookiecraftmods.roadbuilder.placement.RoadStructurePlanner
+                .MAXIMUM_SOLID_BASE_HEIGHT - 3;
         for (int x = -12; x <= 40; x++) {
             for (int z = -12; z <= 30; z++) {
-                level.setBlock(new BlockPos(origin.getX() + x, 60, origin.getZ() + z),
+                level.setBlock(new BlockPos(origin.getX() + x, groundY, origin.getZ() + z),
                         Blocks.STONE.defaultBlockState(), UPDATE_FLAGS);
+                for (int y = groundY + 1; y <= roadY + 12; y++) {
+                    level.setBlock(new BlockPos(origin.getX() + x, y, origin.getZ() + z),
+                            Blocks.AIR.defaultBlockState(), UPDATE_FLAGS);
+                }
             }
         }
         var geometry = new com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry(
@@ -108,7 +196,11 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
                 plan, world, ledger), PlacementCommitResult.Success.class, "initial bridge should commit");
         var expected = new java.util.HashMap<BlockPos, BlockState>();
         plan.positions().forEach(pos -> expected.put(pos, world.blockState(pos)));
-        helper.assertTrue(expected.keySet().stream().anyMatch(pos -> pos.getY() < 66),
+        var pillar = com.cookiecraftmods.roadbuilder.placement.RoadStructureMaterialSet.standard().pillar();
+        helper.assertTrue(expected.entrySet().stream().anyMatch(entry ->
+                        entry.getKey().getY() < roadY
+                                - com.cookiecraftmods.roadbuilder.placement.RoadStructurePlanner.DECK_THICKNESS
+                                && entry.getValue().equals(pillar)),
                 "fixture must include bridge supports");
         var endpoint = new com.cookiecraftmods.roadbuilder.networking.SegmentReplacementEndpoint(
                 id -> java.util.Optional.of(preset), ConstructionAuthorizer.creativeOnly(),

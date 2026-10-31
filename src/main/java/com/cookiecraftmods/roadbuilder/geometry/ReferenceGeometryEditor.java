@@ -172,6 +172,19 @@ public final class ReferenceGeometryEditor {
         if (geometry instanceof StraightGeometry) {
             return new StraightGeometry(start, end);
         }
+        if (geometry instanceof MultiCurveGeometry multi) {
+            List<RoadPoint> points = new ArrayList<>();
+            points.add(start);
+            double from = geometry.length() * startFraction;
+            double to = geometry.length() * endFraction;
+            double distance = 0;
+            for (int i=0; i<multi.spans().size()-1; i++) {
+                distance += multi.spans().get(i).length();
+                if (distance > from+1e-6 && distance < to-1e-6) points.add(multi.anchors().get(i+1));
+            }
+            points.add(end);
+            return points.size() < 3 ? new StraightGeometry(start,end) : new MultiCurveGeometry(points);
+        }
         double sourceLength = geometry.length();
         PathSample startSample = geometry.sample(sourceLength * startFraction);
         PathSample endSample = geometry.sample(sourceLength * endFraction);

@@ -4,6 +4,7 @@ public enum RoadBuilderTool {
     STRAIGHT_ROAD,
     SIMPLE_CURVE,
     COMPLEX_CURVE,
+    FREEHAND_DRAW,
     FREEHAND,
     ROUNDABOUT,
     REPLACE,

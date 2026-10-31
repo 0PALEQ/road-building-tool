@@ -64,7 +64,8 @@ public final class CubicBezierGeometry implements ReferenceGeometry {
         return samples.sample(distance);
     }
 
-    private RoadPoint positionAt(double parameter) {
+    public RoadPoint positionAt(double parameter) {
+        requireParameter(parameter);
         double inverse = 1.0 - parameter;
         double startWeight = inverse * inverse * inverse;
         double startControlWeight = 3.0 * inverse * inverse * parameter;
@@ -86,7 +87,8 @@ public final class CubicBezierGeometry implements ReferenceGeometry {
         );
     }
 
-    private RoadVector derivativeAt(double parameter) {
+    public RoadVector derivativeAt(double parameter) {
+        requireParameter(parameter);
         double inverse = 1.0 - parameter;
         return start.vectorTo(startControl)
                 .scale(3.0 * inverse * inverse)
@@ -94,6 +96,38 @@ public final class CubicBezierGeometry implements ReferenceGeometry {
                         .scale(6.0 * inverse * parameter))
                 .add(endControl.vectorTo(end)
                         .scale(3.0 * parameter * parameter));
+    }
+
+    public RoadVector secondDerivativeAt(double parameter) {
+        requireParameter(parameter);
+        return startControl.vectorTo(endControl).subtract(start.vectorTo(startControl))
+                .scale(6 * (1 - parameter))
+                .add(endControl.vectorTo(end).subtract(startControl.vectorTo(endControl))
+                        .scale(6 * parameter));
+    }
+
+    /** Spatial curvature; undefined stationary points return positive infinity. */
+    public double curvatureAt(double parameter) {
+        RoadVector v = derivativeAt(parameter);
+        RoadVector a = secondDerivativeAt(parameter);
+        if (v.length() < 1e-10) return Double.POSITIVE_INFINITY;
+        return Math.hypot(Math.hypot(v.y() * a.z() - v.z() * a.y(),
+                v.z() * a.x() - v.x() * a.z()), v.x() * a.y() - v.y() * a.x())
+                / Math.pow(v.length(), 3);
+    }
+
+    public double horizontalCurvatureAt(double parameter) {
+        RoadVector v = derivativeAt(parameter);
+        RoadVector a = secondDerivativeAt(parameter);
+        if (v.horizontalLength() < 1e-10) return Double.POSITIVE_INFINITY;
+        return Math.abs(v.x() * a.z() - v.z() * a.x())
+                / Math.pow(v.horizontalLength(), 3);
+    }
+
+    private static void requireParameter(double parameter) {
+        if (!Double.isFinite(parameter) || parameter < 0 || parameter > 1) {
+            throw new IllegalArgumentException("parameter must be between 0 and 1");
+        }
     }
 
     @Override

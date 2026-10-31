@@ -145,12 +145,16 @@ public final class MultiCurveGeometry implements ReferenceGeometry {
             direction = anchors.get(index - 1).vectorTo(anchors.get(index));
         } else {
             RoadVector incoming = anchors.get(index - 1)
-                    .vectorTo(anchors.get(index))
-                    .normalize();
+                    .vectorTo(anchors.get(index));
             RoadVector outgoing = anchors.get(index)
-                    .vectorTo(anchors.get(index + 1))
-                    .normalize();
-            direction = incoming.add(outgoing);
+                    .vectorTo(anchors.get(index + 1));
+            // Estimate the derivative with respect to chord distance. Equal
+            // weights create artificial sharp bends beside very short spans,
+            // such as the endpoint samples of a parallel road.
+            double incomingLength = incoming.length();
+            double outgoingLength = outgoing.length();
+            direction = incoming.normalize().scale(outgoingLength)
+                    .add(outgoing.normalize().scale(incomingLength));
             if (direction.length() <= 1.0e-10
                     || direction.horizontalLength() <= 1.0e-10) {
                 direction = outgoing;

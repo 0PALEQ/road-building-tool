@@ -137,7 +137,8 @@ public final class RoadPathPlacementEndpoint {
         PreparedRoadNetworkMutation mutation;
         try {
             if (packet.parallelOffset() == 0) {
-                mutation = graph.prepareRoadNetwork(planned.geometry(), planned.presetId(),
+                mutation = graph.prepareRoadNetwork(new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(
+                        planned.geometry(), planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values()), planned.presetId(),
                         planned.preset(), trafficHandedness);
             } else {
                 var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(
@@ -147,7 +148,11 @@ public final class RoadPathPlacementEndpoint {
                 if (parallelResult instanceof RoadPathPlanningResult.Failure failure) {
                     return rejected(packet, mapPlanFailure(failure.code()));
                 }
-                mutation = graph.prepareParallelRoadNetwork(planned.geometry(), parallel,
+                mutation = graph.prepareParallelRoadNetwork(
+                        new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(planned.geometry(),
+                                planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values()),
+                        new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(parallel,
+                                planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values()),
                         planned.presetId(), planned.preset(), trafficHandedness);
             }
         } catch (IllegalArgumentException invalid) {
@@ -156,6 +161,11 @@ public final class RoadPathPlacementEndpoint {
 
         ServerLevelPlacementBlockWorld world =
                 new ServerLevelPlacementBlockWorld(player.serverLevel());
+        mutation = graph.withTunnelPortals(mutation, world, ledger::isMaterializedRoadPosition);
+        if (mutation.allUpsertedSegments().stream().anyMatch(segment ->
+                segment.referenceGeometry().length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)) {
+            return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
+        }
         BlockPlanResult roadMaterialization = new RoadMaterializationPlanner().plan(
                 dimension,
                 mutation.placedSegments(),
@@ -469,7 +479,7 @@ public final class RoadPathPlacementEndpoint {
                             segment.presetSnapshot().surfaceBands()
                     ))
                     .toList();
-            decoratedSurface = structurePlanner.prepareRailingSurface(
+            decoratedSurface = structurePlanner.prepareStructureSurface(
                     decoratedSurface, structureSpans, world,
                     position -> ledger.isMaterializedRoadPosition(position)
                             || proposedRoadPositions.contains(position));
@@ -583,6 +593,8 @@ public final class RoadPathPlacementEndpoint {
             case UNKNOWN_PRESET -> PlacementResultCode.UNKNOWN_PRESET;
             case PRESET_REVISION_MISMATCH ->
                     PlacementResultCode.PRESET_REVISION_MISMATCH;
+            case TOO_SHARP_TURN -> PlacementResultCode.TOO_SHARP_TURN;
+            case SELF_INTERSECTION -> PlacementResultCode.SELF_INTERSECTION;
             case INVALID_GEOMETRY, COORDINATE_OUT_OF_RANGE ->
                     PlacementResultCode.INVALID_GEOMETRY;
             case BLOCK_LIMIT_EXCEEDED,

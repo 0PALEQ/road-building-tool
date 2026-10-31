@@ -27,6 +27,7 @@ import java.util.function.Predicate;
 
 public final class RoadTunnelPlanner {
     public static final int FREE_HEIGHT = 7;
+    public static final double MINIMUM_SEGMENT_LENGTH = 8.0;
     public static final int PILLAR_SPACING = 2;
     public static final int LIGHT_SPACING = 10;
 
@@ -119,6 +120,31 @@ public final class RoadTunnelPlanner {
         if (tunnelSurfaces.isEmpty()) {
             return Result.success(emptyPlan(surfacePlan), Set.of());
         }
+        // Sweep the lateral boundaries. A rasterized footprint also has steps and
+        // end faces; extruding those faces creates columns across the portal.
+        for (RoadSegment segment : segments) {
+            ReferenceGeometry geometry = segment.referenceGeometry();
+            double halfWidth = segment.presetSnapshot().surfaceBlockWidth() / 2.0;
+            for (double distance = 0; distance <= geometry.length(); distance += 0.25) {
+                PathSample sample = geometry.sample(distance);
+                RoadVector left = sample.tangent().horizontalLeftUnit();
+                for (int side : new int[]{-1, 1}) {
+                    Optional<BlockPos> edge = surfaceIndex.resolve(sample.position().add(
+                            left.scale(side * (halfWidth - 0.5))));
+                    if (edge.isEmpty() || !tunnelSurfaces.contains(edge.get())) continue;
+                    BlockPos outside = surfacePosition(sample.position().add(left.scale(side * (halfWidth + 0.5))));
+                    outside = new BlockPos(outside.getX(), edge.get().getY(), outside.getZ());
+                    if (surfacePositions.contains(outside) || surfacePositions.contains(outside.above())
+                            || surfacePositions.contains(outside.below())) continue;
+                    for (int height = 0; height <= FREE_HEIGHT + 1; height++) {
+                        BlockPos wall = outside.above(height);
+                        if (existingRoadPosition.test(wall) || world.hasBlockEntity(wall)) continue;
+                        if (!put(targets, wall, Blocks.POLISHED_ANDESITE.defaultBlockState(), maximumAffectedBlocks))
+                            return Result.failure();
+                    }
+                }
+            }
+        }
         for (RoadSegment segment : segments) {
             addMedianAndPillars(
                     targets,
@@ -155,6 +181,11 @@ public final class RoadTunnelPlanner {
     ) {
         Set<BlockPos> detected = new HashSet<>();
         for (RoadSegment segment : segments) {
+            if (segment.referenceGeometry().length() < MINIMUM_SEGMENT_LENGTH) continue;
+            Set<BlockPos> segmentSurfaces = new HashSet<>();
+            double coveredLength = 0;
+            double currentRun = 0;
+            double longestRun = 0;
             ReferenceGeometry geometry = segment.referenceGeometry();
             double halfWidth = segment.presetSnapshot().surfaceBlockWidth() / 2.0;
             for (double distance = 0.0;
@@ -172,18 +203,106 @@ public final class RoadTunnelPlanner {
                             sample.position().add(left.scale(lateral))
                     ).ifPresent(crossSection::add);
                 }
-                boolean covered = crossSection.stream().anyMatch(position -> {
-                    BlockPos probe = position.above(FREE_HEIGHT);
-                    BlockState state = world.blockState(probe);
-                    return state.blocksMotion()
-                            && !existingRoadPosition.test(probe);
-                });
+                boolean covered = covered(sample, segment.presetSnapshot().surfaceBlockWidth(),
+                        world, existingRoadPosition, surfaceIndex);
+                segmentSurfaces.addAll(crossSection);
                 if (covered) {
-                    detected.addAll(crossSection);
-                }
+                    coveredLength += 0.25;
+                    currentRun += 0.25;
+                    longestRun = Math.max(longestRun, currentRun);
+                } else currentRun = 0;
             }
+            if (coveredLength >= geometry.length() * 0.6 && longestRun >= MINIMUM_SEGMENT_LENGTH - 0.5)
+                detected.addAll(segmentSurfaces);
         }
         return detected;
+    }
+
+    public static boolean isTerrain(BlockState state) {
+        String path = BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath();
+        return state.blocksMotion() && !(state.getBlock() instanceof net.minecraft.world.level.block.LeavesBlock)
+                && !path.endsWith("_log") && !path.endsWith("_wood")
+                && !path.endsWith("_stem") && !path.endsWith("_hyphae")
+                && !state.is(net.minecraft.tags.BlockTags.LOGS)
+                && !state.is(net.minecraft.tags.BlockTags.LEAVES) && !state.canBeReplaced();
+    }
+
+    /** Portal cuts are measured along the center line and include the full road width. */
+    public static List<Double> portalFractions(ReferenceGeometry geometry, int width, PlacementBlockWorld world) {
+        return portalFractions(geometry, width, world, position -> false);
+    }
+
+    public static List<Double> portalFractions(ReferenceGeometry geometry, int width, PlacementBlockWorld world,
+                                                Predicate<BlockPos> existingRoadPosition) {
+        List<Double> cuts = new ArrayList<>();
+        boolean previous = covered(geometry, width, world, existingRoadPosition, 0);
+        for (double distance = 1; distance < geometry.length(); distance += 1) {
+            boolean current = covered(geometry, width, world, existingRoadPosition, distance);
+            if (current != previous) cuts.add(distance / geometry.length());
+            previous = current;
+        }
+        return stableCuts(geometry.length(), covered(geometry, width, world, existingRoadPosition, 0), cuts);
+    }
+
+    private static List<Double> stableCuts(double length, boolean startsCovered, List<Double> cuts) {
+        List<Double> boundaries = new ArrayList<>();
+        boundaries.add(0.0);
+        cuts.forEach(cut -> boundaries.add(cut * length));
+        boundaries.add(length);
+        List<Boolean> states = new ArrayList<>();
+        for (int i = 0; i < boundaries.size()-1; i++) states.add(startsCovered ^ (i % 2 == 1));
+        // Ignore short terrain spikes before filling short gaps between tunnels.
+        for (int i = 0; i < states.size(); i++)
+            if (states.get(i) && boundaries.get(i+1)-boundaries.get(i) < MINIMUM_SEGMENT_LENGTH) states.set(i, false);
+        List<Double> result = new ArrayList<>();
+        boolean state = states.get(0);
+        for (int i = 1; i < states.size(); i++) {
+            if (states.get(i) != state) {
+                result.add(boundaries.get(i) / length);
+                state = states.get(i);
+            }
+        }
+        // Removing a pair merges a short open gap. Removing an endpoint cut
+        // absorbs a short approach into the adjacent, already valid segment.
+        boolean changed = true;
+        while (changed && !result.isEmpty()) {
+            changed = false;
+            for (int i=0; i<=result.size(); i++) {
+                double from = i==0 ? 0 : result.get(i-1)*length;
+                double to = i==result.size() ? length : result.get(i)*length;
+                if (to-from >= MINIMUM_SEGMENT_LENGTH) continue;
+                if (i==0) result.remove(0);
+                else if (i==result.size()) result.remove(i-1);
+                else { result.remove(i); result.remove(i-1); }
+                changed = true;
+                break;
+            }
+        }
+        return result;
+    }
+
+    private static boolean covered(ReferenceGeometry geometry, int width, PlacementBlockWorld world, Predicate<BlockPos> existingRoadPosition, double distance) {
+        return covered(geometry.sample(distance), width, world, existingRoadPosition, null);
+    }
+
+    private static boolean covered(PathSample sample, int width, PlacementBlockWorld world,
+                                   Predicate<BlockPos> existingRoadPosition, SurfaceIndex surfaceIndex) {
+        RoadVector left = sample.tangent().horizontalLeftUnit();
+        int coveredColumns = 0;
+        boolean centerCovered = false;
+        for (int column = 0; column < width; column++) {
+            double lateral = column - (width - 1) / 2.0;
+            RoadPoint point = sample.position().add(left.scale(lateral));
+            BlockPos surface = surfaceIndex == null ? surfacePosition(point)
+                    : surfaceIndex.resolve(point).orElse(surfacePosition(point));
+            BlockPos probe = surface.above(FREE_HEIGHT);
+            boolean terrain = !existingRoadPosition.test(probe) && isTerrain(world.blockState(probe));
+            if (terrain) coveredColumns++;
+            if (Math.abs(lateral) <= 0.5) centerCovered |= terrain;
+        }
+        // A cut into one side of a hillside needs a retaining wall, not a roof
+        // extending over otherwise open lanes.
+        return centerCovered && coveredColumns >= Math.ceil(width * 0.6);
     }
 
     private static boolean isUnsupportedVegetation(BlockState state) {

@@ -60,9 +60,9 @@ public final class StraightRoadPreviewRenderer {
         matrices.pushPose();
         matrices.translate(-cameraPosition.x, -cameraPosition.y, -cameraPosition.z);
         try {
-            float previewRed = tool.placementPending() ? 0.95F : 0.15F;
-            float previewGreen = tool.placementPending() ? 0.62F : 0.72F;
-            float previewBlue = tool.placementPending() ? 0.12F : 0.95F;
+            float previewRed = tool.previewInvalid() || tool.placementPending() ? 0.95F : 0.15F;
+            float previewGreen = tool.previewInvalid() ? 0.15F : tool.placementPending() ? 0.62F : 0.72F;
+            float previewBlue = tool.previewInvalid() ? 0.15F : tool.placementPending() ? 0.12F : 0.95F;
             tool.rawPreviews().forEach(preview -> {
                 VertexConsumer fill = consumers.getBuffer(NODE_FILL);
                 List<RawRoadPreview.CrossSection> sections =
@@ -125,6 +125,13 @@ public final class StraightRoadPreviewRenderer {
             );
             for (RoadNodeMarker marker : nodeMarkers) {
                 renderNodeMarkerOutline(matrices, markerLines, marker);
+            }
+            for (var port : tool.visibleLanePorts()) {
+                var point = port.position();
+                LevelRenderer.renderLineBox(matrices, markerLines,
+                        new AABB(point.x() - 0.65, point.y() + 1.02, point.z() - 0.65,
+                                point.x() + 0.65, point.y() + 1.08, point.z() + 0.65),
+                        0.1F, 0.95F, 0.3F, 1.0F);
             }
             tool.startBlock().ifPresent(position -> LevelRenderer.renderLineBox(
                     matrices,

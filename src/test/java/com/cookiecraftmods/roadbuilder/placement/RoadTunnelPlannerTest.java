@@ -40,6 +40,113 @@ class RoadTunnelPlannerTest {
     }
 
     @Test
+    void suppressesOneBlockTunnelsAndNeverProducesShortPortalSegments() {
+        MapWorld world = new MapWorld();
+        var geometry = new StraightGeometry(new RoadPoint(0.5,64,0.5), new RoadPoint(100.5,64,0.5));
+        for (int x : new int[]{1, 20, 21, 98})
+            for (int z=-5; z<=5; z++) world.states.put(new BlockPos(x,71,z), Blocks.STONE.defaultBlockState());
+        assertTrue(RoadTunnelPlanner.portalFractions(geometry,11,world).isEmpty());
+        for (int x=30; x<70; x++)
+            if (x!=50) for (int z=-5; z<=5; z++) world.states.put(new BlockPos(x,71,z), Blocks.STONE.defaultBlockState());
+        var cuts = RoadTunnelPlanner.portalFractions(geometry,11,world);
+        assertEquals(List.of(0.3,0.7), cuts);
+        double previous=0;
+        for (double cut : cuts) {
+            assertTrue((cut-previous)*geometry.length() >= RoadTunnelPlanner.MINIMUM_SEGMENT_LENGTH);
+            previous=cut;
+        }
+    }
+
+    @Test
+    void diagonalTunnelWallsStayOutsideTravelCorridor() {
+        var original = segment();
+        var geometry = new StraightGeometry(new RoadPoint(0.5, 64, 0.5), new RoadPoint(20.5, 64, 20.5));
+        var diagonal = RoadSegment.path(original.id(), original.roadId(), original.startNodeId(), original.endNodeId(),
+                geometry, original.presetId(), original.presetRevision(), original.presetSnapshot(),
+                original.trafficHandedness(), original.lanes().stream().map(lane -> lane.id()).toList());
+        MapWorld world = new MapWorld();
+        Map<BlockPos, PlannedBlock> surface = new HashMap<>();
+        for (double distance = 0; distance <= geometry.length(); distance += 0.25) {
+            var sample = geometry.sample(distance);
+            for (double lateral = -5; lateral <= 5; lateral += 0.25) {
+                var point = sample.position().add(sample.tangent().horizontalLeftUnit().scale(lateral));
+                var pos = new BlockPos((int)Math.floor(point.x()), 64, (int)Math.floor(point.z()));
+                surface.put(pos, new PlannedBlock(pos, Blocks.GRAY_CONCRETE.defaultBlockState()));
+                world.states.put(pos.above(7), Blocks.STONE.defaultBlockState());
+            }
+        }
+        var plan = new RoadTunnelPlanner().addTunnels(BlockPlacementPlan.create(Level.OVERWORLD, surface.values()),
+                List.of(diagonal), world, position -> false, 30_000).plan().orElseThrow();
+        long walls = 0;
+        for (var block : plan.blocks()) {
+            if (block.position().getY() != 68 || !block.targetState().is(Blocks.POLISHED_ANDESITE)) continue;
+            walls++;
+            double lateral = Math.abs((block.position().getZ() - block.position().getX()) / Math.sqrt(2));
+            assertTrue(lateral >= 5, "wall crosses the travel corridor at " + block.position());
+        }
+        assertTrue(walls > 20);
+    }
+
+    @Test
+    void hillsideOverOneEdgeDoesNotCreateAnExposedTunnelBox() {
+        MapWorld world = new MapWorld();
+        List<PlannedBlock> surface = new ArrayList<>();
+        for (int x = 0; x <= 20; x++) {
+            for (int z = -5; z <= 5; z++) {
+                surface.add(new PlannedBlock(new BlockPos(x, 64, z), Blocks.GRAY_CONCRETE.defaultBlockState()));
+                if (z >= 3) world.states.put(new BlockPos(x, 71, z), Blocks.STONE.defaultBlockState());
+            }
+        }
+        assertTrue(RoadTunnelPlanner.portalFractions(segment().referenceGeometry(), 11, world).isEmpty());
+        var result = new RoadTunnelPlanner().addTunnels(BlockPlacementPlan.create(Level.OVERWORLD, surface),
+                List.of(segment()), world, position -> false, 20_000);
+        assertTrue(result.protectedRoofPositions().isEmpty());
+        assertTrue(result.plan().orElseThrow().blocks().stream().noneMatch(block -> block.position().getY() > 64));
+    }
+
+    @Test
+    void tunnelCoversWholeSegmentWithWallsAndOpenPortals() {
+        MapWorld world = new MapWorld();
+        List<PlannedBlock> surface = new ArrayList<>();
+        for (int x = 0; x <= 20; x++) {
+            for (int z = -5; z <= 5; z++)
+                surface.add(new PlannedBlock(new BlockPos(x, 64, z), Blocks.GRAY_CONCRETE.defaultBlockState()));
+        }
+        for (int x=0; x<=20; x++) for (int z = -5; z <= 5; z++) world.states.put(new BlockPos(x, 71, z), Blocks.STONE.defaultBlockState());
+        var result = new RoadTunnelPlanner().addTunnels(BlockPlacementPlan.create(Level.OVERWORLD, surface),
+                List.of(segment()), world, position -> false, 20_000);
+        var plan = result.plan().orElseThrow();
+        assertState(plan, new BlockPos(1, 72, 0), Blocks.POLISHED_ANDESITE.defaultBlockState());
+        assertState(plan, new BlockPos(19, 72, 0), Blocks.POLISHED_ANDESITE.defaultBlockState());
+        assertState(plan, new BlockPos(10, 68, -6), Blocks.POLISHED_ANDESITE.defaultBlockState());
+        assertState(plan, new BlockPos(10, 71, 6), Blocks.POLISHED_ANDESITE.defaultBlockState());
+        assertTrue(plan.blocks().stream().noneMatch(block -> block.position().equals(new BlockPos(-1, 68, 0))));
+        assertTrue(plan.blocks().stream().noneMatch(block -> block.position().equals(new BlockPos(21, 68, 0))));
+    }
+
+    @Test
+    void forestIsNotTerrainAndDoesNotCreatePortals() {
+        MapWorld world = new MapWorld();
+        for (int x = 0; x <= 20; x++) {
+            for (int z = -6; z <= 6; z++)
+                world.states.put(new BlockPos(x, 71, z), Blocks.OAK_LEAVES.defaultBlockState());
+        }
+        world.states.put(new BlockPos(10, 71, 0), Blocks.OAK_LOG.defaultBlockState());
+        assertTrue(RoadTunnelPlanner.portalFractions(segment().referenceGeometry(), 11, world).isEmpty());
+        assertTrue(!RoadTunnelPlanner.isTerrain(Blocks.OAK_LOG.defaultBlockState()));
+        assertTrue(!RoadTunnelPlanner.isTerrain(Blocks.OAK_LEAVES.defaultBlockState()));
+    }
+
+    @Test
+    void terrainCreatesEntryAndExitCuts() {
+        MapWorld world = new MapWorld();
+        for (int x = 5; x < 15; x++)
+            for (int z = -5; z <= 5; z++) world.states.put(new BlockPos(x, 71, z), Blocks.STONE.defaultBlockState());
+        assertEquals(List.of(), RoadTunnelPlanner.portalFractions(
+                segment().referenceGeometry(), 11, world));
+    }
+
+    @Test
     void carvesSevenBlocksAndAddsMedianPillarsAndPairedRoofLights() {
         MapWorld world = new MapWorld();
         List<PlannedBlock> surface = new ArrayList<>();
@@ -100,10 +207,7 @@ class RoadTunnelPlannerTest {
                 ));
             }
         }
-        world.states.put(
-                new BlockPos(10, 71, 0),
-                Blocks.STONE.defaultBlockState()
-        );
+        for (int x=0; x<=20; x++) for (int z = -5; z <= 5; z++) world.states.put(new BlockPos(x, 71, z), Blocks.STONE.defaultBlockState());
         world.states.put(
                 new BlockPos(10, 73, 4),
                 Blocks.GRASS.defaultBlockState()
@@ -135,10 +239,7 @@ class RoadTunnelPlannerTest {
                 ));
             }
         }
-        world.states.put(
-                new BlockPos(10, 72, 0),
-                Blocks.STONE.defaultBlockState()
-        );
+        for (int x=0; x<=20; x++) for (int z = -5; z <= 5; z++) world.states.put(new BlockPos(x, 72, z), Blocks.STONE.defaultBlockState());
 
         BlockPlacementPlan plan = new RoadTunnelPlanner().addTunnels(
                 BlockPlacementPlan.create(Level.OVERWORLD, surface),

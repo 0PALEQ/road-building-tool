@@ -1076,6 +1076,74 @@ public final class RoadGraph {
         );
     }
 
+    public PreparedRoadNetworkMutation withTunnelPortals(
+            PreparedRoadNetworkMutation mutation,
+            com.cookiecraftmods.roadbuilder.placement.PlacementBlockWorld world
+    ) {
+        return withTunnelPortals(mutation, world, position -> false);
+    }
+
+    public PreparedRoadNetworkMutation withTunnelPortals(
+            PreparedRoadNetworkMutation mutation,
+            com.cookiecraftmods.roadbuilder.placement.PlacementBlockWorld world,
+            java.util.function.Predicate<net.minecraft.core.BlockPos> existingRoadPosition
+    ) {
+        List<RoadNode> nodes = new ArrayList<>(mutation.addedNodes());
+        List<RoadSegment> placed = new ArrayList<>();
+        Set<RoadNodeId> affected = new HashSet<>();
+        Set<UUID> generated = new HashSet<>();
+        for (RoadSegment segment : mutation.placedSegments()) {
+            var geometry = segment.referenceGeometry();
+            List<Double> cuts = com.cookiecraftmods.roadbuilder.placement.RoadTunnelPlanner.portalFractions(
+                    geometry, segment.presetSnapshot().surfaceBlockWidth(), world, existingRoadPosition);
+            if (cuts.isEmpty()) { placed.add(segment); continue; }
+            List<RoadNodeId> boundaries = new ArrayList<>();
+            boundaries.add(segment.startNodeId());
+            List<RoadPoint> points = new ArrayList<>();
+            for (double fraction : cuts) {
+                RoadPoint point = geometry.sample(fraction * geometry.length()).position();
+                RoadNode node = new RoadNode(new RoadNodeId(nextGeneratedId(generated)), point);
+                nodes.add(node);
+                points.add(point);
+                boundaries.add(node.id());
+            }
+            boundaries.add(segment.endNodeId());
+            affected.addAll(boundaries);
+            var parts = ReferenceGeometryEditor.split(geometry, cuts, points);
+            for (int index = 0; index < parts.size(); index++) {
+                placed.add(RoadSegment.path(new RoadSegmentId(nextGeneratedId(generated)), segment.roadId(),
+                        boundaries.get(index), boundaries.get(index + 1), parts.get(index), segment.presetId(),
+                        segment.presetRevision(), segment.presetSnapshot(), segment.trafficHandedness(),
+                        generatedLaneIds(segment.presetSnapshot().lanes(segment.trafficHandedness()).size(), generated)));
+            }
+        }
+        if (affected.isEmpty()) return mutation;
+        Map<RoadSegmentId, RoadSegment> resulting = new HashMap<>(segments);
+        mutation.segmentSplits().forEach(split -> {
+            resulting.remove(split.original().id());
+            split.replacements().forEach(segment -> resulting.put(segment.id(), segment));
+        });
+        placed.forEach(segment -> resulting.put(segment.id(), segment));
+        Set<RoadLaneId> affectedLanes = new HashSet<>();
+        mutation.placedSegments().stream()
+                .filter(segment -> placed.stream().noneMatch(candidate -> candidate.id().equals(segment.id())))
+                .flatMap(segment -> segment.lanes().stream()).map(RoadLane::id).forEach(affectedLanes::add);
+        // Connector rebuilding uses graph node incidence, including newly created portals.
+        List<LaneConnectorId> removed = new ArrayList<>(mutation.removedConnectorIds());
+        connectors.values().stream().filter(connector -> (affectedLanes.contains(connector.fromLaneId()) || affectedLanes.contains(connector.toLaneId())))
+                .map(LaneConnector::id).filter(id -> !removed.contains(id)).forEach(removed::add);
+        List<LaneConnector> added = new ArrayList<>(mutation.addedConnectors().stream()
+                .filter(connector -> !(affectedLanes.contains(connector.fromLaneId()) || affectedLanes.contains(connector.toLaneId()))).toList());
+        for (LaneConnector connector : rebuildStraightConnectors(resulting.values(), affected, removed, generated)) {
+            if (added.stream().noneMatch(existing -> existing.fromLaneId().equals(connector.fromLaneId())
+                    && existing.toLaneId().equals(connector.toLaneId()))) added.add(connector);
+        }
+        var result = new PreparedRoadNetworkMutation(mutation.expectedRevision(), mutation.road(), mutation.createsRoad(),
+                nodes, mutation.segmentSplits(), placed, removed, added);
+        validateNetworkMutation(result);
+        return result;
+    }
+
     private PreparedRoadNetworkMutation prepareIntersectingRoadNetwork(
             ReferenceGeometry geometry,
             ResourceLocation presetId,

@@ -40,7 +40,7 @@ public record RoadBuilderToolbarLayout(
     private static final int MAXIMUM_TOOL_MODE_WIDTH = 132;
     private static final int MINIMUM_TOOL_MODE_WIDTH = 46;
     private static final int UTILITY_BUTTON_COUNT = 3;
-    private static final int ROAD_TOOL_BUTTON_COUNT = 5;
+    private static final int ROAD_TOOL_BUTTON_COUNT = 6;
 
     public RoadBuilderToolbarLayout {
         groupButtons = Collections.unmodifiableMap(
@@ -329,8 +329,9 @@ public record RoadBuilderToolbarLayout(
             case STRAIGHT_ROAD -> 0;
             case SIMPLE_CURVE -> 1;
             case COMPLEX_CURVE -> 2;
-            case ROUNDABOUT -> 3;
-            case REPLACE -> 4;
+            case FREEHAND_DRAW -> 3;
+            case ROUNDABOUT -> 4;
+            case REPLACE -> 5;
             default -> throw new IllegalArgumentException(
                     "not a road placement tool: " + tool
             );

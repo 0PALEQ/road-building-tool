@@ -30,6 +30,82 @@ class RoadStructurePlannerTest {
     }
 
     @Test
+    void curvedBridgeMediansSurviveSurfaceLayerMergingAsStone() {
+        var gray = new net.minecraft.resources.ResourceLocation("minecraft", "gray_concrete");
+        var grass = new net.minecraft.resources.ResourceLocation("minecraft", "grass_block");
+        var lane = new com.cookiecraftmods.roadbuilder.preset.LaneComponent(
+                com.cookiecraftmods.roadbuilder.preset.LaneType.VEHICLE, 3, 0,
+                com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.FORWARD);
+        var bands = List.of(
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.PAVEMENT, 3, gray),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.GRASS_MEDIAN, 3, grass),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.PAVEMENT, 3, gray));
+        var geometry = new com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry(
+                new RoadPoint(0.5, 12, 0.5), new RoadPoint(20.5, 12, -10.5),
+                new RoadPoint(40.5, 12, 30.5));
+        var segment = com.cookiecraftmods.roadbuilder.network.RoadSegment.path(
+                new com.cookiecraftmods.roadbuilder.network.RoadSegmentId(java.util.UUID.randomUUID()),
+                new com.cookiecraftmods.roadbuilder.network.RoadId(java.util.UUID.randomUUID()),
+                new com.cookiecraftmods.roadbuilder.network.RoadNodeId(java.util.UUID.randomUUID()),
+                new com.cookiecraftmods.roadbuilder.network.RoadNodeId(java.util.UUID.randomUUID()),
+                geometry, gray, 1,
+                new com.cookiecraftmods.roadbuilder.network.RoadPresetSnapshot(9, gray, List.of(lane), bands),
+                com.cookiecraftmods.roadbuilder.preset.TrafficHandedness.RHT,
+                List.of(new com.cookiecraftmods.roadbuilder.network.RoadLaneId(java.util.UUID.randomUUID())));
+        var limits = new ConstructionLimits(512, 131072);
+        var surface = success(new StraightRoadSegmentMaterializer().plan(Level.OVERWORLD, segment, limits));
+        var grassPositions = surface.blocks().stream().filter(block -> block.targetState().is(Blocks.GRASS_BLOCK))
+                .map(PlannedBlock::position).toList();
+        assertFalse(grassPositions.isEmpty());
+        var built = success(new RoadMaterializationPlanner().plan(Level.OVERWORLD, List.of(segment),
+                new MapWorld(0), pos -> false, limits));
+        for (BlockPos position : grassPositions) {
+            assertBlock(built, position, Blocks.SMOOTH_STONE);
+        }
+    }
+
+    @Test
+    void grassMediansBecomeStoneOnlyOnBridgeSpans() {
+        var grass = new net.minecraft.resources.ResourceLocation("minecraft", "grass_block");
+        var asphalt = new net.minecraft.resources.ResourceLocation("minecraft", "gray_concrete");
+        var bands = List.of(
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.PAVEMENT, 2, asphalt),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.GRASS_MEDIAN, 1, grass),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.PAVEMENT, 2, asphalt));
+        for (int height : new int[]{1, 12}) {
+            var geometry = new StraightGeometry(new RoadPoint(0.5, height, 2.5),
+                    new RoadPoint(30.5, height, 2.5));
+            var blocks = new java.util.ArrayList<PlannedBlock>();
+            for (int x = 0; x <= 30; x++) {
+                for (int z = 0; z <= 4; z++) {
+                    blocks.add(new PlannedBlock(new BlockPos(x, height, z),
+                            (z == 2 ? Blocks.GRASS_BLOCK : Blocks.GRAY_CONCRETE).defaultBlockState()));
+                }
+            }
+            var surface = BlockPlacementPlan.create(Level.OVERWORLD, blocks);
+            var spans = List.of(new RoadStructurePlanner.StructureSpan(geometry, 5, bands));
+            var planner = new RoadStructurePlanner();
+            var prepared = planner.prepareStructureSurface(surface, spans, new MapWorld(0), pos -> false);
+            var built = success(planner.addStructures(surface, new MapWorld(0), spans, pos -> false, 20000));
+            for (int x = 0; x <= 30; x++) {
+                assertBlock(prepared, new BlockPos(x, height, 2),
+                        height == 1 ? Blocks.GRASS_BLOCK : Blocks.SMOOTH_STONE);
+                assertBlock(built, new BlockPos(x, height, 2),
+                        height == 1 ? Blocks.GRASS_BLOCK : Blocks.SMOOTH_STONE);
+                assertBlock(built, new BlockPos(x, height, 1), Blocks.GRAY_CONCRETE);
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(prepared.blocks(),
+                    planner.prepareStructureSurface(prepared, spans, new MapWorld(0), pos -> false).blocks());
+        }
+    }
+
+    @Test
     void presetRailingsWorkAtGroundLevelAndReplaceAutomaticBridgeEdges() {
         var stone = new net.minecraft.resources.ResourceLocation("minecraft", "smooth_stone");
         var pavement = new net.minecraft.resources.ResourceLocation("minecraft", "gray_concrete");

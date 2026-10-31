@@ -142,14 +142,7 @@ public final class RoadSnapResolver {
                     ) <= NODE_SNAP_MAXIMUM_VERTICAL_GAP)
                     .map(node -> new NodeCandidate(
                             node,
-                            nodeSnapRadius(
-                                    node,
-                                    incidentByNode.getOrDefault(
-                                            node.id(),
-                                            List.of()
-                                    ),
-                                    settings.range()
-                            )
+                            settings.range()
                     ))
                     .filter(candidate -> horizontalDistance(
                             candidate.node().position(),
@@ -248,7 +241,8 @@ public final class RoadSnapResolver {
                                         nodes,
                                         incidentByNode,
                                         segments,
-                                        settings.range()
+                                        settings.range(),
+                                        settings.guidelineRange()
                                 )
                                 : curveAngleTarget(
                                         raw,
@@ -322,19 +316,6 @@ public final class RoadSnapResolver {
                 MAXIMUM_JUNCTION_FOOTPRINT_RADIUS,
                 maximumHalfWidth / angleFactor + JUNCTION_FOOTPRINT_MARGIN
         );
-    }
-
-    private static double nodeSnapRadius(
-            RoadNode node,
-            Collection<RoadSegment> segments,
-            double baseRadius
-    ) {
-        Objects.requireNonNull(node, "node");
-        Objects.requireNonNull(segments, "segments");
-        // A junction's material footprint can be tens of blocks wide. It is
-        // not an appropriate cursor hit target: using it made nearby ports
-        // impossible to select independently.
-        return baseRadius;
     }
 
     private static List<RoadSegment> incidentSegments(
@@ -548,7 +529,8 @@ public final class RoadSnapResolver {
             Collection<RoadNode> nodes,
             Map<RoadNodeId, List<RoadSegment>> incidentByNode,
             Collection<RoadSegment> segments,
-            double range
+            double range,
+            double guidelineRange
     ) {
         List<SnapCandidate> candidates = new ArrayList<>();
         if (start != null) {
@@ -610,7 +592,7 @@ public final class RoadSnapResolver {
                         node.position(),
                         direction.direction(),
                         range,
-                        Double.POSITIVE_INFINITY,
+                        guidelineRange,
                         RoadSnapGuide.Kind.NODE_ANGLE,
                         1,
                         direction.segmentId(),

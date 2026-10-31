@@ -142,7 +142,10 @@ public final class StraightRoadIntersectionMaterializer {
                     BlockPlanFailureCode.INVALID_GEOMETRY
             );
         }
-        List<CornerFillet> fillets = cornerFillets(approaches, maximumFootprintRadius);
+        boolean auxiliary = !com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts
+                .attachments(node.id(), incidentSegments).isEmpty();
+        List<CornerFillet> fillets = auxiliary ? List.of()
+                : cornerFillets(approaches, maximumFootprintRadius);
 
         double maximumWidth = approaches.stream()
                 .mapToDouble(Approach::width)
@@ -202,6 +205,7 @@ public final class StraightRoadIntersectionMaterializer {
 
         List<PlannedBlock> blocks = new ArrayList<>();
         Optional<BlockState> marking = resolveMarking(incidentSegments);
+        Map<BlockState, ResolvedRoadSurface> elevationSurfaces = new HashMap<>();
         for (int x = minimumX; x <= maximumX; x++) {
             for (int z = minimumZ; z <= maximumZ; z++) {
                 double offsetX = x + 0.5 - node.position().x();
@@ -213,6 +217,10 @@ public final class StraightRoadIntersectionMaterializer {
                 } else if (lanePavement.disabled().contains(position)
                         && marking.isPresent()) {
                     targetState = marking.orElseThrow();
+                } else if (auxiliary) {
+                    // Keep the trunk's surface, medians and markings. Only the ramp's lane
+                    // connection needs junction pavement; no full-width conflict box.
+                    continue;
                 } else {
                     targetState = intersectionState(
                             offsetX,
@@ -233,7 +241,11 @@ public final class StraightRoadIntersectionMaterializer {
                             BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED
                     );
                 }
-                blocks.add(new PlannedBlock(position, targetState));
+                // Use the same half-block quantization and slab companions as road segments.
+                var placement = elevationSurfaces.computeIfAbsent(targetState,
+                        state -> new ResolvedRoadSurface(1, state))
+                        .targetPlacement(0, 0.0, x, z, node.position().y());
+                blocks.add(new PlannedBlock(placement.position(), placement.state()));
             }
         }
         if (blocks.isEmpty()) {
@@ -246,7 +258,11 @@ public final class StraightRoadIntersectionMaterializer {
         // Treating only this layer as a complete connectivity graph would
         // incorrectly pave those bridge cells and cut the visible sidewalk.
         if (approaches.size() != 3) {
-            blocks = removeSidewalkIslands(blocks, sidewalk, pavement);
+            BlockState sidewalkAtLevel = new ResolvedRoadSurface(1, sidewalk)
+                    .targetPlacement(0, 0, 0, 0, node.position().y()).state();
+            BlockState pavementAtLevel = new ResolvedRoadSurface(1, pavement)
+                    .targetPlacement(0, 0, 0, 0, node.position().y()).state();
+            blocks = removeSidewalkIslands(blocks, sidewalkAtLevel, pavementAtLevel);
         }
         return new BlockPlanResult.Success(
                 BlockPlacementPlan.create(dimension, blocks)
@@ -275,6 +291,9 @@ public final class StraightRoadIntersectionMaterializer {
                 node.id(), incident, existingConnectors,
                 () -> new LaneConnectorId(new UUID(0L, ids.incrementAndGet()))
         );
+        var auxiliaryBranches = com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts
+                .attachments(node.id(), incident).stream().map(attachment -> attachment.branch().id())
+                .collect(java.util.stream.Collectors.toSet());
         Set<BlockPos> drivable = new HashSet<>();
         Set<BlockPos> disabled = new HashSet<>();
         long candidates = 0;
@@ -282,6 +301,10 @@ public final class StraightRoadIntersectionMaterializer {
         for (var connector : connectors) {
             RoadLane from = lanes.get(connector.fromLaneId());
             RoadLane to = lanes.get(connector.toLaneId());
+            if (!auxiliaryBranches.isEmpty() && !auxiliaryBranches.contains(from.segmentId())
+                    && !auxiliaryBranches.contains(to.segmentId())) {
+                continue;
+            }
             var geometry = new LaneConnectorGeometryPlanner().plan(
                     connector, lanes, trims.get(from.segmentId()), trims.get(to.segmentId())
             );
@@ -607,6 +630,9 @@ public final class StraightRoadIntersectionMaterializer {
                 .toList();
         if (!containingApproaches.isEmpty()) {
             Approach approach = containingApproaches.get(0);
+            if (approach.isMedian(offsetX, offsetZ)) {
+                return null;
+            }
             return approach.isSidewalk(offsetX, offsetZ)
                     && approach.isInOuterSidewalkBand(offsetX, offsetZ)
                     ? sidewalk
@@ -709,6 +735,13 @@ public final class StraightRoadIntersectionMaterializer {
                             availableLength + BLOCK_CELL_RADIUS
                     )
                     && lateral <= halfWidth() + FOOTPRINT_TOLERANCE;
+        }
+
+        boolean isMedian(double offsetX, double offsetZ) {
+            int column = Math.max(0, Math.min(columnRoles.size() - 1,
+                    (int) Math.floor(rightCoordinate(offsetX, offsetZ) + width / 2.0)));
+            RoadSurfaceRole role = columnRoles.get(column);
+            return role == RoadSurfaceRole.GRASS_MEDIAN || role == RoadSurfaceRole.CONCRETE_MEDIAN;
         }
 
         boolean isSidewalk(double offsetX, double offsetZ) {

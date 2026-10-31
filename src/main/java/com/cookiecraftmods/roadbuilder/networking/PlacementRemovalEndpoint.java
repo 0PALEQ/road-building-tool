@@ -852,7 +852,7 @@ public final class PlacementRemovalEndpoint {
                             segment.presetSnapshot().surfaceBands()
                     ))
                     .toList();
-            combined = new RoadStructurePlanner().prepareRailingSurface(
+            combined = new RoadStructurePlanner().prepareStructureSurface(
                     combined, structureSpans, world, ledger::isMaterializedRoadPosition);
             BlockPlanResult structures = new RoadStructurePlanner()
                     .addStructures(

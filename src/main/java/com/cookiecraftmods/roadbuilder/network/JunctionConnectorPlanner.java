@@ -114,6 +114,23 @@ public final class JunctionConnectorPlanner {
                 }
             }
         }
+        for (var attachment : AuxiliaryLanePorts.attachments(nodeId, incident)) {
+            RoadLaneId branchLane = attachment.branch().lanes().get(0).id();
+            RoadLaneId hostLane = attachment.port().laneId();
+            // A side port is a lane-specific connection; keep through-road movements intact.
+            result.removeIf(connector -> !connector.movement().manual()
+                    && (connector.fromLaneId().equals(branchLane) || connector.toLaneId().equals(branchLane))
+                    && !(attachment.atStart()
+                            ? connector.fromLaneId().equals(hostLane) && connector.toLaneId().equals(branchLane)
+                            : connector.fromLaneId().equals(branchLane) && connector.toLaneId().equals(hostLane)));
+            RoadLaneId from = attachment.atStart() ? hostLane : branchLane;
+            RoadLaneId to = attachment.atStart() ? branchLane : hostLane;
+            if (result.stream().noneMatch(connector -> connector.fromLaneId().equals(from)
+                    && connector.toLaneId().equals(to))) {
+                result.add(new LaneConnector(idSupplier.get(), from, to,
+                        LaneConnectorMovement.automatic(LaneMovementType.MERGE)));
+            }
+        }
         result.sort(Comparator.comparing(LaneConnector::id));
         return List.copyOf(result);
     }

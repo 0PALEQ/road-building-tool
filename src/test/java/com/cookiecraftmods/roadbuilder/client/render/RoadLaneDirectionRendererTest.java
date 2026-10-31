@@ -13,6 +13,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadLaneDirectionRendererTest {
     @Test
+    void cachedBoundsContainCurvedBackwardLanesAndExcludeDistantCameras() {
+        var curve = new com.cookiecraftmods.roadbuilder.geometry.QuadraticBezierGeometry(
+                new RoadPoint(-500, 64, 500), new RoadPoint(0, 64, -500),
+                new RoadPoint(500, 64, 500));
+        var lane = new OffsetGeometry(curve, 20, true);
+        var bounds = RoadLaneDirectionRenderer.geometryBounds(lane);
+        for (int i = 0; i <= 100; i++) {
+            var point = lane.sample(i == 100 ? lane.length() : lane.length() * i / 100).position();
+            org.junit.jupiter.api.Assertions.assertTrue(bounds.contains(point.x(), point.y(), point.z()));
+        }
+        org.junit.jupiter.api.Assertions.assertFalse(bounds.inflate(150).contains(10000, 64, 10000));
+    }
+
+    @Test
     void reversesArrowDirectionForBackwardLanes() {
         PathSample sample = new PathSample(
                 4.0,

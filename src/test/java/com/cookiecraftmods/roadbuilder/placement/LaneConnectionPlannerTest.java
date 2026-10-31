@@ -1,0 +1,75 @@
+package com.cookiecraftmods.roadbuilder.placement;
+
+import com.cookiecraftmods.roadbuilder.geometry.*;
+import com.cookiecraftmods.roadbuilder.network.*;
+import com.cookiecraftmods.roadbuilder.preset.*;
+import com.cookiecraftmods.roadbuilder.test.MinecraftBootstrap;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
+import org.junit.jupiter.api.*;
+import java.util.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+class LaneConnectionPlannerTest {
+    @BeforeAll static void bootstrap(){MinecraftBootstrap.bootstrap();}
+    private static RoadSegment road(RoadPoint a,RoadPoint b,int width,boolean multi) {
+        var preset=new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION,1,width,
+                new ResourceLocation("minecraft","gray_concrete"), multi?List.of(
+                new LaneComponent(LaneType.VEHICLE,3,-2,LaneTravelDirection.FORWARD),
+                new LaneComponent(LaneType.VEHICLE,3,2,LaneTravelDirection.FORWARD)):List.of(
+                new LaneComponent(LaneType.VEHICLE,3,0,LaneTravelDirection.FORWARD)));
+        return new RoadGraph(Level.OVERWORLD).prepareRoadNetwork(new StraightGeometry(a,b),
+                new ResourceLocation("roadbuilder","connection_test"),preset,TrafficHandedness.RHT).placedSegments().get(0);
+    }
+    @Test void adjustsBothHandlesToAvoidAnObstacleBetweenLanePorts() {
+        var source=road(new RoadPoint(-40,64,0),new RoadPoint(0,64,0),9,true);
+        var destination=road(new RoadPoint(60,64,24),new RoadPoint(100,64,24),9,true);
+        var ports=AuxiliaryLanePorts.ports(List.of(source,destination));
+        var start=ports.stream().filter(port->port.segmentId().equals(source.id())&&port.incoming())
+                .max(Comparator.comparingDouble(port->port.position().z())).orElseThrow();
+        var end=ports.stream().filter(port->port.segmentId().equals(destination.id())&&!port.incoming())
+                .max(Comparator.comparingDouble(port->port.position().z())).orElseThrow();
+        var original=(CubicBezierGeometry)LaneConnectionGeometry.align(
+                FreeformGeometry.createBalanced(start.position(),end.position(),start.direction()),start.direction(),end.direction());
+        var center=original.positionAt(0.5);
+        var obstacle=road(new RoadPoint(center.x(),64,center.z()-0.1),new RoadPoint(center.x(),64,center.z()+0.1),3,false);
+        var adjusted=(CubicBezierGeometry)new LaneConnectionPlanner().adjust(original,3,List.of(source,destination,obstacle));
+        assertNotEquals(original,adjusted);
+        assertEquals(original.start(),adjusted.start());
+        assertEquals(original.end(),adjusted.end());
+        assertEquals(1,adjusted.sample(0).tangent().dot(start.direction()),1e-6);
+        assertEquals(1,adjusted.sample(adjusted.length()).tangent().dot(end.direction()),1e-6);
+        for(double distance=0;distance<adjusted.length();distance+=0.1) {
+            var point=adjusted.sample(distance).position();
+            assertTrue(Math.hypot(point.x()-center.x(),point.z()-center.z())>2.5);
+        }
+    }
+    @Test void risingBranchCanLeaveItsSourceAndJoinTheElevatedLane() {
+        var source=road(new RoadPoint(-40,64,0),new RoadPoint(0,64,0),9,true);
+        var destination=road(new RoadPoint(80,74,24),new RoadPoint(120,74,24),9,true);
+        var roads=List.of(source,destination);
+        var ports=AuxiliaryLanePorts.ports(roads);
+        var start=ports.stream().filter(port->port.segmentId().equals(source.id())&&port.incoming())
+                .max(Comparator.comparingDouble(port->port.position().z())).orElseThrow();
+        var end=ports.stream().filter(port->port.segmentId().equals(destination.id())&&!port.incoming())
+                .max(Comparator.comparingDouble(port->port.position().z())).orElseThrow();
+        var curve=LaneConnectionGeometry.align(FreeformGeometry.createBalanced(start.position(),end.position(),start.direction()),
+                start.direction(),end.direction());
+        var result=new RoadOverpassPlanner().adjust(curve,3,roads);
+        assertEquals(start.position(),result.start());
+        assertEquals(end.position(),result.end());
+        assertTrue(AuxiliaryLanePorts.matching(result,true,3,ports).isPresent());
+        assertTrue(AuxiliaryLanePorts.matching(result,false,3,ports).isPresent());
+        assertTrue(result.sample(result.length()/2).position().y()>64);
+    }
+    @Test void impossibleConnectionsAreRejectedRatherThanBuiltThroughTheHost() {
+        var source=road(new RoadPoint(-40,64,0),new RoadPoint(0,64,0),9,true);
+        var destination=road(new RoadPoint(12,80,2),new RoadPoint(52,80,2),9,true);
+        var ports=AuxiliaryLanePorts.ports(List.of(source,destination));
+        var start=ports.stream().filter(port->port.segmentId().equals(source.id())&&port.incoming()).findFirst().orElseThrow();
+        var end=ports.stream().filter(port->port.segmentId().equals(destination.id())&&!port.incoming()).findFirst().orElseThrow();
+        var curve=LaneConnectionGeometry.align(FreeformGeometry.createBalanced(start.position(),end.position(),start.direction()),
+                start.direction(),end.direction());
+        assertThrows(IllegalArgumentException.class,()->new RoadOverpassPlanner().adjust(curve,3,List.of(source,destination)));
+    }
+}
