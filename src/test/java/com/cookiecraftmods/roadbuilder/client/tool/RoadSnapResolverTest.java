@@ -30,6 +30,32 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadSnapResolverTest {
+    @Test
+    void freehandNodeTangentsContinueBothReferenceOrientationsAndLeaveJunctionsFree() {
+        RoadNode anchor = node(70, new RoadPoint(0, 64, 0));
+        RoadSegment arm = sharedSegment(70, anchor.id(), anchor.position(),
+                new RoadPoint(-20, 64, 0), 7);
+        RoadNode other = new RoadNode(arm.endNodeId(), arm.referenceGeometry().end());
+        var graph = new com.cookiecraftmods.roadbuilder.network.RoadGraphSnapshot(
+                net.minecraft.world.level.Level.OVERWORLD, 0, java.util.Map.of(),
+                java.util.Map.of(anchor.id(), anchor, other.id(), other),
+                java.util.Map.of(arm.id(), arm), java.util.Map.of(), java.util.Map.of());
+        assertEquals(new RoadVector(1, 0, 0),
+                LaneConnectionSnapping.openEndDirection(graph, anchor.position(), true));
+        assertEquals(new RoadVector(-1, 0, 0),
+                LaneConnectionSnapping.openEndDirection(graph, anchor.position(), false));
+        assertEquals(new RoadVector(-1, 0, 0),
+                LaneConnectionSnapping.openEndDirection(graph, other.position(), true));
+        assertEquals(new RoadVector(1, 0, 0),
+                LaneConnectionSnapping.openEndDirection(graph, other.position(), false));
+        assertEquals(null, LaneConnectionSnapping.openEndDirection(graph, new RoadPoint(0, 64, 1), true));
+        RoadSegment second = sharedSegment(71, anchor.id(), anchor.position(), new RoadPoint(0, 64, 20), 7);
+        var junction = new com.cookiecraftmods.roadbuilder.network.RoadGraphSnapshot(
+                graph.dimension(), 0, java.util.Map.of(), graph.nodes(),
+                java.util.Map.of(arm.id(), arm, second.id(), second), java.util.Map.of(), java.util.Map.of());
+        assertEquals(null, LaneConnectionSnapping.openEndDirection(junction, anchor.position(), true));
+    }
+
     @org.junit.jupiter.api.BeforeAll
     static void bootstrapMinecraft() {
         com.cookiecraftmods.roadbuilder.test.MinecraftBootstrap.bootstrap();

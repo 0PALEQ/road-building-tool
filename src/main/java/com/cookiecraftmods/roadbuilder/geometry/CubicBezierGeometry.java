@@ -59,6 +59,19 @@ public final class CubicBezierGeometry implements ReferenceGeometry {
         return samples.sampleCount();
     }
 
+    public double parameterAtDistance(double distance) {
+        if(distance<0 || distance>length() || !Double.isFinite(distance)) throw new IllegalArgumentException("distance outside curve");
+        double low=0,high=1;
+        for(int i=0;i<45;i++) { double middle=(low+high)/2; if(samples.distanceAtParameter(middle)<distance) low=middle; else high=middle; }
+        return distance==0 ? 0 : distance==length() ? 1 : (low+high)/2;
+    }
+
+    public CubicBezierGeometry slice(double from,double to) {
+        if(!(from>=0 && to<=1 && from<to)) throw new IllegalArgumentException("invalid curve slice");
+        return new CubicBezierGeometry(positionAt(from),positionAt(from).add(derivativeAt(from).scale((to-from)/3)),
+                positionAt(to).subtract(derivativeAt(to).scale((to-from)/3)),positionAt(to));
+    }
+
     @Override
     public PathSample sample(double distance) {
         return samples.sample(distance);

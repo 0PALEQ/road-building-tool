@@ -36,7 +36,42 @@ public final class FreeformGeometry {
                 start.y() + chord.y() / 3, start.z() + incoming.z() * handle);
         RoadPoint second = new RoadPoint(end.x() - outgoing.x() * handle,
                 end.y() - chord.y() / 3, end.z() - outgoing.z() * handle);
-        return new CubicBezierGeometry(start, first, second, end);
+        var original=new CubicBezierGeometry(start, first, second, end);
+        if(exit==null) return original;
+        // With two independent tangents there is no circular-arc handle formula.
+        // Balance curvature across the entire available span instead of fixing
+        // both handles to one third of the chord.
+        CubicBezierGeometry best=original;
+        double bestScore=bendScore(original,forward,distance);
+        double firstLength=distance/3, secondLength=distance/3;
+        for(int pass=0;pass<3;pass++) {
+            double step=distance*(pass==0 ? 0.1 : pass==1 ? 0.025 : 0.00625);
+            double centerFirst=firstLength, centerSecond=secondLength;
+            int range=pass==0 ? 3 : 2;
+            for(int i=-range;i<=range;i++) for(int j=-range;j<=range;j++) {
+                double a=centerFirst+i*step, b=centerSecond+j*step;
+                if(a<distance*0.1 || b<distance*0.1 || a>distance*0.75 || b>distance*0.75) continue;
+                var candidate=new CubicBezierGeometry(start,
+                        new RoadPoint(start.x()+incoming.x()*a,first.y(),start.z()+incoming.z()*a),
+                        new RoadPoint(end.x()-outgoing.x()*b,second.y(),end.z()-outgoing.z()*b),end);
+                double score=bendScore(candidate,forward,distance);
+                if(score<bestScore) { best=candidate; bestScore=score; firstLength=a; secondLength=b; }
+            }
+        }
+        return best;
+    }
+
+    private static double bendScore(CubicBezierGeometry curve,RoadVector forward,double distance) {
+        double peak=0, energy=0;
+        for(int i=0;i<=64;i++) {
+            double t=i/64.0;
+            // Do not trade an ordinary connection for a loop or a reversal.
+            if(curve.derivativeAt(t).dot(forward)<-1e-8) return Double.POSITIVE_INFINITY;
+            double curvature=curve.horizontalCurvatureAt(t)*distance;
+            peak=Math.max(peak,curvature);
+            energy+=curvature*curvature/65;
+        }
+        return peak+0.01*energy;
     }
 
     private static RoadVector horizontal(RoadVector direction) {

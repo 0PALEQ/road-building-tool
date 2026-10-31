@@ -11,6 +11,37 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LaneConnectionPlannerTest {
+    @Test void mergesAtASlopingContinuationBuiltAsSeparateRoads() {
+        var roads=LaneMergeRegressionFixture.roads();
+        var ports=AuxiliaryLanePorts.ports(roads);
+        var start=ports.stream().filter(p->p.segmentId().equals(roads.get(0).id()) && p.incoming())
+                .max(Comparator.comparingDouble(p->p.position().z())).orElseThrow();
+        var end=ports.stream().filter(p->p.segmentId().equals(roads.get(3).id()) && !p.incoming())
+                .min(Comparator.comparingDouble(p->p.position().x())).orElseThrow();
+        var original=FreeformGeometry.create(start.position(),end.position(),start.direction(),end.direction());
+        var result=assertDoesNotThrow(()->new RoadOverpassPlanner().adjust(original,9,roads));
+        assertEquals(start.position(),result.start());
+        assertEquals(end.position(),result.end());
+        assertNull(RoadCurveValidation.validate(result,5));
+        assertTrue(AuxiliaryLanePorts.matching(result,true,9,ports).isPresent());
+        assertTrue(AuxiliaryLanePorts.matching(result,false,9,ports).isPresent());
+        assertNotEquals(original,result);
+        assertNull(RoadCurveValidation.validate(result,60),"the approach must keep a broad turning radius");
+    }
+
+    @Test void extendedMergeAreaDoesNotExemptAnUnrelatedRoadAtTheEndpoint() {
+        var roads=new ArrayList<>(LaneMergeRegressionFixture.roads());
+        var ports=AuxiliaryLanePorts.ports(roads);
+        var start=ports.stream().filter(p->p.segmentId().equals(roads.get(0).id()) && p.incoming())
+                .max(Comparator.comparingDouble(p->p.position().z())).orElseThrow();
+        var end=ports.stream().filter(p->p.segmentId().equals(roads.get(3).id()) && !p.incoming())
+                .min(Comparator.comparingDouble(p->p.position().x())).orElseThrow();
+        var center=end.position().subtract(end.direction().scale(2));
+        roads.add(road(center.add(new RoadVector(-100,0,0)),center.add(new RoadVector(100,0,0)),9,false));
+        var original=FreeformGeometry.create(start.position(),end.position(),start.direction(),end.direction());
+        assertThrows(IllegalArgumentException.class,()->new LaneConnectionPlanner().adjust(original,9,roads));
+    }
+
     @BeforeAll static void bootstrap(){MinecraftBootstrap.bootstrap();}
     private static RoadSegment road(RoadPoint a,RoadPoint b,int width,boolean multi) {
         var preset=new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION,1,width,

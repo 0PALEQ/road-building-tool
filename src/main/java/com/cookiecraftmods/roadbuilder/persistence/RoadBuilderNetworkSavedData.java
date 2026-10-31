@@ -547,8 +547,8 @@ public final class RoadBuilderNetworkSavedData extends SavedData {
             tag.putString(TYPE_KEY, "cubic");
             points = cubic.controlPoints();
         } else if (geometry instanceof MultiCurveGeometry multi) {
-            tag.putString(TYPE_KEY, "multi");
-            points = multi.anchors();
+            tag.putString(TYPE_KEY, multi.hasExplicitSpans() ? "joined_cubics" : "multi");
+            points = multi.hasExplicitSpans() ? multi.controlPoints() : multi.anchors();
         } else if (geometry instanceof FreehandGeometry freehand) {
             tag.putString(TYPE_KEY, freehand.anchors().size() == 2
                     ? "freehand_line"
@@ -924,6 +924,7 @@ public final class RoadBuilderNetworkSavedData extends SavedData {
                 );
             }
             case "multi" -> new MultiCurveGeometry(points);
+            case "joined_cubics" -> MultiCurveGeometry.fromControlPoints(points);
             case "freehand_line" -> {
                 requirePointCount(points, 2, path);
                 yield new FreehandGeometry(points, 0.0);

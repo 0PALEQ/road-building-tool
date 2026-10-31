@@ -206,6 +206,7 @@ public final class StraightRoadIntersectionMaterializer {
         List<PlannedBlock> blocks = new ArrayList<>();
         Optional<BlockState> marking = resolveMarking(incidentSegments);
         Map<BlockState, ResolvedRoadSurface> elevationSurfaces = new HashMap<>();
+        var elevations=new JunctionSurfaceElevation(node,incidentSegments);
         for (int x = minimumX; x <= maximumX; x++) {
             for (int z = minimumZ; z <= maximumZ; z++) {
                 double offsetX = x + 0.5 - node.position().x();
@@ -244,7 +245,7 @@ public final class StraightRoadIntersectionMaterializer {
                 // Use the same half-block quantization and slab companions as road segments.
                 var placement = elevationSurfaces.computeIfAbsent(targetState,
                         state -> new ResolvedRoadSurface(1, state))
-                        .targetPlacement(0, 0.0, x, z, node.position().y());
+                        .targetPlacement(0, 0.0, x, z, elevations.height(x+0.5,z+0.5));
                 blocks.add(new PlannedBlock(placement.position(), placement.state()));
             }
         }
@@ -263,6 +264,14 @@ public final class StraightRoadIntersectionMaterializer {
             BlockState pavementAtLevel = new ResolvedRoadSurface(1, pavement)
                     .targetPlacement(0, 0, 0, 0, node.position().y()).state();
             blocks = removeSidewalkIslands(blocks, sidewalkAtLevel, pavementAtLevel);
+        }
+        try {
+            if(auxiliary) blocks=LaneMergeMarkingPlanner.restore(dimension,node,incidentSegments,blocks,
+                    maximumAffectedBlocks,maximumPlanningCandidates);
+            blocks=JunctionSurfaceElevation.clearSupersededSurfaces(dimension,blocks,node,incidentSegments,
+                    maximumAffectedBlocks,maximumPlanningCandidates);
+        } catch(IllegalArgumentException budgetExceeded) {
+            return new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED);
         }
         return new BlockPlanResult.Success(
                 BlockPlacementPlan.create(dimension, blocks)

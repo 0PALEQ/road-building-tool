@@ -14,6 +14,23 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RoadOverpassPlannerTest {
+    @Test void curvedOverpassRemainsBuildableAfterItsElevationIsAdjusted() {
+        var curve=new CubicBezierGeometry(new RoadPoint(0,69,0),new RoadPoint(30,69,0),
+                new RoadPoint(60,69,20),new RoadPoint(100,69,20));
+        var adjusted=assertDoesNotThrow(()->new RoadOverpassPlanner().adjust(curve,9,List.of(lower())));
+        assertEquals(curve.start(),adjusted.start());
+        assertEquals(curve.end(),adjusted.end());
+        assertNull(RoadCurveValidation.validate(adjusted,RoadCurveValidation.minimumRadius(9,RoadClass.LOCAL)));
+    }
+
+    @Test void slopingRoadsWithEnoughLocalClearanceDoNotRequireEndpointRamps() {
+        var graph=new RoadGraph(Level.OVERWORLD);
+        var lower=graph.prepareRoadNetwork(new StraightGeometry(new RoadPoint(0,64,0),new RoadPoint(100,84,0)),
+                ID,preset(),TrafficHandedness.RHT).placedSegments();
+        var upper=new StraightGeometry(new RoadPoint(0,78,2),new RoadPoint(100,98,2));
+        assertSame(upper,assertDoesNotThrow(()->new RoadOverpassPlanner().adjust(upper,11,lower)));
+    }
+
     @BeforeAll static void bootstrap() { MinecraftBootstrap.bootstrap(); }
     private static final ResourceLocation ID = new ResourceLocation("roadbuilder","overpass_test");
     private static RoadPreset preset() {

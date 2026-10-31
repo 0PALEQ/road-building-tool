@@ -10,6 +10,36 @@ import static org.junit.jupiter.api.Assertions.*;
 class FreehandDrawWorkflowTest {
     @Test
     @SuppressWarnings("unchecked")
+    void laneEntryDrivesAutomaticExitAndBothLaneTangentsAreSolvedTogether() throws Exception {
+        var controller = new StraightRoadToolController();
+        set(controller, "activeTool", RoadBuilderTool.FREEHAND_DRAW);
+        set(controller, "startTarget", target(0, 0));
+        var field = StraightRoadToolController.class.getDeclaredField("pathPoints");
+        field.setAccessible(true);
+        ((List<CursorTarget>) field.get(controller)).add(target(0, 10));
+        var entry = new RoadVector(1, 0, 0);
+        set(controller, "startLanePort", port(target(0, 0).roadPoint(), entry));
+        var end = target(80, 30);
+        assertEquals(FreeformGeometry.createBalanced(target(0, 0).roadPoint(), end.roadPoint(), entry),
+                preview(controller, end));
+        var exit = new RoadVector(0, 0, 1);
+        set(controller, "hoveredLanePort", port(end.roadPoint(), exit));
+        var curve = assertInstanceOf(CubicBezierGeometry.class, preview(controller, end));
+        assertEquals(FreeformGeometry.create(target(0, 0).roadPoint(), end.roadPoint(), entry, exit), curve);
+        assertEquals(entry, curve.sample(0).tangent());
+        assertEquals(exit, curve.sample(curve.length()).tangent());
+    }
+
+    private static com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts.Port port(
+            RoadPoint position, RoadVector direction) {
+        return new com.cookiecraftmods.roadbuilder.network.AuxiliaryLanePorts.Port(
+                new com.cookiecraftmods.roadbuilder.network.RoadNodeId(java.util.UUID.randomUUID()),
+                new com.cookiecraftmods.roadbuilder.network.RoadSegmentId(java.util.UUID.randomUUID()),
+                com.cookiecraftmods.roadbuilder.network.RoadLaneId.create(), position, direction, true, 9);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void automaticHandlesFollowEndpointAndPacketPreservesPreview() throws Exception {
         var controller = new StraightRoadToolController();
         set(controller, "activeTool", RoadBuilderTool.FREEHAND_DRAW);

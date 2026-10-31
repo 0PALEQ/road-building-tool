@@ -173,6 +173,24 @@ public final class ReferenceGeometryEditor {
             return new StraightGeometry(start, end);
         }
         if (geometry instanceof MultiCurveGeometry multi) {
+            if(multi.hasExplicitSpans()) {
+                double from=geometry.length()*startFraction, to=geometry.length()*endFraction, offset=0;
+                List<CubicBezierGeometry> slices=new ArrayList<>();
+                for(var span:multi.spans()) {
+                    double localFrom=Math.max(0,from-offset), localTo=Math.min(span.length(),to-offset);
+                    if(localTo-localFrom>1e-8) slices.add(span.slice(span.parameterAtDistance(localFrom),span.parameterAtDistance(localTo)));
+                    offset+=span.length();
+                }
+                var first=slices.get(0);
+                slices.set(0,new CubicBezierGeometry(start,start.add(first.start().vectorTo(first.startControl())),first.endControl(),first.end()));
+                int lastIndex=slices.size()-1;
+                var last=slices.get(lastIndex);
+                slices.set(lastIndex,new CubicBezierGeometry(last.start(),last.startControl(),end.add(last.end().vectorTo(last.endControl())),end));
+                if(slices.size()==1) return slices.get(0);
+                List<RoadPoint> controls=new ArrayList<>(); controls.add(start);
+                slices.forEach(span->controls.addAll(span.controlPoints().subList(1,4)));
+                return MultiCurveGeometry.fromControlPoints(controls);
+            }
             List<RoadPoint> points = new ArrayList<>();
             points.add(start);
             double from = geometry.length() * startFraction;

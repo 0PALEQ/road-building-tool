@@ -10,8 +10,40 @@ public final class MultiCurveGeometry implements ReferenceGeometry {
     private final List<CubicBezierGeometry> spans;
     private final double[] cumulativeLengths;
     private final double length;
+    private final boolean explicitSpans;
+
+    public static MultiCurveGeometry fromControlPoints(List<RoadPoint> points) {
+        if(points.size()<7 || (points.size()-1)%3!=0) throw new IllegalArgumentException("joined cubics need 3n+1 control points");
+        List<CubicBezierGeometry> spans=new ArrayList<>();
+        for(int i=0;i<points.size()-1;i+=3)
+            spans.add(new CubicBezierGeometry(points.get(i),points.get(i+1),points.get(i+2),points.get(i+3)));
+        return new MultiCurveGeometry(spans,true);
+    }
+
+    private MultiCurveGeometry(List<CubicBezierGeometry> spans,boolean explicit) {
+        this.explicitSpans=explicit;
+        this.spans=List.copyOf(spans);
+        List<RoadPoint> points=new ArrayList<>();
+        points.add(spans.get(0).start());
+        spans.forEach(span->points.add(span.end()));
+        this.anchors=List.copyOf(points);
+        this.cumulativeLengths=new double[spans.size()+1];
+        double accumulated=0;
+        for(int i=0;i<spans.size();i++) cumulativeLengths[i+1]=accumulated+=spans.get(i).length();
+        this.length=accumulated;
+    }
+
+    public boolean hasExplicitSpans() { return explicitSpans; }
+
+    public List<RoadPoint> controlPoints() {
+        List<RoadPoint> points=new ArrayList<>();
+        points.add(start());
+        for(var span:spans) points.addAll(span.controlPoints().subList(1,4));
+        return List.copyOf(points);
+    }
 
     public MultiCurveGeometry(List<RoadPoint> anchors) {
+        this.explicitSpans=false;
         Objects.requireNonNull(anchors, "anchors");
         if (anchors.size() < 3) {
             throw new IllegalArgumentException(
@@ -197,12 +229,12 @@ public final class MultiCurveGeometry implements ReferenceGeometry {
     public boolean equals(Object other) {
         return this == other
                 || other instanceof MultiCurveGeometry geometry
-                && anchors.equals(geometry.anchors);
+                && explicitSpans==geometry.explicitSpans && spans.equals(geometry.spans);
     }
 
     @Override
     public int hashCode() {
-        return anchors.hashCode();
+        return 31*spans.hashCode()+Boolean.hashCode(explicitSpans);
     }
 
     @Override

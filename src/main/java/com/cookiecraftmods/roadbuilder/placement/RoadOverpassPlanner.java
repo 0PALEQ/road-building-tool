@@ -15,11 +15,7 @@ public final class RoadOverpassPlanner {
         List<Span> spans = new ArrayList<>();
         for (Coverage cover : coverage(geometry,width,existing)) {
             double start=cover.start, end=cover.end;
-            double lowest=Double.POSITIVE_INFINITY;
-            for(double d=start;d<=end;d+=0.5) lowest=Math.min(lowest,geometry.sample(d).position().y());
-            lowest=Math.min(lowest,geometry.sample(end).position().y());
-            if(lowest>=cover.required) continue;
-            double lift=cover.required-lowest+0.15;
+            double lift=cover.lift+0.15;
             double approach=Math.max(16,lift*8);
             // A clipped approach still needs enough distance for both halves of
             // the easing curve. Never squeeze a descent into the last few blocks.
@@ -68,7 +64,7 @@ public final class RoadOverpassPlanner {
         return new MultiCurveGeometry(points);
     }
 
-    private record Coverage(double start,double end,double required) {}
+    private record Coverage(double start,double end,double lift) {}
 
     private static List<Coverage> coverage(ReferenceGeometry geometry,int width,Collection<RoadSegment> roads) {
         List<Coverage> result=new ArrayList<>();
@@ -80,7 +76,7 @@ public final class RoadOverpassPlanner {
             int chords=Math.max(1,(int)Math.ceil(lower.length()/2));
             List<RoadPoint> points=new ArrayList<>();
             for(int i=0;i<=chords;i++) points.add(lower.sample(lower.length() * (i / (double) chords)).position());
-            double runStart=-1, required=0;
+            double runStart=-1, lift=0;
             double radius=(width+road.presetSnapshot().surfaceBlockWidth())/2.0+1;
             for(int i=0;i<=count;i++) {
                 double distance=geometry.length() * (i / (double) count);
@@ -97,14 +93,16 @@ public final class RoadOverpassPlanner {
                     double separation=Math.hypot(point.x()-first.x()-t*dx,point.z()-first.z()-t*dz);
                     if(separation<nearest){nearest=separation;lowerY=first.y()+(last.y()-first.y())*t;}
                 }
-                boolean overlaps=nearest<=radius && point.y()>lowerY+1;
+                double required=Math.floor(lowerY+0.5)+1+MINIMUM_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS;
+                double deficit=required-point.y();
+                boolean overlaps=nearest<=radius && point.y()>lowerY+1 && deficit>1e-9;
                 if(overlaps) {
                     if(runStart<0) runStart=Math.max(0,distance-0.5);
-                    required=Math.max(required,Math.floor(lowerY+0.5)+1+MINIMUM_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS);
+                    lift=Math.max(lift,deficit);
                 }
                 if(runStart>=0 && (!overlaps || i==count)) {
-                    result.add(new Coverage(runStart,distance,required));
-                    runStart=-1;required=0;
+                    result.add(new Coverage(runStart,distance,lift));
+                    runStart=-1;lift=0;
                 }
             }
         }
@@ -113,7 +111,7 @@ public final class RoadOverpassPlanner {
         for(var next:result) {
             if(!merged.isEmpty() && next.start<=merged.get(merged.size()-1).end+16) {
                 var previous=merged.remove(merged.size()-1);
-                merged.add(new Coverage(previous.start,Math.max(previous.end,next.end),Math.max(previous.required,next.required)));
+                merged.add(new Coverage(previous.start,Math.max(previous.end,next.end),Math.max(previous.lift,next.lift)));
             } else merged.add(next);
         }
         return merged;

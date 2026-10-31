@@ -30,6 +30,7 @@ public final class ReferenceGeometryReverser {
             );
         }
         if (geometry instanceof MultiCurveGeometry multi) {
+            if(multi.hasExplicitSpans()) return MultiCurveGeometry.fromControlPoints(reversed(multi.controlPoints()));
             return new MultiCurveGeometry(reversed(multi.anchors()));
         }
         if (geometry instanceof FreehandGeometry freehand) {

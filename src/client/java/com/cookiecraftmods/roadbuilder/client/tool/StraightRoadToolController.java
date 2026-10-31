@@ -1111,7 +1111,8 @@ public final class StraightRoadToolController {
         ReferenceGeometry geometry;
         try {
             geometry = buildPreviewGeometry(endpoint);
-            if (!parallelEnabled && snapSettings.tangentEnabled()) {
+            if (activeTool != RoadBuilderTool.FREEHAND_DRAW
+                    && !parallelEnabled && snapSettings.tangentEnabled()) {
                 RoadVector exit = hoveredLanePort == null ? null : hoveredLanePort.direction();
                 geometry = LaneConnectionGeometry.align(geometry,
                         startLanePort == null ? null : startLanePort.direction(), exit);
@@ -1159,7 +1160,7 @@ public final class StraightRoadToolController {
         double radius = RoadCurveValidation.minimumRadius(width,
                 RoadBuilderClientNetworking.selectedPreset().map(RoadPresetCatalogEntry::roadClass)
                         .orElse(com.cookiecraftmods.roadbuilder.preset.RoadClass.LOCAL));
-        var curveFailure = RoadCurveValidation.validate(geometry, radius);
+        var curveFailure = RoadCurveValidation.validate(displayGeometry, radius);
         if (curveFailure != null) previewProblem = StraightRoadPreviewProblem.planningFailure(curveFailure);
         if (parallelEnabled) {
             try {
@@ -1172,7 +1173,7 @@ public final class StraightRoadToolController {
                         : new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(
                                 parallel, (int)Math.ceil(width), graph.get().segments().values());
                 parallelPreview = new RawRoadPreview(parallelDisplay, width);
-                var parallelFailure = RoadCurveValidation.validate(parallel, radius);
+                var parallelFailure = RoadCurveValidation.validate(parallelDisplay, radius);
                 if (parallelFailure != null) previewProblem = StraightRoadPreviewProblem.planningFailure(parallelFailure);
             } catch (IllegalArgumentException invalid) {
                 parallelPreviewInvalid = true;
@@ -1224,7 +1225,17 @@ public final class StraightRoadToolController {
                     yield new StraightGeometry(start, cursor.roadPoint());
                 }
                 RoadVector entry = start.vectorTo(pathPoints.get(0).roadPoint());
-                yield FreeformGeometry.createBalanced(start, cursor.roadPoint(), entry);
+                RoadVector exit = null;
+                if (!parallelEnabled && snapSettings.tangentEnabled()) {
+                    // Solve both handles together: rotating the entry afterwards
+                    // leaves the automatic exit based on the old entry direction.
+                    RoadVector attachedEntry = startLanePort != null ? startLanePort.direction()
+                            : LaneConnectionSnapping.openEndDirection(indexedGraph, start, true);
+                    if (attachedEntry != null) entry = attachedEntry;
+                    exit = hoveredLanePort != null ? hoveredLanePort.direction()
+                            : LaneConnectionSnapping.openEndDirection(indexedGraph, cursor.roadPoint(), false);
+                }
+                yield FreeformGeometry.create(start, cursor.roadPoint(), entry, exit);
             }
             case FREEHAND -> {
                 List<RoadPoint> stroke = pathPoints.stream()

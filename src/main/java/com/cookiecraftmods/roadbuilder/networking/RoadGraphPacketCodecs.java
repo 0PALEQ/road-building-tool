@@ -703,8 +703,8 @@ public final class RoadGraphPacketCodecs {
             writePoints(buffer, cubic.controlPoints());
         } else if (geometry instanceof MultiCurveGeometry multi) {
             buffer.writeDouble(Double.NaN);
-            buffer.writeByte(3);
-            writePoints(buffer, multi.anchors());
+            buffer.writeByte(multi.hasExplicitSpans() ? 5 : 3);
+            writePoints(buffer, multi.hasExplicitSpans() ? multi.controlPoints() : multi.anchors());
         } else if (geometry instanceof FreehandGeometry freehand) {
             buffer.writeDouble(Double.NaN);
             buffer.writeByte(freehand.anchors().size() == 2 ? 4 : 3);
@@ -751,6 +751,7 @@ public final class RoadGraphPacketCodecs {
                 );
             }
             case 3 -> new MultiCurveGeometry(points);
+            case 5 -> MultiCurveGeometry.fromControlPoints(points);
             case 4 -> {
                 requirePointCount(points, 2, "freehand line geometry");
                 yield new FreehandGeometry(points, 0.0);

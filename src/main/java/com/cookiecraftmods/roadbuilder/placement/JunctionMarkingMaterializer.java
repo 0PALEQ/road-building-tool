@@ -199,9 +199,17 @@ public final class JunctionMarkingMaterializer {
                     BlockPlanFailureCode.INVALID_GEOMETRY
             );
         }
+        var elevation=new JunctionSurfaceElevation(node,incidentSegments);
+        Map<BlockPos,PlannedBlock> elevated=new LinkedHashMap<>();
+        for(var block:blocks.values()) {
+            var pos=block.position();
+            var placement=new ResolvedRoadSurface(1,block.targetState()).targetPlacement(0,0,pos.getX(),pos.getZ(),
+                    elevation.height(pos.getX()+0.5,pos.getZ()+0.5));
+            elevated.put(placement.position(),new PlannedBlock(placement.position(),placement.state()));
+        }
         return new BlockPlanResult.Success(BlockPlacementPlan.create(
                 dimension,
-                blocks.values()
+                elevated.values()
         ));
     }
 

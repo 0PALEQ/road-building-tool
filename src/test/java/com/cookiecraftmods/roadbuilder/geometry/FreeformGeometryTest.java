@@ -4,6 +4,23 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FreeformGeometryTest {
+    @Test void independentEndpointTangentsUseTheWholeSpanForABroadTurn() {
+        for(double rotation:new double[]{0,0.7,-1.9}) {
+            var forward=new RoadVector(Math.cos(rotation),0,Math.sin(rotation));
+            var side=new RoadVector(-forward.z(),0,forward.x());
+            var start=new RoadPoint(10,64,20);
+            var end=start.add(forward.scale(280)).add(side.scale(65));
+            var entry=forward.scale(0.883).add(side.scale(-0.469));
+            var exit=forward.scale(-0.123).add(side.scale(0.985));
+            var curve=FreeformGeometry.create(start,end,entry,exit);
+            double peak=0;
+            for(int i=0;i<=1024;i++) peak=Math.max(peak,curve.horizontalCurvatureAt(i/1024.0));
+            assertTrue(1/peak>70,"the turn should use the full span, radius="+1/peak);
+            assertEquals(1,curve.sample(0).tangent().dot(entry.normalize()),1e-9);
+            assertEquals(1,curve.sample(curve.length()).tangent().dot(exit.normalize()),1e-9);
+        }
+    }
+
     @Test
     void balancesBothHandlesAndEndpointCurvatureForRotatedSlopingArcs() {
         for (double rotation : new double[]{0, 0.4, 1.7, -2.1}) {
