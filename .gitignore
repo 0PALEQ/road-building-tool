@@ -25,6 +25,3 @@ run
 
 # Runtime logs created by Minecraft classes during tests and development
 debug/logs/
-
-#Excluded because there is some development stuff explained in polish :c
-FREEFORM_GEOMETRY.md
