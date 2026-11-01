@@ -1157,10 +1157,14 @@ public final class StraightRoadToolController {
                 .map(RoadPresetCatalogEntry::surfaceWidth)
                 .orElse(FALLBACK_PREVIEW_WIDTH);
         ReferenceGeometry displayGeometry = geometry;
+        double radius = RoadCurveValidation.minimumRadius(width,
+                RoadBuilderClientNetworking.selectedPreset().map(RoadPresetCatalogEntry::roadClass)
+                        .orElse(com.cookiecraftmods.roadbuilder.preset.RoadClass.LOCAL));
+        rawPreview = new RawRoadPreview(geometry, width);
         try {
             var graph = currentGraph(client);
             if (graph.isPresent()) displayGeometry = new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner()
-                    .adjust(geometry, (int)Math.ceil(width), graph.get().segments().values());
+                    .adjust(geometry, (int)Math.ceil(width), graph.get().segments().values(),radius);
         } catch (IllegalArgumentException invalid) {
             previewProblem = StraightRoadPreviewProblem.planningFailure(
                     com.cookiecraftmods.roadbuilder.placement.BlockPlanFailureCode.INVALID_GEOMETRY);
@@ -1170,9 +1174,6 @@ public final class StraightRoadToolController {
         if (geometry.length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)
             previewProblem = StraightRoadPreviewProblem.planningFailure(
                     com.cookiecraftmods.roadbuilder.placement.BlockPlanFailureCode.INVALID_GEOMETRY);
-        double radius = RoadCurveValidation.minimumRadius(width,
-                RoadBuilderClientNetworking.selectedPreset().map(RoadPresetCatalogEntry::roadClass)
-                        .orElse(com.cookiecraftmods.roadbuilder.preset.RoadClass.LOCAL));
         var curveFailure = RoadCurveValidation.validate(displayGeometry, radius);
         if (curveFailure != null) previewProblem = StraightRoadPreviewProblem.planningFailure(curveFailure);
         if (parallelEnabled) {
@@ -1184,7 +1185,7 @@ public final class StraightRoadToolController {
                 var graph = currentGraph(client);
                 ReferenceGeometry parallelDisplay = graph.isEmpty() ? parallel
                         : new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(
-                                parallel, (int)Math.ceil(width), graph.get().segments().values());
+                                parallel, (int)Math.ceil(width), graph.get().segments().values(),radius);
                 parallelPreview = new RawRoadPreview(parallelDisplay, width);
                 var parallelFailure = RoadCurveValidation.validate(parallelDisplay, radius);
                 if (parallelFailure != null) previewProblem = StraightRoadPreviewProblem.planningFailure(parallelFailure);

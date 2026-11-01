@@ -34,7 +34,7 @@ final class LaneConnectionElevationPlanner {
             throw new IllegalArgumentException("not enough separated road length for a gentle lane ramp");
         SortedSet<Double> distances=new TreeSet<>();
         distances.add(0.0); distances.add(length);
-        for(int i=1;i<12;i++) distances.add(length*i/12);
+        for(int i=1;i<12;i++) distances.add(length*(i/12.0));
         distances.add(from); distances.add(to);
         distances.add(from+run*EASING_FRACTION); distances.add(to-run*EASING_FRACTION);
         List<Double> marks=new ArrayList<>();
@@ -66,7 +66,7 @@ final class LaneConnectionElevationPlanner {
         if(host.isEmpty()) return Math.min(4,flat.length()*0.025);
         int count=Math.max(1,(int)Math.ceil(flat.length()/0.5));
         for(int i=0;i<=count;i++) {
-            double d=flat.length()*i/count;
+            double d=flat.length()*(i/(double)count);
             var projection=project(flat.sample(reverse?flat.length()-d:d).position(),host);
             if(projection.distance>width/2.0+projection.halfWidth+0.5) return Math.min(flat.length(),d+0.5);
         }
@@ -102,8 +102,10 @@ final class LaneConnectionElevationPlanner {
         for(var road:roads) if(ids.contains(road.id())) {
             var g=road.referenceGeometry();
             int count=Math.max(1,(int)Math.ceil(g.length()/2));
-            for(int i=0;i<count;i++) result.add(new Chord(g.sample(g.length()*i/count).position(),
-                    g.sample(g.length()*(i+1)/count).position(),road.presetSnapshot().surfaceBlockWidth()/2.0));
+            // Divide first so the last sample is exactly length(), rather than
+            // one floating-point step beyond the geometry's valid interval.
+            for(int i=0;i<count;i++) result.add(new Chord(g.sample(g.length()*(i/(double)count)).position(),
+                    g.sample(g.length()*((i+1)/(double)count)).position(),road.presetSnapshot().surfaceBlockWidth()/2.0));
         }
         return result;
     }

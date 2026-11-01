@@ -11,6 +11,35 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LaneConnectionPlannerTest {
+    @Test void automaticConnectionHonorsTheRoadClassRadiusAfterRaisingCrossings() {
+        var curve=SharpLaneMergeRegressionFixture.connection();
+        var roads=SharpLaneMergeRegressionFixture.roads();
+        double radius=RoadCurveValidation.minimumRadius(14,RoadClass.HIGHWAY);
+        assertNull(RoadCurveValidation.validate(curve,radius));
+        assertEquals(BlockPlanFailureCode.TOO_SHARP_TURN,RoadCurveValidation.validate(
+                new LaneConnectionPlanner().adjust(curve,14,roads),radius));
+        var result=assertDoesNotThrow(()->new RoadOverpassPlanner().adjust(curve,14,roads,radius));
+        assertNull(RoadCurveValidation.validate(result,radius));
+        assertEquals(curve.start(),result.start());
+        assertEquals(curve.end(),result.end());
+        assertTrue(assertInstanceOf(MultiCurveGeometry.class,result).controlPoints().size()<=64);
+        for(int i=0;i<=1024;i++) {
+            var tangent=result.sample(result.length()*(i/1024.0)).tangent();
+            assertTrue(Math.abs(tangent.y())/tangent.horizontalLength()<=ConstructionLimits.DEFAULT_MAXIMUM_GRADE);
+        }
+    }
+
+    @Test void bothLanesCanJoinTheSlopingContinuation() {
+        var roads=LaneMergeRegressionFixture.roads();
+        var ports=AuxiliaryLanePorts.ports(roads);
+        for(var start:ports.stream().filter(p->p.segmentId().equals(roads.get(0).id()) && p.incoming()).toList())
+            for(var end:ports.stream().filter(p->p.segmentId().equals(roads.get(3).id()) && !p.incoming()).toList()) {
+                var original=FreeformGeometry.create(start.position(),end.position(),start.direction(),end.direction());
+                assertDoesNotThrow(()->new RoadOverpassPlanner().adjust(original,9,roads),
+                        "connection from "+start.position()+" to "+end.position());
+            }
+    }
+
     @Test void mergesAtASlopingContinuationBuiltAsSeparateRoads() {
         var roads=LaneMergeRegressionFixture.roads();
         var ports=AuxiliaryLanePorts.ports(roads);
@@ -53,11 +82,21 @@ class LaneConnectionPlannerTest {
                 new ResourceLocation("roadbuilder","connection_test"),preset,TrafficHandedness.RHT).placedSegments().get(0);
     }
     @Test void adjustsBothHandlesToAvoidAnObstacleBetweenLanePorts() {
-        var source=road(new RoadPoint(-40,64,0),new RoadPoint(0,64,0),9,true);
+        assertObstacleAvoided(true);
+    }
+
+    @Test void adjustsHandlesWhenOnlyTheDestinationHasLanePorts() {
+        assertObstacleAvoided(false);
+    }
+
+    private void assertObstacleAvoided(boolean sourceHasPorts) {
+        var source=road(new RoadPoint(-40,64,0),new RoadPoint(0,64,0),9,sourceHasPorts);
         var destination=road(new RoadPoint(60,64,24),new RoadPoint(100,64,24),9,true);
         var ports=AuxiliaryLanePorts.ports(List.of(source,destination));
-        var start=ports.stream().filter(port->port.segmentId().equals(source.id())&&port.incoming())
-                .max(Comparator.comparingDouble(port->port.position().z())).orElseThrow();
+        var start=sourceHasPorts?ports.stream().filter(port->port.segmentId().equals(source.id())&&port.incoming())
+                .max(Comparator.comparingDouble(port->port.position().z())).orElseThrow():
+                new AuxiliaryLanePorts.Port(source.endNodeId(),source.id(),source.lanes().get(0).id(),
+                        source.referenceGeometry().end(),new RoadVector(1,0,0),true,9);
         var end=ports.stream().filter(port->port.segmentId().equals(destination.id())&&!port.incoming())
                 .max(Comparator.comparingDouble(port->port.position().z())).orElseThrow();
         var original=(CubicBezierGeometry)LaneConnectionGeometry.align(

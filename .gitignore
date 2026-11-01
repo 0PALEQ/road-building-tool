@@ -7,6 +7,9 @@
 # Gradle build folder
 build
 
+# Local debugging tools, probes, manifests and captured diagnostics
+/debug/
+
 # IntelliJ
 out/
 .idea
@@ -21,7 +24,7 @@ hs_err_pid*
 run
 
 # Runtime logs created by Minecraft classes during tests and development
-logs/
+debug/logs/
 
 #Excluded because there is some development stuff explained in polish :c
 FREEFORM_GEOMETRY.md

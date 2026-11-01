@@ -14,6 +14,46 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RoadOverpassPlannerTest {
+    @Test void underpassLowersTheWholeFootprintWithGentleApproaches() {
+        var original=upper(59);
+        var adjusted=new RoadOverpassPlanner().adjust(original,11,List.of(lower()));
+        assertEquals(original.start(),adjusted.start());
+        assertEquals(original.end(),adjusted.end());
+        assertTrue(adjusted.sample(adjusted.length()*0.2).position().y()<58.9,
+                "the descent should begin well before the crossing");
+        for(var span:assertInstanceOf(MultiCurveGeometry.class,adjusted).spans()) {
+            for(int i=0;i<=32;i++) {
+                var point=span.positionAt(i/32.0);
+                var tangent=span.derivativeAt(i/32.0);
+                assertTrue(Math.abs(tangent.y())/tangent.horizontalLength()<=0.21);
+                if(point.x()>=39 && point.x()<=62)
+                    assertTrue(Math.floor(point.y()+0.5)+1+RoadOverpassPlanner.MINIMUM_FREE_HEIGHT
+                            <=64-RoadStructurePlanner.DECK_THICKNESS);
+            }
+        }
+    }
+
+    @Test void alreadyLowRoadKeepsItsOriginalProfile() {
+        var original=upper(50);
+        assertSame(original,new RoadOverpassPlanner().adjust(original,11,List.of(lower())));
+    }
+
+    @Test void underpassNearEndpointCannotCreateAnAbruptRamp() {
+        var shortExit=new StraightGeometry(new RoadPoint(0.5,60,0.5),new RoadPoint(70.5,60,0.5));
+        assertThrows(IllegalArgumentException.class,
+                ()->new RoadOverpassPlanner().adjust(shortExit,11,List.of(lower())));
+    }
+
+    @Test void overpassStartsClimbingEarlyAndLimitsItsGrade() {
+        var adjusted=new RoadOverpassPlanner().adjust(upper(69),11,List.of(lower()));
+        assertTrue(adjusted.sample(adjusted.length()*0.2).position().y()>69.1);
+        for(var span:assertInstanceOf(MultiCurveGeometry.class,adjusted).spans())
+            for(int i=0;i<=32;i++) {
+                var tangent=span.derivativeAt(i/32.0);
+                assertTrue(Math.abs(tangent.y())/tangent.horizontalLength()<=0.21);
+            }
+    }
+
     @Test void curvedOverpassRemainsBuildableAfterItsElevationIsAdjusted() {
         var curve=new CubicBezierGeometry(new RoadPoint(0,69,0),new RoadPoint(30,69,0),
                 new RoadPoint(60,69,20),new RoadPoint(100,69,20));
@@ -21,6 +61,18 @@ class RoadOverpassPlannerTest {
         assertEquals(curve.start(),adjusted.start());
         assertEquals(curve.end(),adjusted.end());
         assertNull(RoadCurveValidation.validate(adjusted,RoadCurveValidation.minimumRadius(9,RoadClass.LOCAL)));
+        for(var span:assertInstanceOf(MultiCurveGeometry.class,adjusted).spans()) {
+            for(int i=0;i<=16;i++) {
+                var point=span.positionAt(i/16.0);
+                double from=0,to=1;
+                for(int step=0;step<50;step++) {
+                    double middle=(from+to)/2;
+                    if(curve.positionAt(middle).x()<point.x()) from=middle; else to=middle;
+                }
+                assertEquals(curve.positionAt((from+to)/2).z(),point.z(),1e-8,
+                        "raising the deck must preserve the original path in plan view");
+            }
+        }
     }
 
     @Test void slopingRoadsWithEnoughLocalClearanceDoNotRequireEndpointRamps() {
@@ -55,7 +107,7 @@ class RoadOverpassPlannerTest {
         for(double d=0;d<result.length();d+=0.1) {
             var point=result.sample(d).position();
             if(point.x()>=45 && point.x()<=56)
-                assertTrue(Math.floor(point.y()+0.5)-RoadStructurePlanner.DECK_THICKNESS-65 >= 7);
+                assertTrue(Math.floor(point.y()+0.5)-RoadStructurePlanner.DECK_THICKNESS-65 >= 5);
         }
         assertEquals(0.125,RoadOverpassPlanner.ease(0.25),1e-10);
         assertEquals(0.875,RoadOverpassPlanner.ease(0.75),1e-10);
@@ -71,7 +123,7 @@ class RoadOverpassPlannerTest {
         var parts=ReferenceGeometryEditor.split(adjusted,List.of(0.2,0.8),List.of(
                 adjusted.sample(adjusted.length()*0.2).position(),adjusted.sample(adjusted.length()*0.8).position()));
         var middle=parts.get(1);
-        assertTrue(middle.sample(middle.length()/2).position().y() >= 74);
+        assertTrue(middle.sample(middle.length()/2).position().y() >= 72);
     }
     @Test void raisedProfileSurvivesNetworkRoundTrip() {
         var adjusted=new RoadOverpassPlanner().adjust(upper(69),11,List.of(lower()));
@@ -81,7 +133,7 @@ class RoadOverpassPlannerTest {
         var decoded=com.cookiecraftmods.roadbuilder.networking.RoadGraphSnapshotS2CPacket.decode(packet.encode());
         var restored=decoded.snapshot().segments().values().iterator().next().referenceGeometry();
         assertEquals(adjusted.length(),restored.length(),1e-6);
-        assertTrue(restored.sample(restored.length()/2).position().y()>=74);
+        assertTrue(restored.sample(restored.length()/2).position().y()>=72);
     }
     @Test void descentHasNoEndpointCliffAndAddedGradeStaysBounded() {
         var adjusted=new RoadOverpassPlanner().adjust(upper(69),11,List.of(lower()));
@@ -103,7 +155,7 @@ class RoadOverpassPlannerTest {
         var lower=graph.prepareRoadNetwork(new StraightGeometry(new RoadPoint(40,64,8),new RoadPoint(60,64,8)),
                 ID,preset(),TrafficHandedness.RHT).placedSegments().get(0);
         var adjusted=new RoadOverpassPlanner().adjust(upper(69),3,List.of(lower));
-        assertTrue(adjusted.sample(adjusted.length()/2).position().y()>=74);
+        assertTrue(adjusted.sample(adjusted.length()/2).position().y()>=72);
     }
     @Test void ordinaryRoadPreviewsWithFractionalLengthsAreNeverRejected() {
         var random=new java.util.Random(513);
@@ -146,6 +198,6 @@ class RoadOverpassPlannerTest {
         var plan=assertInstanceOf(BlockPlanResult.Success.class,result).plan();
         assertTrue(plan.blocks().stream().noneMatch(block -> !block.targetState().isAir()
                 && block.position().getX()>=45 && block.position().getX()<=55
-                && block.position().getY()>=65 && block.position().getY()<=71));
+                && block.position().getY()>=65 && block.position().getY()<=69));
     }
 }

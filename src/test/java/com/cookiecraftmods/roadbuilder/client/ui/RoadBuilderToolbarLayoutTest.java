@@ -16,6 +16,9 @@ class RoadBuilderToolbarLayoutTest {
             assertTrue(layout.roadToolButton(RoadBuilderTool.REPLACE).bottom() <= layout.elevationDisplay().y());
             assertTrue(layout.elevationDisplay().bottom() <= layout.parallelDisplay().y());
             assertTrue(layout.parallelDisplay().bottom() <= layout.roadNodeSnappingButton().y());
+            assertEquals(layout.panel().y(), layout.toolModePanel().y());
+            assertEquals(layout.presetPanel().bottom(), layout.toolModePanel().bottom());
+            assertTrue(layout.owns(layout.toolModePanel().x(), layout.toolModePanel().y()));
             assertEquals(layout.presetPanel().x(), layout.panel().x());
             assertEquals(layout.presetPanel().width(), layout.panel().width());
             assertTrue(layout.toolModePanel().right() <= layout.panel().x());

@@ -135,10 +135,12 @@ public final class RoadPathPlacementEndpoint {
         ResolvedRoadPathPlan planned =
                 ((RoadPathPlanningResult.Success) result).roadPlan();
         PreparedRoadNetworkMutation mutation;
+        double minimumRadius=com.cookiecraftmods.roadbuilder.placement.RoadCurveValidation.minimumRadius(
+                planned.preset().surfaceBlockWidth(),planned.preset().classification().roadClass());
         try {
             if (packet.parallelOffset() == 0) {
                 mutation = graph.prepareRoadNetwork(new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(
-                        planned.geometry(), planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values()), planned.presetId(),
+                        planned.geometry(), planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values(),minimumRadius), planned.presetId(),
                         planned.preset(), trafficHandedness);
             } else {
                 var parallel = com.cookiecraftmods.roadbuilder.geometry.ParallelRoadGeometry.create(
@@ -150,9 +152,9 @@ public final class RoadPathPlacementEndpoint {
                 }
                 mutation = graph.prepareParallelRoadNetwork(
                         new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(planned.geometry(),
-                                planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values()),
+                                planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values(),minimumRadius),
                         new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(parallel,
-                                planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values()),
+                                planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values(),minimumRadius),
                         planned.presetId(), planned.preset(), trafficHandedness);
             }
         } catch (IllegalArgumentException invalid) {

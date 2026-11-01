@@ -34,8 +34,8 @@ public record RoadBuilderToolbarLayout(
     private static final int CONTEXT_HEIGHT = 88;
     private static final int STATUS_HEIGHT = 13;
     private static final int BOTTOM_MARGIN = 6;
-    private static final int PREFERRED_WIDTH = 414;
-    private static final int MAXIMUM_TOOL_MODE_WIDTH = 132;
+    private static final int PREFERRED_WIDTH = 478;
+    private static final int MAXIMUM_TOOL_MODE_WIDTH = 196;
     private static final int MINIMUM_TOOL_MODE_WIDTH = 46;
     private static final int ROAD_TOOL_BUTTON_COUNT = 5;
 
@@ -55,7 +55,7 @@ public record RoadBuilderToolbarLayout(
         int modeWidth = overallWidth >= MINIMUM_TOOL_MODE_WIDTH + 2
                 ? Math.min(
                         MAXIMUM_TOOL_MODE_WIDTH,
-                        Math.max(MINIMUM_TOOL_MODE_WIDTH, overallWidth * 32 / 100)
+                        Math.max(MINIMUM_TOOL_MODE_WIDTH, overallWidth * 41 / 100)
                 )
                 : 0;
         int shelfGap = modeWidth == 0 ? 0 : GAP;
@@ -75,7 +75,7 @@ public record RoadBuilderToolbarLayout(
         int contextY = dock.bottom() + GAP;
         int contextHeight = Math.min(CONTEXT_HEIGHT, Math.max(1, shellBottom - contextY));
         UiRectangle context = new UiRectangle(overallX, contextY, overallWidth, contextHeight);
-        UiRectangle mode = new UiRectangle(overallX, contextY, modeWidth, contextHeight);
+        UiRectangle mode = new UiRectangle(overallX, panelY, modeWidth, contextY + contextHeight - panelY);
         UiRectangle presets = new UiRectangle(mainX, contextY, mainWidth, contextHeight);
         int statusY = Math.max(0, panelY - STATUS_HEIGHT - 2);
         UiRectangle status = new UiRectangle(overallX, statusY, overallWidth,
@@ -207,14 +207,25 @@ public record RoadBuilderToolbarLayout(
     public UiRectangle parallelRaiseButton() { return modeCell(toolModePanel, 2, 2, 4); }
     public UiRectangle parallelToggleButton() { return modeCell(toolModePanel, 2, 3, 4); }
 
+    public UiRectangle toolModeLabel(int row) {
+        UiRectangle control = modeCell(toolModePanel, row, 0, 5);
+        return new UiRectangle(toolModePanel.x() + PADDING, control.y(),
+                Math.max(0, modeLabelWidth(toolModePanel) - GAP), control.height());
+    }
+
+    private static int modeLabelWidth(UiRectangle panel) {
+        return panel.width() >= 100 ? Math.min(64, panel.width() / 3) : 0;
+    }
+
     private static UiRectangle modeCell(UiRectangle panel, int row, int index, int count) {
         int padding = panel.width() < 70 ? 2 : PADDING;
         int gap = panel.width() < 70 ? 1 : GAP;
-        int available = Math.max(count, panel.width() - padding * 2 - gap * (count - 1));
+        int labelWidth = modeLabelWidth(panel);
+        int available = Math.max(count, panel.width() - labelWidth - padding * 2 - gap * (count - 1));
         int width = available / count;
         int remainder = available % count;
         int rowHeight = Math.max(1, (panel.height() - padding * 2 - gap * 3) / 4);
-        return new UiRectangle(panel.x() + padding + index * (width + gap) + Math.min(index, remainder),
+        return new UiRectangle(panel.x() + padding + labelWidth + index * (width + gap) + Math.min(index, remainder),
                 panel.y() + padding + row * (rowHeight + gap),
                 width + (index < remainder ? 1 : 0), rowHeight);
     }
@@ -321,7 +332,8 @@ public record RoadBuilderToolbarLayout(
     }
 
     public boolean owns(double cursorX, double cursorY) {
-        return panel.contains(cursorX, cursorY)
+        return toolModePanel.contains(cursorX, cursorY)
+                || panel.contains(cursorX, cursorY)
                 || lanePathVisibilityButton.contains(cursorX, cursorY)
                 || crosswalkToolButton.contains(cursorX, cursorY)
                 || elevationDisplay.contains(cursorX, cursorY)

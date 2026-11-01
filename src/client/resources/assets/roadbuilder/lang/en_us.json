@@ -38,6 +38,10 @@
   "message.roadbuilder.lane_connector_invalid_target": "Choose a compatible outgoing point at the same intersection.",
   "message.roadbuilder.lane_connector_updated": "Lane connection updated.",
 
+  "toolbar.roadbuilder.label.tool_mode": "Tool Mode",
+  "toolbar.roadbuilder.label.elevation": "Elevation",
+  "toolbar.roadbuilder.label.parallel_mode": "Parallel",
+  "toolbar.roadbuilder.label.snapping": "Snapping",
   "toolbar.roadbuilder.mode_title": "ROAD BUILDER",
   "toolbar.roadbuilder.tool_mode": "TOOL MODE",
   "toolbar.roadbuilder.straight_road": "Straight Road",

@@ -9,6 +9,11 @@ public final class LaneConnectionPlanner {
     private record Chord(RoadSegmentId segment, RoadPoint a, RoadPoint b, double halfWidth) {}
 
     public ReferenceGeometry adjust(ReferenceGeometry geometry, int width, Collection<RoadSegment> roads) {
+        return adjust(geometry,width,roads,width/2.0+0.5);
+    }
+
+    public ReferenceGeometry adjust(ReferenceGeometry geometry, int width, Collection<RoadSegment> roads,
+                                    double minimumRadius) {
         CubicBezierGeometry original;
         if(geometry instanceof CubicBezierGeometry cubic) original=cubic;
         else if(geometry instanceof StraightGeometry straight) original=new CubicBezierGeometry(straight.start(),
@@ -23,7 +28,6 @@ public final class LaneConnectionPlanner {
         var end=AuxiliaryLanePorts.matching(geometry,false,width,ports);
         if(start.isEmpty() && end.isEmpty()) return geometry;
         var elevation=new LaneConnectionElevationPlanner(width,roads,start,end);
-        if(start.isEmpty() || end.isEmpty()) return elevation.adjust(original);
         // Every candidate stays inside the hull of these extreme handles.
         var extremeFirst=original.start().add(original.start().vectorTo(original.startControl()).scale(2.5));
         var extremeSecond=original.end().add(original.end().vectorTo(original.endControl()).scale(2.5));
@@ -48,21 +52,24 @@ public final class LaneConnectionPlanner {
         ReferenceGeometry best=null;
         double bestScore=Double.POSITIVE_INFINITY;
         double[] factors={1,0.7,0.45,0.25,1.3,1.6,2,2.5};
-        var sourceHost=connectedHost(start.get(), width, roads);
-        var destinationHost=connectedHost(end.get(), width, roads);
+        var sourceHost=start.map(port->connectedHost(port,width,roads))
+                .orElseGet(()->endpointHost(original.start(),width,roads));
+        var destinationHost=end.map(port->connectedHost(port,width,roads))
+                .orElseGet(()->endpointHost(original.end(),width,roads));
         try {
             var profiled=elevation.adjust(original);
-            if(RoadCurveValidation.validate(profiled,width/2.0+0.5)==null
+            if(RoadCurveValidation.validate(profiled,minimumRadius)==null
                     && collisionCost(profiled,width,chords,sourceHost,destinationHost)<1) return profiled;
         } catch(IllegalArgumentException insufficientRoom) { /* Try longer plan-view variants below. */ }
         for(double first:factors) for(double second:factors) {
             var curve=new CubicBezierGeometry(original.start(),
                     original.start().add(original.start().vectorTo(original.startControl()).scale(first)),
                     original.end().add(original.end().vectorTo(original.endControl()).scale(second)),original.end());
-            if(RoadCurveValidation.validate(curve,width/2.0+0.5)!=null) continue;
+            if(RoadCurveValidation.validate(curve,minimumRadius)!=null) continue;
             ReferenceGeometry profiled;
             try { profiled=elevation.adjust(curve); }
             catch(IllegalArgumentException insufficientRoom) { continue; }
+            if(RoadCurveValidation.validate(profiled,minimumRadius)!=null) continue;
             double collisions=collisionCost(profiled,width,chords,sourceHost,destinationHost);
             // Prefer a broad turn over merely keeping the original handle lengths.
             // A short exit handle can clear the host but concentrate the entire
@@ -80,6 +87,20 @@ public final class LaneConnectionPlanner {
         double peak=0;
         for(int i=0;i<=64;i++) peak=Math.max(peak,curve.horizontalCurvatureAt(i/64.0));
         return peak;
+    }
+
+    private static Set<RoadSegmentId> endpointHost(RoadPoint endpoint,int width,
+                                                   Collection<RoadSegment> roads) {
+        Set<RoadSegmentId> result=new HashSet<>();
+        for(var road:roads) {
+            var reference=road.referenceGeometry();
+            boolean atStart=reference.start().distanceTo(endpoint)<=0.05;
+            boolean atEnd=reference.end().distanceTo(endpoint)<=0.05;
+            if(!atStart && !atEnd) continue;
+            result.addAll(connectedHost(atStart?road.startNodeId():road.endNodeId(),endpoint,
+                    road.presetSnapshot().surfaceBlockWidth(),width,roads));
+        }
+        return result;
     }
 
     private static double collisionCost(ReferenceGeometry curve,int width,List<Chord> chords,
@@ -165,12 +186,17 @@ public final class LaneConnectionPlanner {
 
     static Set<RoadSegmentId> connectedHost(AuxiliaryLanePorts.Port port, int width,
                                                    Collection<RoadSegment> roads) {
+        return connectedHost(port.nodeId(),port.position(),port.roadWidth(),width,roads);
+    }
+
+    private static Set<RoadSegmentId> connectedHost(RoadNodeId node,RoadPoint position,
+                                                   int roadWidth,int width,Collection<RoadSegment> roads) {
         // A lane port can lie at a continuation created by a separate placement.
         // Follow shared nodes only inside the local contact area, regardless of road ID.
         Set<RoadSegmentId> result=new HashSet<>();
         Set<RoadNodeId> nodes=new HashSet<>();
-        nodes.add(port.nodeId());
-        double contactRange=3*(width+port.roadWidth());
+        nodes.add(node);
+        double contactRange=3*(width+roadWidth);
         boolean changed;
         do {
             changed=false;
@@ -178,9 +204,9 @@ public final class LaneConnectionPlanner {
                 if(result.contains(road.id())) continue;
                 if(nodes.contains(road.startNodeId()) || nodes.contains(road.endNodeId())) {
                     result.add(road.id());
-                    if(road.referenceGeometry().start().distanceTo(port.position())<=contactRange)
+                    if(road.referenceGeometry().start().distanceTo(position)<=contactRange)
                         nodes.add(road.startNodeId());
-                    if(road.referenceGeometry().end().distanceTo(port.position())<=contactRange)
+                    if(road.referenceGeometry().end().distanceTo(position)<=contactRange)
                         nodes.add(road.endNodeId());
                     changed=true;
                 }

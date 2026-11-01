@@ -188,6 +188,16 @@ public final class RoadBuilderToolbarRenderer {
             CursorPosition cursor,
             boolean highContrast
     ) {
+        String[] rowKeys = {"tool_mode", "elevation", "parallel_mode", "snapping"};
+        for (int row = 0; row < rowKeys.length; row++) {
+            UiRectangle label = layout.toolModeLabel(row);
+            if (label.width() == 0) continue;
+            Component text = Component.translatable("toolbar.roadbuilder.label." + rowKeys[row]);
+            graphics.drawString(client.font,
+                    client.font.plainSubstrByWidth(text.getString(), label.width()),
+                    label.x(), label.y() + Math.max(1, (label.height() - client.font.lineHeight) / 2),
+                    TEXT_PRIMARY, false);
+        }
         roadSnappingButton(
                 graphics,
                 layout.roadNodeSnappingButton(),

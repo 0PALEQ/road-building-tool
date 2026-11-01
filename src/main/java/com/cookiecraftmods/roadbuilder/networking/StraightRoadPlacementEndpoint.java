@@ -145,7 +145,9 @@ public final class StraightRoadPlacementEndpoint {
         try {
             graphMutation = graph.prepareRoadNetwork(
                 new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner().adjust(
-                        planned.geometry(), planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values()),
+                        planned.geometry(), planned.preset().surfaceBlockWidth(), graph.snapshot().segments().values(),
+                        com.cookiecraftmods.roadbuilder.placement.RoadCurveValidation.minimumRadius(
+                                planned.preset().surfaceBlockWidth(),planned.preset().classification().roadClass())),
                 planned.presetId(),
                 planned.preset(),
                 trafficHandedness
