@@ -8,7 +8,8 @@ import java.util.Optional;
 
 public enum LaneType {
     VEHICLE("vehicle"),
-    BUS("bus");
+    BUS("bus"),
+    ROUNDABOUT("roundabout");
 
     public static final Codec<LaneType> CODEC = Codec.STRING.comapFlatMap(
             serializedName -> Arrays.stream(values())

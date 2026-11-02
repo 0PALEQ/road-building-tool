@@ -10,8 +10,8 @@ public record PreparedSegmentSplit(
     public PreparedSegmentSplit {
         Objects.requireNonNull(original, "original");
         replacements = List.copyOf(Objects.requireNonNull(replacements, "replacements"));
-        if (replacements.size() < 2) {
-            throw new IllegalArgumentException("a segment split requires at least two replacements");
+        if (replacements.isEmpty()) {
+            throw new IllegalArgumentException("a segment replacement requires at least one replacement");
         }
     }
 }

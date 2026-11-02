@@ -16,7 +16,8 @@ class LaneConnectionPlannerTest {
         var roads=SharpLaneMergeRegressionFixture.roads();
         double radius=RoadCurveValidation.minimumRadius(14,RoadClass.HIGHWAY);
         assertNull(RoadCurveValidation.validate(curve,radius));
-        assertEquals(BlockPlanFailureCode.TOO_SHARP_TURN,RoadCurveValidation.validate(
+        // With two blocks of clearance this fixture no longer needs the tight detour.
+        assertNull(RoadCurveValidation.validate(
                 new LaneConnectionPlanner().adjust(curve,14,roads),radius));
         var result=assertDoesNotThrow(()->new RoadOverpassPlanner().adjust(curve,14,roads,radius));
         assertNull(RoadCurveValidation.validate(result,radius));

@@ -76,6 +76,10 @@ public final class StraightRoadToolController {
     private RoadBuilderToolGroup selectedGroup = RoadBuilderToolGroup.ROADS;
     private RoadCategory roadCategory = RoadCategory.ALL;
     private int presetPage;
+    private boolean roundaboutDragging;
+    private double roundaboutDragX;
+    private double roundaboutInitialRadius;
+    private double roundaboutRadius;
     private int keyboardFocusedRoadTool = -1;
     private int elevationOffset;
     private boolean lanePathsVisible;
@@ -312,7 +316,7 @@ public final class StraightRoadToolController {
         Objects.requireNonNull(client, "client");
         AuxiliaryLanePorts.Port previousPort = hoveredLanePort;
         CursorTargetResult nextResult = applySnapping(client, CursorRaycaster.cast(client));
-        if (!nextResult.equals(cursorResult) || !Objects.equals(previousPort, hoveredLanePort)) {
+        if (roundaboutDragging || !nextResult.equals(cursorResult) || !Objects.equals(previousPort, hoveredLanePort)) {
             cursorResult = nextResult;
             if (isRoadPlacementTool()) {
                 captureFreehandPoint();
@@ -334,6 +338,13 @@ public final class StraightRoadToolController {
                 || client.screen != null
                 || client.getOverlay() != null) {
             return false;
+        }
+        if (action == GLFW.GLFW_RELEASE
+                && button == GLFW.GLFW_MOUSE_BUTTON_LEFT && roundaboutDragging) {
+            updateRoundaboutRadius(client);
+            roundaboutDragging = false;
+            rebuildPreview(client);
+            return true;
         }
         if (action == GLFW.GLFW_RELEASE
                 && button == GLFW.GLFW_MOUSE_BUTTON_LEFT
@@ -955,6 +966,29 @@ public final class StraightRoadToolController {
         if (startTarget == null) {
             startTarget = target;
             startLanePort = hoveredLanePort;
+            if (activeTool == RoadBuilderTool.ROUNDABOUT && client.level != null) {
+                var graph = RoadBuilderClientNetworking.roadGraph(client.level.dimension()).orElse(null);
+                if (graph != null) {
+                    var point = target.roadPoint();
+                    var node = graph.nodes().values().stream()
+                            .filter(candidate -> Math.abs(candidate.position().y() - point.y()) < 2)
+                            .filter(candidate -> graph.segments().values().stream().filter(segment ->
+                                    segment.startNodeId().equals(candidate.id()) || segment.endNodeId().equals(candidate.id())).count() >= 3)
+                            .filter(candidate -> horizontalDistance(candidate.position(), point)
+                                    <= RoadSnapResolver.junctionFootprintRadius(candidate, graph.segments().values()))
+                            .min(java.util.Comparator.comparingDouble(candidate -> horizontalDistance(candidate.position(), point)))
+                            .orElse(null);
+                    if (node != null) {
+                        startTarget = new CursorTarget(BlockPos.containing(node.position().x(), node.position().y(), node.position().z()), node.position());
+                        startLanePort = null;
+                        roundaboutInitialRadius = Math.max(RoadSnapResolver.junctionFootprintRadius(node, graph.segments().values()),
+                                RoadBuilderClientNetworking.selectedPreset().map(entry -> RoundaboutGeometry.minimumRadius(entry.surfaceWidth())).orElse(4.0));
+                        roundaboutRadius = roundaboutInitialRadius;
+                        roundaboutDragX = client.mouseHandler.xpos();
+                        roundaboutDragging = true;
+                    }
+                }
+            }
             pathPoints.clear();
             if (activeTool == RoadBuilderTool.FREEHAND) {
                 pathPoints.add(target);
@@ -1096,7 +1130,17 @@ public final class StraightRoadToolController {
         placementContinuation.queue(target);
     }
 
+    private void updateRoundaboutRadius(Minecraft client) {
+        if (roundaboutDragging) {
+            // Screen-space horizontal movement is independent of camera heading.
+            roundaboutRadius = Math.max(RoundaboutGeometry.MINIMUM_RADIUS,
+                    Math.min(RoundaboutGeometry.MAXIMUM_RADIUS,
+                            roundaboutInitialRadius + (client.mouseHandler.xpos() - roundaboutDragX) / 8.0));
+        }
+    }
+
     private void rebuildPreview(Minecraft client) {
+        updateRoundaboutRadius(client);
         previewGeometry = null;
         rawPreview = null;
         parallelPreview = null;
@@ -1107,7 +1151,8 @@ public final class StraightRoadToolController {
             return;
         }
 
-        CursorTarget endpoint = cursorResult.target().orElse(null);
+        CursorTarget endpoint = cursorResult.target().orElse(
+                activeTool == RoadBuilderTool.ROUNDABOUT && roundaboutRadius > 0 ? startTarget : null);
         if (endpoint == null) {
             previewProblem = StraightRoadPreviewProblem.of(
                     StraightRoadPreviewProblem.Kind.NO_TARGET
@@ -1124,7 +1169,7 @@ public final class StraightRoadToolController {
         ReferenceGeometry geometry;
         try {
             geometry = buildPreviewGeometry(endpoint);
-            if (activeTool != RoadBuilderTool.FREEHAND_DRAW
+            if (activeTool != RoadBuilderTool.FREEHAND_DRAW && activeTool != RoadBuilderTool.ROUNDABOUT
                     && !parallelEnabled && snapSettings.tangentEnabled()) {
                 RoadVector exit = hoveredLanePort == null ? null : hoveredLanePort.direction();
                 geometry = LaneConnectionGeometry.align(geometry,
@@ -1269,6 +1314,12 @@ public final class StraightRoadToolController {
                         : new FreehandGeometry(stroke);
             }
             case ROUNDABOUT -> {
+                if (roundaboutRadius > 0) {
+                    double minimum = RoadBuilderClientNetworking.selectedPreset()
+                            .map(entry -> RoundaboutGeometry.minimumRadius(entry.surfaceWidth())).orElse(4.0);
+                    double radius = Math.max(minimum, roundaboutRadius);
+                    yield new RoundaboutGeometry(start, new RoadPoint(start.x() + radius, start.y(), start.z()));
+                }
                 double deltaX = cursor.roadPoint().x() - start.x();
                 double deltaZ = cursor.roadPoint().z() - start.z();
                 double rawRadius = Math.hypot(deltaX, deltaZ);
@@ -1836,6 +1887,8 @@ public final class StraightRoadToolController {
 
     private void clearSelection() {
         startTarget = null;
+        roundaboutDragging = false;
+        roundaboutRadius = 0;
         startLanePort = null;
         hoveredLanePort = null;
         visibleLanePorts = List.of();

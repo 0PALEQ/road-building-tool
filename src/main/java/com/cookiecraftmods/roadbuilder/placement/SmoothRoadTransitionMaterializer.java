@@ -36,11 +36,7 @@ public final class SmoothRoadTransitionMaterializer {
         if (incident.size() != 2
                 || incident.get(0).presetSnapshot().surfaceBlockWidth()
                 == incident.get(1).presetSnapshot().surfaceBlockWidth()
-                || incident.stream().anyMatch(segment ->
-                        !RoadNodePortResolver.isCenteredBoundary(
-                                node,
-                                segment
-                        ))) {
+                || !RoadNodePortResolver.isValidTopology(node, incident)) {
             return false;
         }
         RoadVector first = outwardTangent(incident.get(0), node);
@@ -86,8 +82,10 @@ public final class SmoothRoadTransitionMaterializer {
         wideSection = wideSection.withSurface(wideSurface.orElseThrow());
 
         double widthDifference = wideSection.width() - narrowSection.width();
+        double boundaryOffset = boundaryPosition(wide, node)
+                .distanceTo(boundaryPosition(narrow, node));
         double requestedTransitionLength = Math.max(
-                Math.max(8.0, widthDifference * 3.0),
+                Math.max(8.0, Math.max(widthDifference, boundaryOffset * 2.0) * 3.0),
                 transitionTurn(node, incident) * 8.0
         );
         double transitionLength = Math.min(
@@ -276,17 +274,26 @@ public final class SmoothRoadTransitionMaterializer {
         RoadPoint end = endSample.position();
         RoadVector startTangent = outwardTangent(wide, node).scale(-1.0);
         RoadVector endTangent = endSample.tangent().scale(narrowStartsAtNode ? 1.0 : -1.0);
-        double chord = node.position().distanceTo(end);
+        // Lane attachments share a logical node, but their reference-line
+        // endpoints differ. Start at the wide end cap so the whole cross
+        // section, including its outer markings, meets the existing road.
+        RoadPoint start = boundaryPosition(wide, node);
+        double chord = start.distanceTo(end);
         double handle = Math.min(
                 transitionLength * 0.45,
                 Math.max(2.0, chord * 0.4)
         );
         return new CubicBezierGeometry(
-                node.position(),
-                node.position().add(startTangent.scale(handle)),
+                start,
+                start.add(startTangent.scale(handle)),
                 end.subtract(endTangent.scale(handle)),
                 end
         );
+    }
+
+    private static RoadPoint boundaryPosition(RoadSegment segment, RoadNode node) {
+        return segment.startNodeId().equals(node.id())
+                ? segment.referenceGeometry().start() : segment.referenceGeometry().end();
     }
 
     private static double transitionTurn(

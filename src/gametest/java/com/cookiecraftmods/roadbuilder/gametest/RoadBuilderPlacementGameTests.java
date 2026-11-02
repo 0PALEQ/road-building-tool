@@ -73,6 +73,51 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
     private static final int UPDATE_FLAGS = Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS;
 
     @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 200)
+    public void convertsIntersectionIntoRoundaboutWithConsistentSurfaceHistory(GameTestHelper helper) {
+        var level = helper.getLevel();
+        var origin = helper.absolutePos(new BlockPos(14000, 0, 14000));
+        var presetId = new ResourceLocation("roadbuilder", "roundabout_conversion_test");
+        var preset = new com.cookiecraftmods.roadbuilder.preset.RoadPreset(
+                com.cookiecraftmods.roadbuilder.preset.RoadPreset.CURRENT_SCHEMA_VERSION, 1, 7,
+                new ResourceLocation("minecraft", "gray_concrete"), List.of(
+                new com.cookiecraftmods.roadbuilder.preset.LaneComponent(com.cookiecraftmods.roadbuilder.preset.LaneType.VEHICLE,
+                        3, -1.75, com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.FORWARD),
+                new com.cookiecraftmods.roadbuilder.preset.LaneComponent(com.cookiecraftmods.roadbuilder.preset.LaneType.BUS,
+                        3, 1.75, com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.BACKWARD)));
+        com.cookiecraftmods.roadbuilder.preset.RoadPresetLookup presets = id -> java.util.Optional.of(preset);
+        for (int x = -35; x <= 35; x++) for (int z = -35; z <= 35; z++) {
+            level.setBlock(new BlockPos(origin.getX() + x, 63, origin.getZ() + z), Blocks.STONE.defaultBlockState(), UPDATE_FLAGS);
+        }
+        var graph = new RoadGraph(level.dimension());
+        var ledger = new PlacementOwnershipLedger(level.dimension());
+        var player = testPlayer(level, true);
+        player.setPos(origin.getX(), 66, origin.getZ());
+        var straight = new StraightRoadPlacementEndpoint(new StraightRoadPlanningService(presets, new StraightRoadPlanner()),
+                ConstructionAuthorizer.creativeOnly(), ConstructionLimits.defaults(), new BlockPlanCommitter());
+        var center = new RoadPoint(origin.getX() + 0.5, 64, origin.getZ() + 0.5);
+        for (int[] offset : List.of(new int[]{30, 0}, new int[]{-30, 0}, new int[]{0, 30}, new int[]{0, -30})) {
+            var result = straight.handle(StraightRoadIntentC2SPacket.current(UUID.randomUUID(), level.dimension().location(),
+                    presetId, 1, center.x(), center.y(), center.z(), center.x() + offset[0], center.y(), center.z() + offset[1]),
+                    player, ledger, graph);
+            helper.assertTrue(result.resultCode() == PlacementResultCode.ACCEPTED, "approach must build: " + result.resultCode());
+        }
+        var endpoint = new com.cookiecraftmods.roadbuilder.networking.RoadPathPlacementEndpoint(
+                new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanningService(presets,
+                        new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanner()),
+                ConstructionAuthorizer.creativeOnly(), ConstructionLimits.defaults(), new BlockPlanCommitter(), TrafficHandedness.RHT);
+        var result = endpoint.handle(com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket.current(
+                UUID.randomUUID(), level.dimension().location(), presetId, 1, graph.revision(),
+                com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket.PathType.ROUNDABOUT,
+                List.of(center, new RoadPoint(center.x() + 12, center.y(), center.z()))), player, ledger, graph, null);
+        helper.assertTrue(result.resultCode() == PlacementResultCode.ACCEPTED, "conversion must build: " + result.resultCode());
+        helper.assertTrue(RoadGraphMaterializationConsistency.validate(graph, ledger).isEmpty(),
+                "converted surface history must reference surviving owners: " + RoadGraphMaterializationConsistency.validate(graph, ledger));
+        helper.assertTrue(level.getBlockState(BlockPos.containing(center.x(), center.y(), center.z())).is(Blocks.GRASS_BLOCK),
+                "old intersection center must become an island");
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 200)
     public void complexCurveConnectsToLaneAtSharedNodeAndPreservesThroughRoad(GameTestHelper helper) {
         var level = helper.getLevel();
         var origin = helper.absolutePos(new BlockPos(12000, 0, 12000));

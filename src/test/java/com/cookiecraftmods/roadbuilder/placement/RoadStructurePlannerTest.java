@@ -936,6 +936,86 @@ class RoadStructurePlannerTest {
         assertFalse(result.positions().contains(frontCut));
     }
 
+    @Test
+    void lowCrossingKeepsDeckAndDoesNotBuildPiersThroughLowerRoad() {
+        MapWorld world = new MapWorld(0);
+        Set<BlockPos> lower = new HashSet<>();
+        for (int x = 0; x < 25; x++) for (int z = 0; z < 7; z++) {
+            BlockPos pos = new BlockPos(x, 2, z);
+            lower.add(pos);
+            world.states.put(pos, Blocks.GRAY_CONCRETE.defaultBlockState());
+        }
+        var geometry = new StraightGeometry(new RoadPoint(0.5, 7, 3.5), new RoadPoint(24.5, 7, 3.5));
+        var built = success(new RoadStructurePlanner().addStructures(surface(7, 7, 25),
+                world, geometry, 7, lower::contains, 20000));
+        assertBlock(built, new BlockPos(10, 6, 3), Blocks.COBBLESTONE);
+        assertTrue(built.blocks().stream().noneMatch(block -> block.position().getZ() >= 0
+                && block.position().getZ() < 7 && block.position().getY() < 5
+                && !block.targetState().isAir()));
+    }
+
+    @Test
+    void bridgeClearsTrunkBelowDeck() {
+        MapWorld world = new MapWorld(0);
+        for (int y = 1; y < 12; y++) world.states.put(new BlockPos(5, y, 2),
+                Blocks.OAK_LOG.defaultBlockState());
+        var built = success(new RoadStructurePlanner().addStructures(surface(12, 5, 12), world, 20000));
+        assertBlock(built, new BlockPos(5, 4, 2), Blocks.AIR);
+    }
+
+    @Test
+    void railingUsesRaisedSlabColumnAndSolidBase() {
+        var stone = new net.minecraft.resources.ResourceLocation("minecraft", "smooth_stone");
+        var bands = List.of(
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.RAILING, 1, stone),
+                new com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand(
+                        com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole.PAVEMENT, 1, stone));
+        var geometry = new StraightGeometry(new RoadPoint(0.5, 12.3, 1), new RoadPoint(10.5, 12.3, 1));
+        var blocks = new ArrayList<PlannedBlock>();
+        for (int x = 0; x <= 10; x++) for (int z = 0; z < 2; z++) blocks.add(new PlannedBlock(
+                new BlockPos(x, 13, z), Blocks.SMOOTH_STONE_SLAB.defaultBlockState()));
+        var built = success(new RoadStructurePlanner().addStructures(
+                BlockPlacementPlan.create(Level.OVERWORLD, blocks), new MapWorld(0),
+                List.of(new RoadStructurePlanner.StructureSpan(geometry, 2, bands)), pos -> false, 20000));
+        assertState(built, new BlockPos(5, 13, 0), Blocks.SMOOTH_STONE_SLAB.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.SlabBlock.TYPE,
+                        net.minecraft.world.level.block.state.properties.SlabType.DOUBLE));
+        assertBlock(built, new BlockPos(5, 14, 0), Blocks.IRON_BARS);
+    }
+
+    @Test
+    void gapBetweenLowerRoadsGetsWallsWithoutBlockingEitherRoad() {
+        MapWorld world = new MapWorld(0);
+        Set<BlockPos> lower = new HashSet<>();
+        for (int x = 0; x < 12; x++) for (int z : new int[]{0, 2}) {
+            BlockPos pos = new BlockPos(x, 2, z);
+            lower.add(pos);
+            world.states.put(pos, Blocks.GRAY_CONCRETE.defaultBlockState());
+        }
+        world.states.put(new BlockPos(5, 3, 1), Blocks.OAK_LOG.defaultBlockState());
+        var built = success(new RoadStructurePlanner().addStructures(surface(12, 3, 12),
+                world, List.of(), lower::contains, 20000));
+        assertBlock(built, new BlockPos(5, 3, 1), Blocks.POLISHED_ANDESITE);
+        assertTrue(built.blocks().stream().noneMatch(block -> !block.targetState().isAir()
+                && (block.position().getZ() == 0 || block.position().getZ() == 2)
+                && block.position().getY() < 10));
+    }
+
+    @Test
+    void customBridgeWithinTwoBlocksDoesNotReceiveDeckOrPiers() {
+        MapWorld world = new MapWorld(0);
+        for (int x = 0; x < 12; x++) for (int z = 0; z < 3; z++)
+            world.states.put(new BlockPos(x, 10, z), Blocks.STONE_BRICKS.defaultBlockState());
+        var geometry = new StraightGeometry(new RoadPoint(0.5, 12, 1.5), new RoadPoint(11.5, 12, 1.5));
+        var built = success(new RoadStructurePlanner().addStructures(surface(12, 3, 12),
+                world, geometry, 3, pos -> false, 20000));
+        assertTrue(built.blocks().stream().noneMatch(block -> !block.targetState().isAir()
+                && block.position().getX() >= 0 && block.position().getX() < 12
+                && block.position().getZ() >= 0 && block.position().getZ() < 3
+                && block.position().getY() <= 10));
+    }
+
     private static BlockPlacementPlan surface(int y, int width, int length) {
         List<PlannedBlock> blocks = new ArrayList<>();
         for (int x = 0; x < length; x++) {

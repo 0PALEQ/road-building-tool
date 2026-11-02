@@ -45,6 +45,37 @@ class SmoothRoadTransitionMaterializerTest {
     }
 
     @Test
+    void laneOffsetWidthChangesBlendFromTheActualWideRoadBoundary() {
+        for (boolean reversed : new boolean[]{false, true}) {
+            for (boolean wideCentered : new boolean[]{false, true}) {
+                RoadNodeId nodeId = new RoadNodeId(UUID.randomUUID());
+                RoadPoint wideEnd = new RoadPoint(0.5, 64, 0.5);
+                RoadPoint narrowEnd = new RoadPoint(0.5, 64, 4.5);
+                RoadNode node = new RoadNode(nodeId, wideCentered ? wideEnd : narrowEnd);
+                RoadPoint wideFar = new RoadPoint(-50.5, 64, 0.5);
+                RoadPoint narrowFar = new RoadPoint(50.5, 64, 4.5);
+                RoadNodeId wideId = new RoadNodeId(UUID.randomUUID());
+                RoadNodeId narrowId = new RoadNodeId(UUID.randomUUID());
+                RoadSegment wide = segment(reversed ? wideEnd : wideFar, reversed ? wideFar : wideEnd,
+                        reversed ? nodeId : wideId, reversed ? wideId : nodeId, preset(15, 2));
+                RoadSegment narrow = segment(reversed ? narrowFar : narrowEnd, reversed ? narrowEnd : narrowFar,
+                        reversed ? narrowId : nodeId, reversed ? nodeId : narrowId, preset(7, 1));
+                assertTrue(SmoothRoadTransitionMaterializer.supports(node, List.of(narrow, wide)));
+                var geometry = SmoothRoadTransitionMaterializer.transitionGeometry(node, narrow, wide, 24);
+                assertEquals(wideEnd, geometry.start(), "Use the physical wide end cap, not the graph node");
+                assertEquals(new RoadPoint(24.5, 64, 4.5), geometry.end());
+                var plan = assertInstanceOf(BlockPlanResult.Success.class,
+                        new SmoothRoadTransitionMaterializer().plan(Level.OVERWORLD, node,
+                                List.of(narrow, wide), 10000, 100000)).plan();
+                assertTrue(plan.positions().contains(new BlockPos(0, 64, -7)),
+                        "The taper must cover the wide road's outer edge at the seam");
+                assertTrue(plan.positions().contains(new BlockPos(12, 64, -2)),
+                        "The missing side of the offset merge must taper gradually");
+            }
+        }
+    }
+
+    @Test
     void curvedTransitionMatchesTheRoadTangentAtBothEnds() {
         for (boolean reversed : new boolean[]{false, true}) {
             RoadNodeId nodeId = new RoadNodeId(UUID.randomUUID());

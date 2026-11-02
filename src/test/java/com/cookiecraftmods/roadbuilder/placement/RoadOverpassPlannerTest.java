@@ -15,11 +15,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RoadOverpassPlannerTest {
     @Test void underpassLowersTheWholeFootprintWithGentleApproaches() {
-        var original=upper(59);
+        var original=upper(62);
         var adjusted=new RoadOverpassPlanner().adjust(original,11,List.of(lower()));
         assertEquals(original.start(),adjusted.start());
         assertEquals(original.end(),adjusted.end());
-        assertTrue(adjusted.sample(adjusted.length()*0.2).position().y()<58.9,
+        assertTrue(adjusted.sample(adjusted.length()*0.2).position().y()<61.9,
                 "the descent should begin well before the crossing");
         for(var span:assertInstanceOf(MultiCurveGeometry.class,adjusted).spans()) {
             for(int i=0;i<=32;i++) {
@@ -45,8 +45,8 @@ class RoadOverpassPlannerTest {
     }
 
     @Test void overpassStartsClimbingEarlyAndLimitsItsGrade() {
-        var adjusted=new RoadOverpassPlanner().adjust(upper(69),11,List.of(lower()));
-        assertTrue(adjusted.sample(adjusted.length()*0.2).position().y()>69.1);
+        var adjusted=new RoadOverpassPlanner().adjust(upper(66),11,List.of(lower()));
+        assertTrue(adjusted.sample(adjusted.length()*0.2).position().y()>66.1);
         for(var span:assertInstanceOf(MultiCurveGeometry.class,adjusted).spans())
             for(int i=0;i<=32;i++) {
                 var tangent=span.derivativeAt(i/32.0);
@@ -55,8 +55,8 @@ class RoadOverpassPlannerTest {
     }
 
     @Test void curvedOverpassRemainsBuildableAfterItsElevationIsAdjusted() {
-        var curve=new CubicBezierGeometry(new RoadPoint(0,69,0),new RoadPoint(30,69,0),
-                new RoadPoint(60,69,20),new RoadPoint(100,69,20));
+        var curve=new CubicBezierGeometry(new RoadPoint(0,66,0),new RoadPoint(30,66,0),
+                new RoadPoint(60,66,20),new RoadPoint(100,66,20));
         var adjusted=assertDoesNotThrow(()->new RoadOverpassPlanner().adjust(curve,9,List.of(lower())));
         assertEquals(curve.start(),adjusted.start());
         assertEquals(curve.end(),adjusted.end());
@@ -99,7 +99,7 @@ class RoadOverpassPlannerTest {
         return new StraightGeometry(new RoadPoint(0.5,y,0.5),new RoadPoint(100.5,y,0.5));
     }
     @Test void raisesWholeCrossingFootprintAndKeepsEndpointElevations() {
-        var original=upper(69);
+        var original=upper(66);
         var result=new RoadOverpassPlanner().adjust(original,11,List.of(lower()));
         assertEquals(original.start(),result.start());
         assertEquals(original.end(),result.end());
@@ -107,7 +107,7 @@ class RoadOverpassPlannerTest {
         for(double d=0;d<result.length();d+=0.1) {
             var point=result.sample(d).position();
             if(point.x()>=45 && point.x()<=56)
-                assertTrue(Math.floor(point.y()+0.5)-RoadStructurePlanner.DECK_THICKNESS-65 >= 5);
+                assertTrue(Math.floor(point.y()+0.5)-RoadStructurePlanner.DECK_THICKNESS-65 >= RoadOverpassPlanner.MINIMUM_FREE_HEIGHT);
         }
         assertEquals(0.125,RoadOverpassPlanner.ease(0.25),1e-10);
         assertEquals(0.875,RoadOverpassPlanner.ease(0.75),1e-10);
@@ -119,24 +119,24 @@ class RoadOverpassPlannerTest {
         assertSame(high,new RoadOverpassPlanner().adjust(high,11,List.of(lower())));
     }
     @Test void splittingProfileKeepsTheRaisedSpan() {
-        var adjusted=new RoadOverpassPlanner().adjust(upper(69),11,List.of(lower()));
+        var adjusted=new RoadOverpassPlanner().adjust(upper(66),11,List.of(lower()));
         var parts=ReferenceGeometryEditor.split(adjusted,List.of(0.2,0.8),List.of(
                 adjusted.sample(adjusted.length()*0.2).position(),adjusted.sample(adjusted.length()*0.8).position()));
         var middle=parts.get(1);
-        assertTrue(middle.sample(middle.length()/2).position().y() >= 72);
+        assertTrue(middle.sample(middle.length()/2).position().y() >= 69);
     }
     @Test void raisedProfileSurvivesNetworkRoundTrip() {
-        var adjusted=new RoadOverpassPlanner().adjust(upper(69),11,List.of(lower()));
+        var adjusted=new RoadOverpassPlanner().adjust(upper(66),11,List.of(lower()));
         var graph=new RoadGraph(Level.OVERWORLD);
         graph.applyNetworkMutation(graph.prepareRoadNetwork(adjusted,ID,preset(),TrafficHandedness.RHT));
         var packet=com.cookiecraftmods.roadbuilder.networking.RoadGraphSnapshotS2CPacket.current(graph.snapshot());
         var decoded=com.cookiecraftmods.roadbuilder.networking.RoadGraphSnapshotS2CPacket.decode(packet.encode());
         var restored=decoded.snapshot().segments().values().iterator().next().referenceGeometry();
         assertEquals(adjusted.length(),restored.length(),1e-6);
-        assertTrue(restored.sample(restored.length()/2).position().y()>=72);
+        assertTrue(restored.sample(restored.length()/2).position().y()>=69);
     }
     @Test void descentHasNoEndpointCliffAndAddedGradeStaysBounded() {
-        var adjusted=new RoadOverpassPlanner().adjust(upper(69),11,List.of(lower()));
+        var adjusted=new RoadOverpassPlanner().adjust(upper(66),11,List.of(lower()));
         var previous=adjusted.sample(0).position();
         for(double distance=0.1;distance<adjusted.length();distance+=0.1) {
             var point=adjusted.sample(distance).position();
@@ -144,18 +144,18 @@ class RoadOverpassPlannerTest {
             assertTrue(Math.abs(point.y()-previous.y())/horizontal<0.4,"overpass approach is too steep");
             previous=point;
         }
-        assertTrue(Math.abs(adjusted.sample(adjusted.length()-0.1).position().y()-69)<0.02);
+        assertTrue(Math.abs(adjusted.sample(adjusted.length()-0.1).position().y()-66)<0.02);
     }
     @Test void crossingNearEndpointCannotCompressItsDescentIntoACliff() {
-        var shortExit=new StraightGeometry(new RoadPoint(0.5,69,0.5),new RoadPoint(70.5,69,0.5));
+        var shortExit=new StraightGeometry(new RoadPoint(0.5,66,0.5),new RoadPoint(70.5,66,0.5));
         assertThrows(IllegalArgumentException.class,()->new RoadOverpassPlanner().adjust(shortExit,11,List.of(lower())));
     }
     @Test void edgeOverlapRequiresClearanceEvenWhenReferenceLinesNeverCross() {
         var graph=new RoadGraph(Level.OVERWORLD);
         var lower=graph.prepareRoadNetwork(new StraightGeometry(new RoadPoint(40,64,8),new RoadPoint(60,64,8)),
                 ID,preset(),TrafficHandedness.RHT).placedSegments().get(0);
-        var adjusted=new RoadOverpassPlanner().adjust(upper(69),3,List.of(lower));
-        assertTrue(adjusted.sample(adjusted.length()/2).position().y()>=72);
+        var adjusted=new RoadOverpassPlanner().adjust(upper(66),3,List.of(lower));
+        assertTrue(adjusted.sample(adjusted.length()/2).position().y()>=69);
     }
     @Test void ordinaryRoadPreviewsWithFractionalLengthsAreNeverRejected() {
         var random=new java.util.Random(513);
@@ -181,7 +181,7 @@ class RoadOverpassPlannerTest {
         }
     }
     @Test void bridgeStructuresDoNotIntrudeIntoLowerRoadHeadroom() {
-        var adjusted=new RoadOverpassPlanner().adjust(upper(69),11,List.of(lower()));
+        var adjusted=new RoadOverpassPlanner().adjust(upper(66),11,List.of(lower()));
         var graph=new RoadGraph(Level.OVERWORLD);
         var mutation=graph.prepareRoadNetwork(adjusted,ID,preset(),TrafficHandedness.RHT);
         PlacementBlockWorld world=new PlacementBlockWorld() {
@@ -198,6 +198,28 @@ class RoadOverpassPlannerTest {
         var plan=assertInstanceOf(BlockPlanResult.Success.class,result).plan();
         assertTrue(plan.blocks().stream().noneMatch(block -> !block.targetState().isAir()
                 && block.position().getX()>=45 && block.position().getX()<=55
-                && block.position().getY()>=65 && block.position().getY()<=69));
+                && block.position().getY()>=65 && block.position().getY()<=66));
+    }
+    @Test void lowUnadjustedBridgeKeepsItsEntireDeck() {
+        var adjusted=upper(67);
+        var graph=new RoadGraph(Level.OVERWORLD);
+        var mutation=graph.prepareRoadNetwork(adjusted,ID,preset(),TrafficHandedness.RHT);
+        PlacementBlockWorld world=new PlacementBlockWorld() {
+            public ResourceKey<Level> dimension(){return Level.OVERWORLD;}
+            public boolean hasBlockEntity(BlockPos pos){return false;}
+            public boolean setBlockState(BlockPos pos,BlockState state){return true;}
+            public BlockState blockState(BlockPos pos){
+                if (pos.getY()==64 && pos.getX()>=45 && pos.getX()<=55) return Blocks.GRAY_CONCRETE.defaultBlockState();
+                return (pos.getY()<=60?Blocks.STONE:Blocks.AIR).defaultBlockState();
+            }
+        };
+        var result=new RoadMaterializationPlanner().plan(Level.OVERWORLD,mutation.placedSegments(),world,
+                pos -> pos.getY()==64 && pos.getX()>=45 && pos.getX()<=55, ConstructionLimits.defaults());
+        var plan=assertInstanceOf(BlockPlanResult.Success.class,result).plan();
+        assertTrue(plan.blocks().stream().anyMatch(block -> block.position().equals(new BlockPos(50, 65, 0))
+                && block.targetState().is(Blocks.SMOOTH_STONE)));
+        assertTrue(plan.blocks().stream().noneMatch(block -> !block.targetState().isAir()
+                && block.position().getX()>=45 && block.position().getX()<=55
+                && block.position().getY()==64));
     }
 }

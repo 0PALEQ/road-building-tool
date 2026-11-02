@@ -805,6 +805,7 @@ public final class RoadGraphPacketCodecs {
         buffer.writeByte(switch (lane.type()) {
             case VEHICLE -> 0;
             case BUS -> 1;
+            case ROUNDABOUT -> 2;
         });
         buffer.writeDouble(lane.width());
         buffer.writeDouble(lane.lateralOffset());
@@ -818,6 +819,7 @@ public final class RoadGraphPacketCodecs {
         LaneType type = switch (buffer.readUnsignedByte()) {
             case 0 -> LaneType.VEHICLE;
             case 1 -> LaneType.BUS;
+            case 2 -> LaneType.ROUNDABOUT;
             default -> throw new IllegalArgumentException("unknown lane type wire ID");
         };
         double width = buffer.readDouble();

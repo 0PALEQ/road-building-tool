@@ -25,6 +25,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -344,7 +345,10 @@ public final class RoadBuilderPlacementSavedData extends SavedData {
                                 stacks,
                                 limits.maximumTotalLayers()
                         );
-        return new DecodedData(Map.copyOf(stacks), materializationOwners);
+        // This decoder owns stacks exclusively. Map.copyOf uses linear probing,
+        // which becomes quadratic for dense BlockPos footprints with clustered hashes.
+        // Keep the validated hash map and expose only a read-only view.
+        return new DecodedData(Collections.unmodifiableMap(stacks), materializationOwners);
     }
 
     private static Map<PlacementOperationId, RoadMaterializationOwner> decodeMaterializationOwners(

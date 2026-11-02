@@ -89,8 +89,8 @@ public final class JunctionConnectorPlanner {
                         continue;
                     }
                     RoadLane nearest = outgoing.stream()
-                            .filter(to -> to.component().type()
-                                    == from.component().type())
+                            .filter(to -> LaneConnectionCompatibility.canTransition(
+                                    from.component().type(), to.component().type()))
                             .min(Comparator
                                     .comparingDouble((RoadLane to) ->
                                             from.geometry().end().distanceTo(

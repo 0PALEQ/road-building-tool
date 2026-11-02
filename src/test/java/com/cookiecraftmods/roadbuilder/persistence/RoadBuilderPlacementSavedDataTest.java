@@ -93,6 +93,23 @@ class RoadBuilderPlacementSavedDataTest {
     }
 
     @Test
+    void denseRoadHistoryLoadsWithoutQuadraticPositionCopying() {
+        CompoundTag raw=root();
+        ListTag ownership=new ListTag();
+        for(int x=0;x<256;x++) for(int z=0;z<256;z++)
+            ownership.add(position(new BlockPos(x,64,z),layerA()));
+        raw.put("ownership",ownership);
+        org.junit.jupiter.api.Assertions.assertTimeout(java.time.Duration.ofSeconds(10),()-> {
+            var data=RoadBuilderPlacementSavedData.load(Level.OVERWORLD,raw);
+            assertTrue(data.isCompatible());
+            assertEquals(256*256,data.ledger().positionStacks().size());
+            assertEquals(256*256,data.ledger().operation(OPERATION_A).orElseThrow().positions().size());
+            assertEquals(Blocks.STONE.defaultBlockState(),
+                    data.ledger().stack(new BlockPos(255,64,255)).orElseThrow().top().afterState());
+        });
+    }
+
+    @Test
     void ledgerMutationMarksCompatibleDataDirty() {
         RoadBuilderPlacementSavedData data = RoadBuilderPlacementSavedData.create(Level.OVERWORLD);
         MapWorld world = new MapWorld(Level.OVERWORLD);

@@ -21,6 +21,23 @@ final class LaneConnectorLaneMatcher {
         Objects.requireNonNull(outgoing, "outgoing");
         Objects.requireNonNull(preferredSide, "preferredSide");
         List<Match> result = new ArrayList<>();
+        if (incoming.stream().anyMatch(lane -> lane.component().type() == LaneType.ROUNDABOUT)
+                || outgoing.stream().anyMatch(lane -> lane.component().type() == LaneType.ROUNDABOUT)) {
+            double sign = preferredSide == PreferredSide.RIGHT ? -1.0 : 1.0;
+            Comparator<RoadLane> order = Comparator.comparingDouble(lane -> sign * travelRightOffset(lane));
+            List<RoadLane> from = incoming.stream().sorted(order.thenComparing(RoadLane::id)).toList();
+            List<RoadLane> to = outgoing.stream().sorted(order.thenComparing(RoadLane::id)).toList();
+            if (!from.isEmpty() && !to.isEmpty()) {
+                for (int i = 0; i < Math.max(from.size(), to.size()); i++) {
+                    RoadLane a = from.get(Math.min(i, from.size() - 1));
+                    RoadLane b = to.get(Math.min(i, to.size() - 1));
+                    if (LaneConnectionCompatibility.canTransition(a.component().type(), b.component().type())) {
+                        result.add(new Match(a, b));
+                    }
+                }
+            }
+            return List.copyOf(result);
+        }
         for (LaneType type : LaneType.values()) {
             List<RoadLane> matchingIncoming = ordered(
                     incoming,

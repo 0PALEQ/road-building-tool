@@ -13,6 +13,7 @@ public final class LaneConnectionCompatibility {
         Objects.requireNonNull(from, "from");
         Objects.requireNonNull(to, "to");
         return from == to
+                || from == LaneType.ROUNDABOUT || to == LaneType.ROUNDABOUT
                 || from == LaneType.BUS && to == LaneType.VEHICLE
                 || from == LaneType.VEHICLE && to == LaneType.BUS;
     }

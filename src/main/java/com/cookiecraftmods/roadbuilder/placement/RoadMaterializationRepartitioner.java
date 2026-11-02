@@ -140,7 +140,28 @@ public final class RoadMaterializationRepartitioner {
                     Map.of()
             ));
         }
+        convertedJunctionOwners(mutation).forEach((oldNode, newNode) ->
+                ledger.operation(RoadMaterializationOwner.node(oldNode)).ifPresent(source ->
+                        result.add(new OperationMaterializationRepartition(source.id(), List.of(
+                                new MaterializationPartition(source.id(), RoadMaterializationOwner.node(newNode),
+                                        source.positions()))))));
         return List.copyOf(result);
+    }
+
+    /** Move the old junction's surface history to a surviving ring port. */
+    public static Map<RoadNodeId, RoadNodeId> convertedJunctionOwners(PreparedRoadNetworkMutation mutation) {
+        Set<RoadNodeId> retained = new HashSet<>();
+        mutation.allUpsertedSegments().forEach(segment -> {
+            retained.add(segment.startNodeId());
+            retained.add(segment.endNodeId());
+        });
+        Map<RoadNodeId, RoadNodeId> owners = new java.util.LinkedHashMap<>();
+        for (PreparedSegmentSplit split : mutation.segmentSplits()) {
+            for (RoadNodeId old : List.of(split.original().startNodeId(), split.original().endNodeId())) {
+                if (!retained.contains(old)) owners.put(old, mutation.placedSegments().get(0).startNodeId());
+            }
+        }
+        return Map.copyOf(owners);
     }
 
     private static int nearestChild(

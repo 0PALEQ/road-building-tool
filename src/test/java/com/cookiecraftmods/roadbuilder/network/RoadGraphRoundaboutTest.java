@@ -116,6 +116,85 @@ class RoadGraphRoundaboutTest {
     }
 
     @Test
+    void convertsIntersectionAndPreservesConnectedEditableApproaches() {
+        AtomicLong ids = new AtomicLong(40_000);
+        RoadGraph graph = new RoadGraph(Level.OVERWORLD, RoadGraphLimits.defaults(),
+                () -> new UUID(0L, ids.getAndIncrement()), () -> { });
+        RoadPoint center = new RoadPoint(0.5, 64, 0.5);
+        for (RoadPoint end : List.of(new RoadPoint(40.5, 64, 0.5), new RoadPoint(-39.5, 64, 0.5),
+                new RoadPoint(0.5, 64, 40.5), new RoadPoint(0.5, 64, -39.5))) {
+            graph.applyNetworkMutation(graph.prepareStraightRoadNetwork(
+                    new com.cookiecraftmods.roadbuilder.geometry.StraightGeometry(center, end),
+                    PRESET_ID, PRESET, TrafficHandedness.RHT));
+        }
+        RoadNode originalCenter = graph.snapshot().nodes().values().stream()
+                .filter(node -> node.position().distanceTo(center) < 0.1).findFirst().orElseThrow();
+        var mutation = graph.prepareRoadNetwork(new RoundaboutGeometry(center, new RoadPoint(12.5, 64, 0.5)),
+                PRESET_ID, PRESET, TrafficHandedness.RHT);
+        assertEquals(4, mutation.segmentSplits().size());
+        graph.applyNetworkMutation(mutation);
+        assertTrue(graph.snapshot().segments().values().stream().noneMatch(segment ->
+                segment.startNodeId().equals(originalCenter.id()) || segment.endNodeId().equals(originalCenter.id())));
+        var snapshot = graph.snapshot();
+        assertTrue(!snapshot.nodes().containsKey(originalCenter.id()));
+        assertEquals(snapshot, com.cookiecraftmods.roadbuilder.networking.RoadGraphSnapshotS2CPacket.decode(
+                com.cookiecraftmods.roadbuilder.networking.RoadGraphSnapshotS2CPacket.current(snapshot).encode()).snapshot());
+        for (RoadSegment ring : mutation.placedSegments()) {
+            assertTrue(ring.lanes().stream().allMatch(lane -> lane.component().type() == LaneType.ROUNDABOUT));
+        }
+        for (var split : mutation.segmentSplits()) {
+            RoadSegment approach = split.replacements().get(0);
+            assertTrue(approach.referenceGeometry().length() < split.original().referenceGeometry().length());
+            for (RoadLane lane : approach.lanes()) {
+                assertTrue(snapshot.connectors().values().stream().anyMatch(connector ->
+                        connector.fromLaneId().equals(lane.id()) && snapshot.lanes().get(connector.toLaneId()).component().type() == LaneType.ROUNDABOUT
+                        || connector.toLaneId().equals(lane.id()) && snapshot.lanes().get(connector.fromLaneId()).component().type() == LaneType.ROUNDABOUT));
+            }
+        }
+        RoadSegment ring = mutation.placedSegments().get(0);
+        var edit = graph.prepareSegmentReplacement(ring.id(), PRESET_ID, PRESET);
+        graph.applySegmentReplacement(edit);
+        assertTrue(edit.replacement().lanes().stream().allMatch(lane -> lane.component().type() == LaneType.ROUNDABOUT
+                && lane.component().direction() == LaneTravelDirection.FORWARD));
+    }
+
+    @Test
+    void convertsSkewedThreeWayJunctionWithCurvedApproachForBothTrafficDirections() {
+        for (TrafficHandedness handedness : TrafficHandedness.values()) {
+            RoadGraph graph = new RoadGraph(Level.OVERWORLD);
+            RoadPoint center = new RoadPoint(0.5, 64, 0.5);
+            for (double angle : List.of(0.2, 2.4, 4.4)) {
+                var outward = new com.cookiecraftmods.roadbuilder.geometry.RoadVector(Math.cos(angle), 0, Math.sin(angle));
+                var sideways = new com.cookiecraftmods.roadbuilder.geometry.RoadVector(-Math.sin(angle), 0, Math.cos(angle));
+                var geometry = new CubicBezierGeometry(center, center.add(outward.scale(12)),
+                        center.add(outward.scale(28)).add(sideways.scale(3)), center.add(outward.scale(40)));
+                graph.applyNetworkMutation(graph.prepareRoadNetwork(geometry, PRESET_ID, PRESET, handedness));
+            }
+            var before = graph.snapshot();
+            var mutation = graph.prepareRoadNetwork(new RoundaboutGeometry(center, center.add(
+                    new com.cookiecraftmods.roadbuilder.geometry.RoadVector(12, 0, 0))), PRESET_ID, PRESET, handedness);
+            assertEquals(3, mutation.segmentSplits().size());
+            graph.applyNetworkMutation(mutation);
+            var delta = RoadGraphDelta.between(before, graph.snapshot());
+            assertEquals(graph.snapshot(), delta.applyTo(before));
+            for (var replacement : mutation.replacementSegments()) {
+                assertInstanceOf(CubicBezierGeometry.class, replacement.referenceGeometry());
+                assertEquals(4, graph.snapshot().connectors().values().stream().filter(connector ->
+                        replacement.lanes().stream().anyMatch(lane -> lane.id().equals(connector.fromLaneId())
+                                || lane.id().equals(connector.toLaneId()))).count());
+            }
+        }
+    }
+
+    @Test
+    void roundaboutLanesConnectToEveryCategoryInBothDirections() {
+        for (LaneType type : LaneType.values()) {
+            assertTrue(LaneConnectionCompatibility.canTransition(type, LaneType.ROUNDABOUT));
+            assertTrue(LaneConnectionCompatibility.canTransition(LaneType.ROUNDABOUT, type));
+        }
+    }
+
+    @Test
     void leftHandTrafficCirculatesClockwise() {
         AtomicLong ids = new AtomicLong(25_000);
         RoadGraph graph = new RoadGraph(

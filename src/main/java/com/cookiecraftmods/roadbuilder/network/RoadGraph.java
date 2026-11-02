@@ -360,7 +360,9 @@ public final class RoadGraph {
                 original.referenceGeometry(),
                 presetId,
                 preset.revision(),
-                RoadPresetSnapshot.from(preset),
+                original.lanes().stream().anyMatch(lane -> lane.component().type()
+                        == com.cookiecraftmods.roadbuilder.preset.LaneType.ROUNDABOUT)
+                        ? roundaboutSnapshot(preset) : RoadPresetSnapshot.from(preset),
                 original.trafficHandedness(),
                 replacementLaneIds
         );
@@ -973,6 +975,14 @@ public final class RoadGraph {
         var traversalSpans = geometry.spans(
                 (handedness == TrafficHandedness.LHT) != reverseTraversal
         );
+        RoadNode center = nodes.values().stream()
+                .filter(node -> node.position().distanceTo(geometry.center()) < 0.1)
+                .filter(node -> incidentSegments(node.id()).size() >= 3)
+                .findFirst().orElse(null);
+        RoundaboutConversion.Plan conversion = center == null ? null : RoundaboutConversion.plan(
+                geometry, center, incidentSegments(center.id()),
+                (handedness == TrafficHandedness.LHT) != reverseTraversal);
+        if (conversion != null) traversalSpans = conversion.spans();
         RoadPresetSnapshot roundaboutSnapshot = roundaboutSnapshot(preset);
 
         Set<UUID> generated = new HashSet<>();
@@ -1022,11 +1032,38 @@ public final class RoadGraph {
         }
 
         List<RoadSegment> resultingSegments = new ArrayList<>(segments.values());
+        List<PreparedSegmentSplit> replacements = new ArrayList<>();
+        Set<RoadNodeId> affectedNodes = new HashSet<>(distinctNodeIds);
+        if (conversion != null) {
+            affectedNodes.add(center.id());
+            for (var approach : conversion.approaches()) {
+                RoadSegment source = approach.source();
+                RoadNode port = boundaryNodes.stream().min(Comparator.comparingDouble(
+                        node -> node.position().distanceTo(approach.port()))).orElseThrow();
+                RoadSegment trimmed = recreateSegment(source, source.id(),
+                        approach.atStart() ? port.id() : source.startNodeId(),
+                        approach.atStart() ? source.endNodeId() : port.id(),
+                        approach.trimmed(), source.lanes().stream().map(RoadLane::id).toList());
+                replacements.add(new PreparedSegmentSplit(source, List.of(trimmed)));
+                resultingSegments.remove(source);
+                resultingSegments.add(trimmed);
+                affectedNodes.add(source.startNodeId());
+                affectedNodes.add(source.endNodeId());
+            }
+        }
         resultingSegments.addAll(placedSegments);
+        List<LaneConnectorId> removedConnectors = connectors.values().stream()
+                .filter(connector -> {
+                    RoadLane lane = lanes.get(connector.fromLaneId());
+                    RoadSegment segment = lane == null ? null : segments.get(lane.segmentId());
+                    return segment != null && affectedNodes.contains(lane.component().direction().followsReferenceDirection()
+                            ? segment.endNodeId() : segment.startNodeId());
+                })
+                .map(LaneConnector::id).toList();
         List<LaneConnector> addedConnectors = rebuildStraightConnectors(
                 resultingSegments,
-                Set.copyOf(distinctNodeIds),
-                List.of(),
+                affectedNodes,
+                removedConnectors,
                 generated
         );
         PreparedRoadNetworkMutation mutation = new PreparedRoadNetworkMutation(
@@ -1034,9 +1071,9 @@ public final class RoadGraph {
                 road,
                 true,
                 addedNodes,
-                List.of(),
+                replacements,
                 placedSegments,
-                List.of(),
+                removedConnectors,
                 addedConnectors
         );
         validateNetworkMutation(mutation);
@@ -1046,7 +1083,7 @@ public final class RoadGraph {
     private static RoadPresetSnapshot roundaboutSnapshot(RoadPreset preset) {
         List<LaneComponent> circulatingLanes = preset.lanes().stream()
                 .map(lane -> new LaneComponent(
-                        lane.type(),
+                        com.cookiecraftmods.roadbuilder.preset.LaneType.ROUNDABOUT,
                         lane.width(),
                         lane.lateralOffset(),
                         LaneTravelDirection.FORWARD
@@ -1446,6 +1483,7 @@ public final class RoadGraph {
         }
         mutation.addedConnectors().forEach(connector ->
                 connectors.put(connector.id(), connector));
+        removeDetachedReplacementNodes(nodes, segments.values(), mutation);
         revision++;
     }
 
@@ -1832,6 +1870,7 @@ public final class RoadGraph {
                         junctionDefinitions,
                         mutation.segmentSplits()
                 );
+        removeDetachedReplacementNodes(candidateNodes, candidateSegments.values(), mutation);
         RoadGraph.restore(
                 dimension,
                 revision + 1,
@@ -1843,6 +1882,19 @@ public final class RoadGraph {
                 limits,
                 () -> { }
         );
+    }
+
+    private static void removeDetachedReplacementNodes(Map<RoadNodeId, RoadNode> nodes,
+            Collection<RoadSegment> segments, PreparedRoadNetworkMutation mutation) {
+        Set<RoadNodeId> used = new HashSet<>();
+        segments.forEach(segment -> {
+            used.add(segment.startNodeId());
+            used.add(segment.endNodeId());
+        });
+        for (PreparedSegmentSplit split : mutation.segmentSplits()) {
+            if (!used.contains(split.original().startNodeId())) nodes.remove(split.original().startNodeId());
+            if (!used.contains(split.original().endNodeId())) nodes.remove(split.original().endNodeId());
+        }
     }
 
     private void validateJunctionDefinition(JunctionDefinition definition) {
@@ -1880,6 +1932,12 @@ public final class RoadGraph {
                 new HashMap<>(source);
         for (PreparedSegmentSplit split : splits) {
             RoadSegment original = split.original();
+            if (!split.replacements().get(0).startNodeId().equals(original.startNodeId())) {
+                migrated.remove(original.startNodeId());
+            }
+            if (!split.replacements().get(split.replacements().size() - 1).endNodeId().equals(original.endNodeId())) {
+                migrated.remove(original.endNodeId());
+            }
             RoadSegment last = split.replacements().get(
                     split.replacements().size() - 1
             );

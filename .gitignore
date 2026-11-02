@@ -25,3 +25,5 @@ run
 
 # Runtime logs created by Minecraft classes during tests and development
 debug/logs/
+logs
+logs/*

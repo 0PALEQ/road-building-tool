@@ -42,7 +42,7 @@ public final class RoadStructurePlanner {
     private static final int CUT_WALL_HEIGHT =
             RoadTunnelPlanner.FREE_HEIGHT + 2;
     private static final int MINIMUM_EXPOSED_HEIGHT = 2;
-    private static final int AT_GRADE_ROAD_GAP = 6;
+    private static final int AT_GRADE_ROAD_GAP = 1;
     private static final int[][] CARDINAL_DIRECTIONS = {
             {1, 0}, {-1, 0}, {0, 1}, {0, -1}
     };
@@ -155,12 +155,28 @@ public final class RoadStructurePlanner {
             boolean roadBelow = ground.solid()
                     && verticalGap > AT_GRADE_ROAD_GAP
                     && existingRoadPosition.test(ground.position());
+            boolean besideLowerRoad = false;
+            for (int[] direction : CARDINAL_DIRECTIONS) {
+                Ground adjacent = groundBelow(position.offset(direction[0], 0, direction[1]),
+                        world, existingRoadPosition, groundCache);
+                if (existingRoadPosition.test(adjacent.position())
+                        && position.getY() - adjacent.position().getY() > AT_GRADE_ROAD_GAP) {
+                    besideLowerRoad = true;
+                }
+            }
             boolean forcedDeck = endpointDeckZones.stream()
                     .anyMatch(zone -> zone.contains(position));
-            boolean deck = forcedDeck
-                    || roadBelow
-                    || ground.fluidEncountered()
-                    || verticalGap > MAXIMUM_SOLID_BASE_HEIGHT;
+            boolean deck = roadBelow || ground.fluidEncountered()
+                    || verticalGap > MAXIMUM_SOLID_BASE_HEIGHT
+                    || (forcedDeck && verticalGap > 2 && !besideLowerRoad);
+            // Clear vegetation below the deck without treating trunks as foundations.
+            for (int y = position.getY() - 1; y > ground.position().getY(); y--) {
+                BlockPos obstacle = new BlockPos(position.getX(), y, position.getZ());
+                if (!existingRoadPosition.test(obstacle) && !world.hasBlockEntity(obstacle)
+                        && isVegetation(world.blockState(obstacle))
+                        && !put(targets, surfacePositions, obstacle, Blocks.AIR.defaultBlockState(),
+                        maximumAffectedBlocks)) return failure();
+            }
 
             if (deck) {
                 if (!addDeck(
@@ -174,6 +190,15 @@ public final class RoadStructurePlanner {
                     return failure();
                 }
                 railingSurfacePositions.add(position);
+                if (besideLowerRoad && !roadBelow && ground.solid() && !ground.fluidEncountered()) {
+                    for (int y = position.getY() - 1;
+                            y > ground.position().getY(); y--) {
+                        BlockPos wall = new BlockPos(position.getX(), y, position.getZ());
+                        if (!existingRoadPosition.test(wall)
+                                && !put(targets, surfacePositions, wall, materials.retainingWall(),
+                                maximumAffectedBlocks)) return failure();
+                    }
+                }
             } else if (verticalGap > 1) {
                 if (sideEdge && verticalGap > MAXIMUM_TERRAIN_FILL_HEIGHT) {
                     railingSurfacePositions.add(position);
@@ -182,8 +207,8 @@ public final class RoadStructurePlanner {
                         <= MAXIMUM_TERRAIN_FILL_HEIGHT
                         ? materials.terrainFill()
                         : materials.reinforcedBase();
-                BlockState state = sideEdge
-                        && verticalGap > MAXIMUM_TERRAIN_FILL_HEIGHT
+                BlockState state = besideLowerRoad || (sideEdge
+                        && verticalGap > MAXIMUM_TERRAIN_FILL_HEIGHT)
                         ? materials.retainingWall()
                         : interior;
                 for (int y = position.getY() - 1;
@@ -210,6 +235,7 @@ public final class RoadStructurePlanner {
             }
             if (edge
                     && !deck
+                    && !besideLowerRoad
                     && verticalGap <= MAXIMUM_TERRAIN_FILL_HEIGHT) {
                 addEmbankmentCandidates(
                         embankments,
@@ -259,6 +285,7 @@ public final class RoadStructurePlanner {
                         addBarrierPath(bandPositions, span.geometry(),
                                 (span.roadWidth() - 1) / 2.0 - column - index);
                     }
+                    bandPositions = alignToSurface(bandPositions, roadSurfacePositions);
                     if (column == 0 || column + band.width() == span.roadWidth()) {
                         bandPositions.removeIf(position -> !isExposedHorizontalEdge(
                                 position, roadSurfacePositions, existingRoadPosition));
@@ -354,6 +381,7 @@ public final class RoadStructurePlanner {
                         addBarrierPath(positions, span.geometry(),
                                 (span.roadWidth() - 1) / 2.0 - column - index);
                     }
+                    positions = alignToSurface(positions, footprint);
                     boolean edge = column == 0 || column + band.width() == span.roadWidth();
                     for (BlockPos position : positions) {
                         PlannedBlock base = blocks.get(position);
@@ -496,6 +524,11 @@ public final class RoadStructurePlanner {
             int maximumAffectedBlocks
     ) {
         for (BlockPos position : barrierPositions) {
+            PlannedBlock base = targets.get(position.below());
+            if (base != null && base.targetState().getBlock() instanceof SlabBlock) {
+                targets.put(base.position(), new PlannedBlock(base.position(),
+                        base.targetState().setValue(SlabBlock.TYPE, SlabType.DOUBLE)));
+            }
             // Carry the fascia out beneath the railing and up to road level.
             // A full curb supports the bars even beside a bottom-slab surface.
             if (!surfacePositions.contains(position.below())
@@ -619,6 +652,7 @@ public final class RoadStructurePlanner {
                     addBarrierPath(candidates, span.geometry(), -edgeOffset);
                 }
             }
+            candidates = alignToSurface(candidates, outerDeckPositions);
             candidates.retainAll(outerDeckPositions);
         }
         candidates.removeIf(position -> !isExposedHorizontalEdge(
@@ -629,6 +663,15 @@ public final class RoadStructurePlanner {
         return candidates.stream()
                 .map(BlockPos::above)
                 .collect(java.util.stream.Collectors.toSet());
+    }
+
+    private static Set<BlockPos> alignToSurface(Set<BlockPos> path, Set<BlockPos> surface) {
+        Set<BlockPos> aligned = new HashSet<>();
+        for (BlockPos position : path) {
+            if (surface.contains(position.above())) aligned.add(position.above());
+            else if (surface.contains(position)) aligned.add(position);
+        }
+        return aligned;
     }
 
     private static void addBarrierPath(
@@ -1129,6 +1172,25 @@ public final class RoadStructurePlanner {
                 RoadPoint center = sample.position().add(
                         left.scale(lateralOffset)
                 );
+                if (!availablePierSite(center, forward, left, minimumOffset, maximumOffset,
+                        surfaceY, footprint, world, existingRoadPosition, groundCache)) {
+                    RoadPoint replacement = null;
+                    for (int shift = 1; shift <= roadWidth / 2 && replacement == null; shift++) {
+                        for (int sign : new int[]{-1, 1}) {
+                            RoadPoint candidate = center.add(left.scale(sign * shift));
+                            if (availablePierSite(candidate, forward, left, minimumOffset, maximumOffset,
+                                    surfaceY, footprint, world, existingRoadPosition, groundCache)) {
+                                replacement = candidate;
+                                break;
+                            }
+                        }
+                    }
+                    if (replacement == null) {
+                        sites.add(new PierSite((int) Math.signum(lateralOffset), false));
+                        continue;
+                    }
+                    center = replacement;
+                }
                 int centerX = floorToInt(center.x());
                 int centerZ = floorToInt(center.z());
                 Ground centerGround = groundBelow(
@@ -1311,6 +1373,25 @@ public final class RoadStructurePlanner {
         return true;
     }
 
+    private static boolean availablePierSite(
+            RoadPoint center, RoadVector forward, RoadVector left, int minimumOffset, int maximumOffset,
+            int surfaceY, Set<HorizontalColumn> footprint, PlacementBlockWorld world,
+            Predicate<BlockPos> existingRoadPosition, Map<GroundKey, Ground> groundCache
+    ) {
+        for (HorizontalColumn column : localColumns(center, forward, left,
+                minimumOffset, maximumOffset, minimumOffset - 1, maximumOffset + 1)) {
+            if (!footprint.contains(column)) return false;
+            Ground ground = groundBelow(new BlockPos(column.x(), surfaceY, column.z()),
+                    world, existingRoadPosition, groundCache);
+            if (!ground.solid() || existingRoadPosition.test(ground.position())) return false;
+            for (int y = ground.position().getY(); y < surfaceY - DECK_THICKNESS; y++) {
+                BlockPos position = new BlockPos(column.x(), y, column.z());
+                if (existingRoadPosition.test(position) || world.hasBlockEntity(position)) return false;
+            }
+        }
+        return true;
+    }
+
     private static List<Double> pillarDistances(double length) {
         if (length <= PIER_END_INSET * 2.0) {
             return List.of(length / 2.0);
@@ -1362,9 +1443,14 @@ public final class RoadStructurePlanner {
     ) {
         for (HorizontalColumn column : columns) {
             BlockPos position = new BlockPos(column.x(), y, column.z());
-            if (existingRoadPosition.test(position)) {
-                continue;
+            boolean roadBelow = false;
+            for (int depth = 0; depth <= MAXIMUM_GROUND_SCAN_DEPTH; depth++) {
+                if (existingRoadPosition.test(position.below(depth))) {
+                    roadBelow = true;
+                    break;
+                }
             }
+            if (roadBelow) continue;
             if (!put(
                     targets,
                     surfacePositions,
@@ -1401,7 +1487,13 @@ public final class RoadStructurePlanner {
         for (int y = surface.getY() - 1; y >= minimumY; y--) {
             BlockPos position = new BlockPos(surface.getX(), y, surface.getZ());
             if (existingRoadPosition.test(position)) {
-                continue;
+                // Ownership also includes the current road's deck and old earth fill.
+                // Neither is a separate lower carriageway.
+                if (existingRoadPosition.test(surface)
+                        || world.blockState(position).is(Blocks.DIRT)) continue;
+                Ground ground = new Ground(position, true, fluidEncountered);
+                cache.put(key, ground);
+                return ground;
             }
             BlockState state = world.blockState(position);
             if (!state.getFluidState().isEmpty()) {
@@ -1428,6 +1520,8 @@ public final class RoadStructurePlanner {
         return !state.isAir()
                 && state.getFluidState().isEmpty()
                 && (state.canBeReplaced()
+                || state.is(BlockTags.LOGS)
+                || BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath().endsWith("_log")
                 || state.is(BlockTags.LEAVES)
                 || state.getBlock() instanceof LeavesBlock);
     }

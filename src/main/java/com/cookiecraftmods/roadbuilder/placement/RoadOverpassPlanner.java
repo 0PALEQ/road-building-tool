@@ -6,7 +6,7 @@ import java.util.*;
 
 /** Fits separated crossings above and below roads before graph materialization. */
 public final class RoadOverpassPlanner {
-    public static final int MINIMUM_FREE_HEIGHT = 5;
+    public static final int MINIMUM_FREE_HEIGHT = 2;
     private record Span(double start, double end, double lift, double approach) {}
 
     public ReferenceGeometry adjust(ReferenceGeometry geometry, int width, Collection<RoadSegment> existing) {

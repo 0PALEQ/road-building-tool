@@ -215,6 +215,11 @@ public final class RoadPathPlacementEndpoint {
                 dimension,
                 materializationPlans
         );
+        if (planned.geometry() instanceof com.cookiecraftmods.roadbuilder.geometry.RoundaboutGeometry ring
+                && !mutation.segmentSplits().isEmpty()) {
+            plan = com.cookiecraftmods.roadbuilder.placement.RoundaboutIslandPlanner.addIsland(
+                    plan, ring, planned.preset().surfaceBlockWidth());
+        }
         ConstructionValidationResult planValidation =
                 authorizer.validate(player, plan, limits);
         if (!planValidation.isAllowed()) {
@@ -232,8 +237,12 @@ public final class RoadPathPlacementEndpoint {
         }
 
         PlacementOperationId operationId = committer.nextOperationId();
+        Set<RoadNodeId> inheritedJunctionOwners = RoadMaterializationRepartitioner.convertedJunctionOwners(mutation)
+                .entrySet().stream().filter(entry -> ledger.operation(RoadMaterializationOwner.node(entry.getKey())).isPresent())
+                .map(Map.Entry::getValue).collect(java.util.stream.Collectors.toSet());
         Map<RoadNodeId, BlockPlacementPlan> newlyOwnedJunctionPlans =
                 junctionPlans.entrySet().stream()
+                        .filter(entry -> !inheritedJunctionOwners.contains(entry.getKey()))
                         .filter(entry -> ledger.operation(
                                 RoadMaterializationOwner.node(entry.getKey())
                         ).isEmpty())

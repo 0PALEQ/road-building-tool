@@ -130,10 +130,7 @@ public final class RoadMaterializationPlanner {
         if (!(structures instanceof BlockPlanResult.Success structured)) {
             return structures;
         }
-        Set<BlockPos> roadSurfacePositions = BlockPositionSets.copyOf(mergedSurface.positions());
-        BlockPlacementPlan structurePlan = BlockPlacementPlan.create(dimension, structured.plan().blocks().stream()
-                .filter(block -> block.targetState().isAir() || roadSurfacePositions.contains(block.position())
-                        || !inExistingRoadHeadroom(block.position(), existingRoadPosition)).toList());
+        BlockPlacementPlan structurePlan = structured.plan();
         Set<BlockPos> structurePositions = BlockPositionSets.copyOf(structurePlan.positions());
         materialLayers.add(new LayeredBlockPlan(
                 structurePlan,
@@ -186,12 +183,6 @@ public final class RoadMaterializationPlanner {
             );
         }
         return new BlockPlanResult.Success(plan);
-    }
-
-    private static boolean inExistingRoadHeadroom(BlockPos pos, java.util.function.Predicate<BlockPos> existingRoad) {
-        for (int height=1; height<=RoadOverpassPlanner.MINIMUM_FREE_HEIGHT; height++)
-            if (existingRoad.test(pos.below(height))) return true;
-        return false;
     }
 
     private record SegmentSurface(
