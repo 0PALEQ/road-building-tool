@@ -88,6 +88,7 @@ public final class StraightRoadToolController {
     private RoadLaneGraph.ConnectionPoint hoveredLaneConnectionPoint;
     private CursorTargetResult cursorResult = CursorTargetResult.failure(CursorTargetProblem.NO_WORLD);
     private CursorTarget startTarget;
+    private boolean sunkenRoad;
     private boolean parallelEnabled;
     private int parallelOffset = 16;
     private RawRoadPreview parallelPreview;
@@ -415,6 +416,8 @@ public final class StraightRoadToolController {
         return true;
     }
 
+    public boolean sunkenRoad() { return sunkenRoad; }
+
     public boolean parallelEnabled() { return parallelEnabled; }
 
     public boolean previewInvalid() {
@@ -692,7 +695,7 @@ public final class StraightRoadToolController {
         if (parallelPreviewInvalid) {
             return Component.translatable("status.roadbuilder.parallel_invalid");
         }
-        boolean straight = activeTool == RoadBuilderTool.STRAIGHT_ROAD && !parallelEnabled;
+        boolean straight = activeTool == RoadBuilderTool.STRAIGHT_ROAD && !parallelEnabled && !sunkenRoad;
         if (straight
                 ? !RoadBuilderClientNetworking.canSendStraightRoadIntent()
                 : !RoadBuilderClientNetworking.canSendRoadPathIntent()) {
@@ -828,6 +831,13 @@ public final class StraightRoadToolController {
             }
         }
         if (selectedGroup == RoadBuilderToolGroup.ROADS) {
+            if (layout.sunkenRoadButton().contains(guiX, guiY)) {
+                if (pendingPlacementRequestId == null && !placementJob.isActive()) {
+                    sunkenRoad = !sunkenRoad;
+                    rebuildPreview(client);
+                }
+                return;
+            }
             if (layout.parallelToggleButton().contains(guiX, guiY)) {
                 if (pendingPlacementRequestId == null) {
                     parallelEnabled = !parallelEnabled;
@@ -1038,7 +1048,7 @@ public final class StraightRoadToolController {
                 || placementJob.isActive()) {
             return;
         }
-        boolean straight = activeTool == RoadBuilderTool.STRAIGHT_ROAD && !parallelEnabled;
+        boolean straight = activeTool == RoadBuilderTool.STRAIGHT_ROAD && !parallelEnabled && !sunkenRoad;
         if (straight
                 ? !RoadBuilderClientNetworking.canSendStraightRoadIntent()
                 : !RoadBuilderClientNetworking.canSendRoadPathIntent()) {
@@ -1094,7 +1104,7 @@ public final class StraightRoadToolController {
                             graphRevision,
                             pathType(),
                             canonicalPathPoints()
-                    ).withParallelOffset(parallelEnabled ? parallelOffset : 0);
+                    ).withParallelOffset(parallelEnabled ? parallelOffset : 0).withSunkenRoad(sunkenRoad);
             sent = RoadBuilderClientNetworking.sendRoadPathIntent(packet);
         }
         if (!sent) {

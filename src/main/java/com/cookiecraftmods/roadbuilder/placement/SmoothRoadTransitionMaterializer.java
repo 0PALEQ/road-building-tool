@@ -120,14 +120,14 @@ public final class SmoothRoadTransitionMaterializer {
         for (int longitudinalIndex = 0;
              longitudinalIndex <= longitudinalSteps;
              longitudinalIndex++) {
-            double curveDistance = transitionGeometry.length()
-                    * longitudinalIndex / longitudinalSteps;
-            double distanceFromNode = transitionLength
-                    * longitudinalIndex / longitudinalSteps;
+            // Normalize first: length * steps / steps can round above length
+            // on the final sample, which the curve sampler correctly rejects.
+            double progress = longitudinalIndex / (double) longitudinalSteps;
+            double curveDistance = transitionGeometry.length() * progress;
+            double distanceFromNode = transitionLength * progress;
             PathSample sample = transitionGeometry.sample(curveDistance);
             RoadVector outward = sample.tangent();
             RoadVector right = horizontalRight(outward);
-            double progress = distanceFromNode / transitionLength;
             double eased = progress * progress * (3.0 - 2.0 * progress);
             double halfWidth = interpolate(
                     wideSection.width() / 2.0,

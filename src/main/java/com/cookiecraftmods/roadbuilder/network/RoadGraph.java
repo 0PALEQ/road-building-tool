@@ -1130,6 +1130,7 @@ public final class RoadGraph {
         Set<RoadNodeId> affected = new HashSet<>();
         Set<UUID> generated = new HashSet<>();
         for (RoadSegment segment : mutation.placedSegments()) {
+            if (segment.presetSnapshot().sunkenRoad()) { placed.add(segment); continue; }
             var geometry = segment.referenceGeometry();
             List<Double> cuts = com.cookiecraftmods.roadbuilder.placement.RoadTunnelPlanner.portalFractions(
                     geometry, segment.presetSnapshot().surfaceBlockWidth(), world, existingRoadPosition);

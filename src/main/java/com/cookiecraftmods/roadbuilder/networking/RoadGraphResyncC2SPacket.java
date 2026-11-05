@@ -17,7 +17,7 @@ public record RoadGraphResyncC2SPacket(
     public static final long NO_KNOWN_REVISION = -1L;
 
     public static final PacketType<RoadGraphResyncC2SPacket> TYPE = PacketType.create(
-            new ResourceLocation("roadbuilder", "road_graph_resync_v1"),
+            new ResourceLocation("roadbuilder", "road_graph_resync_v2"),
             RoadGraphResyncC2SPacket::new
     );
 

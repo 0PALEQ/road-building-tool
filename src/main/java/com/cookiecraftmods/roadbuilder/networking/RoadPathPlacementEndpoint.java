@@ -163,6 +163,7 @@ public final class RoadPathPlacementEndpoint {
 
         ServerLevelPlacementBlockWorld world =
                 new ServerLevelPlacementBlockWorld(player.serverLevel());
+        mutation = mutation.withSunkenRoad(packet.sunkenRoad());
         mutation = graph.withTunnelPortals(mutation, world, ledger::isMaterializedRoadPosition);
         if (mutation.allUpsertedSegments().stream().anyMatch(segment ->
                 segment.referenceGeometry().length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)) {
@@ -487,7 +488,8 @@ public final class RoadPathPlacementEndpoint {
                     .map(segment -> new RoadStructurePlanner.StructureSpan(
                             segment.referenceGeometry(),
                             segment.presetSnapshot().surfaceBlockWidth(),
-                            segment.presetSnapshot().surfaceBands()
+                            segment.presetSnapshot().surfaceBands(),
+                            segment.presetSnapshot().sunkenRoad()
                     ))
                     .toList();
             decoratedSurface = structurePlanner.prepareStructureSurface(

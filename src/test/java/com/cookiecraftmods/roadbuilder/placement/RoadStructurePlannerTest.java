@@ -200,17 +200,11 @@ class RoadStructurePlannerTest {
         RoadStructurePlanner planner = new RoadStructurePlanner();
 
         BlockPlacementPlan fill = success(planner.addStructures(
-                surface(64, 3, 3),
-                world,
-                10_000
-        ));
-        assertState(fill, new BlockPos(1, 63, 1), Blocks.DIRT.defaultBlockState());
-        assertState(fill, new BlockPos(0, 63, 0),
-                Blocks.DIRT.defaultBlockState());
-        assertState(fill, new BlockPos(-1, 63, 1),
-                Blocks.GRASS_BLOCK.defaultBlockState());
-        assertState(fill, new BlockPos(-2, 62, 1),
-                Blocks.GRASS_BLOCK.defaultBlockState());
+                surface(61, 3, 3), world, 10_000));
+        assertState(fill, new BlockPos(1, 60, 1), Blocks.DIRT.defaultBlockState());
+        assertState(fill, new BlockPos(0, 60, 0), Blocks.DIRT.defaultBlockState());
+        assertState(fill, new BlockPos(-1, 60, 1), Blocks.GRASS_BLOCK.defaultBlockState());
+        assertFalse(fill.positions().contains(new BlockPos(-2, 60, 1)));
 
         BlockPlacementPlan solid = success(planner.addStructures(
                 surface(66, 3, 3),
@@ -458,7 +452,7 @@ class RoadStructurePlannerTest {
     }
 
     @Test
-    void roadOnALedgeRaisesTheLowerTerrainIntoAnEmbankment() {
+    void roadOnALedgeDoesNotSpillADeepEmbankmentOutsideItsFootprint() {
         MapWorld world = new MapWorld(59);
         world.states.put(
                 new BlockPos(0, 63, 0),
@@ -468,12 +462,8 @@ class RoadStructurePlannerTest {
         BlockPlacementPlan result = success(new RoadStructurePlanner()
                 .addStructures(surface(64, 1, 1), world, 2_000));
 
-        assertState(result, new BlockPos(1, 63, 0),
-                Blocks.GRASS_BLOCK.defaultBlockState());
-        assertState(result, new BlockPos(2, 62, 0),
-                Blocks.GRASS_BLOCK.defaultBlockState());
-        assertState(result, new BlockPos(4, 60, 0),
-                Blocks.GRASS_BLOCK.defaultBlockState());
+        assertFalse(result.blocks().stream().anyMatch(block ->
+                !block.targetState().isAir() && (block.position().getX() != 0 || block.position().getZ() != 0)));
     }
 
     @Test
@@ -565,7 +555,7 @@ class RoadStructurePlannerTest {
 
     @Test
     void retainingWallEdgesHaveSupportedRailingsButLowEmbankmentsDoNot() {
-        for (int height : new int[]{5, 6, 7}) {
+        for (int height : new int[]{2, 3, 7}) {
             StraightGeometry geometry = new StraightGeometry(
                     new RoadPoint(0.5, height, 1.5),
                     new RoadPoint(8.5, height, 1.5));
@@ -580,7 +570,7 @@ class RoadStructurePlannerTest {
             for (PlannedBlock slab : slabs.blocks()) {
                 assertState(result, slab.position(), slab.targetState());
             }
-            if (height == 5) {
+            if (height == 2) {
                 assertFalse(result.blocks().stream().anyMatch(block ->
                         block.targetState().is(Blocks.IRON_BARS)));
                 continue;
@@ -1014,6 +1004,54 @@ class RoadStructurePlannerTest {
                 && block.position().getX() >= 0 && block.position().getX() < 12
                 && block.position().getZ() >= 0 && block.position().getZ() < 3
                 && block.position().getY() <= 10));
+    }
+
+    @Test
+    void fiveBlockRiseUsesRetainingWallsWithoutLateralEarthSpill() {
+        var geometry = new StraightGeometry(new RoadPoint(0.5, 80, 6.5), new RoadPoint(24.5, 80, 6.5));
+        var built = success(new RoadStructurePlanner().addStructures(surface(80, 14, 25),
+                new MapWorld(75), geometry, 14, pos -> false, 20000));
+        assertBlock(built, new BlockPos(12, 79, 0), Blocks.POLISHED_ANDESITE);
+        assertTrue(built.blocks().stream().noneMatch(block -> block.targetState().is(Blocks.DIRT)
+                || block.targetState().is(Blocks.GRASS_BLOCK)));
+        assertTrue(built.blocks().stream().allMatch(block -> block.position().getZ() >= -1
+                && block.position().getZ() <= 14));
+    }
+
+    @Test
+    void relocatedPierCapsStayWithinTheDeckFootprint() {
+        MapWorld world = new MapWorld(0);
+        Set<BlockPos> lower = new HashSet<>();
+        for (int x=0; x<25; x++) {
+            BlockPos position = new BlockPos(x, 2, 5);
+            lower.add(position);
+            world.states.put(position, Blocks.GRAY_CONCRETE.defaultBlockState());
+        }
+        var geometry = new StraightGeometry(new RoadPoint(0.5, 12, 5.5), new RoadPoint(24.5, 12, 5.5));
+        var built = success(new RoadStructurePlanner().addStructures(surface(12, 11, 25),
+                world, geometry, 11, lower::contains, 20000));
+        var pillars = built.blocks().stream().filter(block -> block.targetState().is(Blocks.STONE_BRICKS)).toList();
+        assertFalse(pillars.isEmpty());
+        assertTrue(pillars.stream().allMatch(block -> block.position().getZ() >= 0
+                && block.position().getZ() < 11 && block.position().getX() >= 0 && block.position().getX() < 25));
+        assertTrue(pillars.stream().noneMatch(block -> block.position().getZ() == 5));
+    }
+
+    @Test
+    void ownedClearanceAirDoesNotHideTheLowerRoadOrCreateWallsOnItsLanes() {
+        MapWorld world = new MapWorld(70);
+        Set<BlockPos> owned = new HashSet<>();
+        for(int x=0;x<12;x++) for(int z=0;z<5;z++) {
+            world.states.put(new BlockPos(x,75,z),Blocks.GRAY_CONCRETE.defaultBlockState());
+            for(int y=75;y<=87;y++) owned.add(new BlockPos(x,y,z));
+        }
+        var geometry = new StraightGeometry(new RoadPoint(0.5,83,2.5),new RoadPoint(11.5,83,2.5));
+        var built = success(new RoadStructurePlanner().addStructures(surface(83,5,12),world,
+                geometry,5,owned::contains,20000));
+        assertBlock(built,new BlockPos(5,81,2),Blocks.SMOOTH_STONE);
+        assertTrue(built.blocks().stream().noneMatch(block -> !block.targetState().isAir()
+                && block.position().getZ()>=0 && block.position().getZ()<5
+                && block.position().getY()>=76 && block.position().getY()<=80));
     }
 
     private static BlockPlacementPlan surface(int y, int width, int length) {

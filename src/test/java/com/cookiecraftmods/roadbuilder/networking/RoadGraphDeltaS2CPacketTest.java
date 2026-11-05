@@ -177,7 +177,7 @@ class RoadGraphDeltaS2CPacketTest {
         assertEquals(0, buffer.readableBytes());
         assertSame(RoadGraphDeltaS2CPacket.TYPE, packet.getType());
         assertEquals(
-                new ResourceLocation("roadbuilder", "road_graph_delta_v1"),
+                new ResourceLocation("roadbuilder", "road_graph_delta_v2"),
                 packet.getType().getId()
         );
         return decoded.delta();

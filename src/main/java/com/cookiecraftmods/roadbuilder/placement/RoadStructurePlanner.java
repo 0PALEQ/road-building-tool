@@ -26,7 +26,7 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 public final class RoadStructurePlanner {
-    public static final int MAXIMUM_TERRAIN_FILL_HEIGHT = 5;
+    public static final int MAXIMUM_TERRAIN_FILL_HEIGHT = 2;
     public static final int MAXIMUM_SOLID_BASE_HEIGHT = 7;
     public static final int DECK_THICKNESS = 2;
     public static final int MAXIMUM_GROUND_SCAN_DEPTH = 128;
@@ -128,6 +128,7 @@ public final class RoadStructurePlanner {
             }
         }
 
+        Set<BlockPos> sunkenSurfaces = SunkenRoadPlanner.surfacePositions(surfacePlan, spans);
         Map<GroundKey, Ground> groundCache = new HashMap<>();
         List<EndpointDeckZone> endpointDeckZones = endpointDeckZones(
                 spans,
@@ -168,7 +169,7 @@ public final class RoadStructurePlanner {
                     .anyMatch(zone -> zone.contains(position));
             boolean deck = roadBelow || ground.fluidEncountered()
                     || verticalGap > MAXIMUM_SOLID_BASE_HEIGHT
-                    || (forcedDeck && verticalGap > 2 && !besideLowerRoad);
+                    || (forcedDeck && verticalGap > MAXIMUM_TERRAIN_FILL_HEIGHT && !besideLowerRoad);
             // Clear vegetation below the deck without treating trunks as foundations.
             for (int y = position.getY() - 1; y > ground.position().getY(); y--) {
                 BlockPos obstacle = new BlockPos(position.getX(), y, position.getZ());
@@ -245,6 +246,7 @@ public final class RoadStructurePlanner {
             }
 
             if (sideEdge
+                    && !sunkenSurfaces.contains(position)
                     && !deck
                     && !roadBelow
                     && !ground.fluidEncountered()
@@ -349,10 +351,9 @@ public final class RoadStructurePlanner {
                 return failure();
             }
         }
-        return new BlockPlanResult.Success(BlockPlacementPlan.create(
-                surfacePlan.dimension(),
-                targets.values()
-        ));
+        return new SunkenRoadPlanner().excavate(BlockPlacementPlan.create(
+                surfacePlan.dimension(), targets.values()), sunkenSurfaces,
+                world, existingRoadPosition, maximumAffectedBlocks);
     }
 
     /** Adapts median and railing surfaces to their supporting structures before layer merging. */
@@ -896,6 +897,7 @@ public final class RoadStructurePlanner {
             if (!ground.solid()
                     || ground.fluidEncountered()
                     || ground.position().getY() >= candidate.topY()
+                    || candidate.topY() - ground.position().getY() > MAXIMUM_TERRAIN_FILL_HEIGHT
                     || existingRoadPosition.test(ground.position())) {
                 continue;
             }
@@ -1325,6 +1327,7 @@ public final class RoadStructurePlanner {
                                 topMaximum
                         ),
                         pillarTopY,
+                        footprint,
                         existingRoadPosition,
                         maximumAffectedBlocks
                 ) || !putPillarLayer(
@@ -1340,6 +1343,7 @@ public final class RoadStructurePlanner {
                                 lowerMaximum
                         ),
                         pillarTopY - 1,
+                        footprint,
                         existingRoadPosition,
                         maximumAffectedBlocks
                 )) {
@@ -1363,6 +1367,7 @@ public final class RoadStructurePlanner {
                                 beamHalfWidth
                         ),
                         pillarTopY - 3,
+                        footprint,
                         existingRoadPosition,
                         maximumAffectedBlocks
                 )) {
@@ -1438,10 +1443,12 @@ public final class RoadStructurePlanner {
             Set<BlockPos> surfacePositions,
             Set<HorizontalColumn> columns,
             int y,
+            Set<HorizontalColumn> footprint,
             Predicate<BlockPos> existingRoadPosition,
             int maximumAffectedBlocks
     ) {
         for (HorizontalColumn column : columns) {
+            if (!footprint.contains(column)) continue;
             BlockPos position = new BlockPos(column.x(), y, column.z());
             boolean roadBelow = false;
             for (int depth = 0; depth <= MAXIMUM_GROUND_SCAN_DEPTH; depth++) {
@@ -1486,16 +1493,19 @@ public final class RoadStructurePlanner {
         boolean fluidEncountered = false;
         for (int y = surface.getY() - 1; y >= minimumY; y--) {
             BlockPos position = new BlockPos(surface.getX(), y, surface.getZ());
-            if (existingRoadPosition.test(position)) {
-                // Ownership also includes the current road's deck and old earth fill.
-                // Neither is a separate lower carriageway.
-                if (existingRoadPosition.test(surface)
-                        || world.blockState(position).is(Blocks.DIRT)) continue;
+            BlockState state = world.blockState(position);
+            if (existingRoadPosition.test(position) && !state.isAir()
+                    && state.getFluidState().isEmpty()) {
+                // The ledger also owns excavated AIR. It must neither become a
+                // foundation nor make us ignore a lower road during rebuilding.
+                boolean ownDeck = existingRoadPosition.test(surface)
+                        && !world.blockState(surface).isAir()
+                        && surface.getY() - y <= DECK_THICKNESS;
+                if (ownDeck || state.is(Blocks.DIRT)) continue;
                 Ground ground = new Ground(position, true, fluidEncountered);
                 cache.put(key, ground);
                 return ground;
             }
-            BlockState state = world.blockState(position);
             if (!state.getFluidState().isEmpty()) {
                 fluidEncountered = true;
                 continue;
@@ -1645,8 +1655,13 @@ public final class RoadStructurePlanner {
     public record StructureSpan(
             ReferenceGeometry geometry,
             int roadWidth,
-            List<RoadSurfaceBand> surfaceBands
+            List<RoadSurfaceBand> surfaceBands,
+            boolean sunkenRoad
     ) {
+        public StructureSpan(ReferenceGeometry geometry, int roadWidth, List<RoadSurfaceBand> surfaceBands) {
+            this(geometry, roadWidth, surfaceBands, false);
+        }
+
         public StructureSpan(ReferenceGeometry geometry, int roadWidth) {
             this(geometry, roadWidth, List.of());
         }

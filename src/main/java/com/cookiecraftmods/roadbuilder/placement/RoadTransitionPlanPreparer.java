@@ -39,7 +39,8 @@ public final class RoadTransitionPlanPreparer {
                 .map(segment -> new RoadStructurePlanner.StructureSpan(
                         segment.referenceGeometry(),
                         segment.presetSnapshot().surfaceBlockWidth(),
-                        segment.presetSnapshot().surfaceBands()
+                        segment.presetSnapshot().surfaceBands(),
+                        segment.presetSnapshot().sunkenRoad()
                 ))
                 .toList();
         RoadStructurePlanner structurePlanner = new RoadStructurePlanner();

@@ -26,6 +26,22 @@ class RoadPathIntentC2SPacketTest {
             new ResourceLocation("roadbuilder", "two_way");
 
     @Test
+    void sunkenModeSurvivesParallelOffsetAndWireRoundTrip() {
+        var packet = RoadPathIntentC2SPacket.current(REQUEST_ID, DIMENSION, PRESET, 1,
+                RoadPathIntentC2SPacket.PathType.STRAIGHT,
+                List.of(new RoadPoint(0, 64, 0), new RoadPoint(30, 64, 0)))
+                .withSunkenRoad(true).withParallelOffset(8);
+        FriendlyByteBuf buffer = PacketByteBufs.create();
+        try {
+            packet.write(buffer);
+            assertEquals(packet, RoadPathIntentC2SPacket.TYPE.read(buffer));
+            assertEquals(true, packet.sunkenRoad());
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @Test
     void laneAttachedCurveUsesOrdinaryCubicPacket() {
         var geometry = new com.cookiecraftmods.roadbuilder.geometry.CubicBezierGeometry(
                 new RoadPoint(0, 64, 3), new RoadPoint(10, 64, 3),

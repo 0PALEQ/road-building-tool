@@ -133,7 +133,7 @@ class RoadGraphSnapshotS2CPacketTest {
                 () -> assertEquals(0, buffer.readableBytes()),
                 () -> assertSame(RoadGraphSnapshotS2CPacket.TYPE, packet.getType()),
                 () -> assertEquals(
-                        new ResourceLocation("roadbuilder", "road_graph_snapshot_v1"),
+                        new ResourceLocation("roadbuilder", "road_graph_snapshot_v2"),
                         packet.getType().getId()
                 )
         );

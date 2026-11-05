@@ -147,7 +147,7 @@ public final class LaneConnectionPlanner {
                         || destinationAttachment && Math.abs(destinationGap)<=0.5) continue;
                 // Interior elevated crossings are raised by the overpass planner.
                 if(Math.abs(gap)>1) {
-                    if(Math.abs(gap)<1+RoadOverpassPlanner.MINIMUM_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS)
+                    if(Math.abs(gap)<1+RoadOverpassPlanner.STRUCTURE_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS)
                         needsClearance=true;
                     continue;
                 }

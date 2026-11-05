@@ -115,7 +115,8 @@ public final class RoadMaterializationPlanner {
                 .map(surface -> new RoadStructurePlanner.StructureSpan(
                         surface.segment().referenceGeometry(),
                         surface.segment().presetSnapshot().surfaceBlockWidth(),
-                        surface.segment().presetSnapshot().surfaceBands()
+                        surface.segment().presetSnapshot().surfaceBands(),
+                        surface.segment().presetSnapshot().sunkenRoad()
                 ))
                 .toList();
         mergedSurface = structurePlanner.prepareStructureSurface(

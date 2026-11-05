@@ -70,8 +70,8 @@ class RoadPathCrossingAnalyzerTest {
 
         var elevatedJoin = new RoadPathCrossingAnalyzer().analyze(
                 new StraightGeometry(
-                        new RoadPoint(5.0, 70.0, 0.0),
-                        new RoadPoint(5.0, 70.0, 8.0)
+                        new RoadPoint(5.0, 65.0, 0.0),
+                        new RoadPoint(5.0, 65.0, 8.0)
                 ),
                 List.of(trunk)
         );
@@ -81,8 +81,8 @@ class RoadPathCrossingAnalyzerTest {
 
         assertTrue(new RoadPathCrossingAnalyzer().analyze(
                 new StraightGeometry(
-                        new RoadPoint(5.0, 71.0, 0.0),
-                        new RoadPoint(5.0, 71.0, 8.0)
+                        new RoadPoint(5.0, 66.0, 0.0),
+                        new RoadPoint(5.0, 66.0, 8.0)
                 ),
                 List.of(trunk)
         ).isEmpty());

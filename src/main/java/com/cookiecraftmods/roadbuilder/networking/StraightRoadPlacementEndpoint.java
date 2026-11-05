@@ -566,7 +566,8 @@ public final class StraightRoadPlacementEndpoint {
                     .map(segment -> new RoadStructurePlanner.StructureSpan(
                             segment.referenceGeometry(),
                             segment.presetSnapshot().surfaceBlockWidth(),
-                            segment.presetSnapshot().surfaceBands()
+                            segment.presetSnapshot().surfaceBands(),
+                            segment.presetSnapshot().sunkenRoad()
                     ))
                     .toList();
             decoratedSurface = structurePlanner.prepareStructureSurface(

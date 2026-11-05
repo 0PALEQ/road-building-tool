@@ -45,6 +45,32 @@ class SmoothRoadTransitionMaterializerTest {
     }
 
     @Test
+    void fractionalTransitionLengthsIncludeTheEndpointWithoutSamplingPastIt() {
+        var random = new java.util.Random(151774716);
+        for (boolean reversed : new boolean[]{false, true}) {
+            for (int i = 0; i < 60; i++) {
+                double length = i == 0 ? 15.177471607775244 : 8 + random.nextDouble() * 15;
+                RoadNodeId nodeId = new RoadNodeId(UUID.randomUUID());
+                RoadNodeId farId = new RoadNodeId(UUID.randomUUID());
+                RoadNode node = new RoadNode(nodeId, new RoadPoint(0.5, 64, 0.5));
+                RoadPoint far = new RoadPoint(0.5 + length, 64, 0.5);
+                RoadSegment narrow = segment(reversed ? far : node.position(),
+                        reversed ? node.position() : far, reversed ? farId : nodeId,
+                        reversed ? nodeId : farId, preset(7, 1));
+                RoadSegment wide = segment(new RoadPoint(-40.5, 64, 0.5), node.position(),
+                        new RoadNodeId(UUID.randomUUID()), nodeId, preset(15, 2));
+                var result = org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                        new SmoothRoadTransitionMaterializer().plan(Level.OVERWORLD, node,
+                                List.of(narrow, wide), 10000, 100000),
+                        "fractional transition length " + length + ", reversed=" + reversed);
+                var plan = assertInstanceOf(BlockPlanResult.Success.class, result).plan();
+                assertTrue(plan.positions().contains(BlockPos.containing(far.x(), far.y(), far.z())),
+                        "The final cross section must remain in the plan");
+            }
+        }
+    }
+
+    @Test
     void laneOffsetWidthChangesBlendFromTheActualWideRoadBoundary() {
         for (boolean reversed : new boolean[]{false, true}) {
             for (boolean wideCentered : new boolean[]{false, true}) {

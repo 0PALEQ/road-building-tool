@@ -34,6 +34,16 @@ public record PreparedRoadNetworkMutation(
         }
     }
 
+    public PreparedRoadNetworkMutation withSunkenRoad(boolean enabled) {
+        return new PreparedRoadNetworkMutation(expectedRevision, road, createsRoad, addedNodes,
+                segmentSplits, placedSegments.stream().map(segment -> RoadSegment.path(
+                        segment.id(), segment.roadId(), segment.startNodeId(), segment.endNodeId(),
+                        segment.referenceGeometry(), segment.presetId(), segment.presetRevision(),
+                        segment.presetSnapshot().withSunkenRoad(enabled), segment.trafficHandedness(),
+                        segment.lanes().stream().map(RoadLane::id).toList())).toList(),
+                removedConnectorIds, addedConnectors);
+    }
+
     public List<RoadSegment> replacementSegments() {
         return segmentSplits.stream()
                 .flatMap(split -> split.replacements().stream())

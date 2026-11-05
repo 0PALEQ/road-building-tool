@@ -515,6 +515,7 @@ public final class RoadGraphPacketCodecs {
         buffer.writeVarInt(segment.presetRevision());
 
         RoadPresetSnapshot preset = segment.presetSnapshot();
+        buffer.writeBoolean(preset.sunkenRoad());
         buffer.writeVarInt(preset.surfaceBlockWidth());
         PacketValidation.writeBoundedId(buffer, preset.surfaceBlock());
         buffer.writeVarInt(preset.surfaceBands().size());
@@ -561,6 +562,7 @@ public final class RoadGraphPacketCodecs {
         if (presetRevision < 1) {
             throw new IllegalArgumentException("preset revision must be positive");
         }
+        boolean sunkenRoad = buffer.readBoolean();
         int surfaceWidth = buffer.readVarInt();
         ResourceLocation surfaceBlock = PacketValidation.readBoundedId(buffer, "surfaceBlock");
         int surfaceBandCount = readCount(
@@ -660,7 +662,8 @@ public final class RoadGraphPacketCodecs {
                         lanes,
                         surfaceBands,
                         classification,
-                        intersectionStyle
+                        intersectionStyle,
+                        sunkenRoad
                 ),
                 List.copyOf(laneIds)
         );

@@ -230,6 +230,10 @@ public final class RoadBuilderToolbarRenderer {
                 PARALLEL_ICON,
                 highContrast
         );
+        contextButton(graphics, client, layout.sunkenRoadButton(),
+                Component.literal(tool.sunkenRoad() ? "[x] " : "[ ] ").append(
+                        Component.translatable("toolbar.roadbuilder.sunken_road")),
+                tool.sunkenRoad(), true, cursor, highContrast);
         renderPresetShelf(
                 graphics,
                 client,
@@ -1341,6 +1345,9 @@ public final class RoadBuilderToolbarRenderer {
             tooltip = Component.translatable(
                     "tooltip.roadbuilder.replace"
             );
+        } else if (tool.selectedGroup() == RoadBuilderToolGroup.ROADS
+                && layout.sunkenRoadButton().contains(cursor.x(), cursor.y())) {
+            tooltip = Component.translatable("tooltip.roadbuilder.sunken_road");
         } else if (tool.selectedGroup() == RoadBuilderToolGroup.ROADS
                 && layout.parallelToggleButton().contains(cursor.x(), cursor.y())) {
             tooltip = Component.translatable("tooltip.roadbuilder.parallel", Math.abs(tool.parallelOffset()),

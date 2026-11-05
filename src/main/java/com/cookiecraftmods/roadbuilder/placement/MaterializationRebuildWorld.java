@@ -35,6 +35,9 @@ public final class MaterializationRebuildWorld implements PlacementBlockWorld {
     }
 
     @Override
+    public int maximumBuildHeight() { return world.maximumBuildHeight(); }
+
+    @Override
     public BlockState blockState(BlockPos position) {
         return restoredStates.computeIfAbsent(position.immutable(), this::restoreState);
     }

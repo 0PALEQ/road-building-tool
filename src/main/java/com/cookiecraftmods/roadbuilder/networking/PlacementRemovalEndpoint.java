@@ -849,7 +849,8 @@ public final class PlacementRemovalEndpoint {
                     .map(segment -> new RoadStructurePlanner.StructureSpan(
                             segment.referenceGeometry(),
                             segment.presetSnapshot().surfaceBlockWidth(),
-                            segment.presetSnapshot().surfaceBands()
+                            segment.presetSnapshot().surfaceBands(),
+                            segment.presetSnapshot().sunkenRoad()
                     ))
                     .toList();
             combined = new RoadStructurePlanner().prepareStructureSurface(

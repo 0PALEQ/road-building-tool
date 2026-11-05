@@ -16,7 +16,7 @@ public record RoadGraphDeltaS2CPacket(
     public static final int MAX_PAYLOAD_BYTES = 262_144;
 
     public static final PacketType<RoadGraphDeltaS2CPacket> TYPE = PacketType.create(
-            new ResourceLocation("roadbuilder", "road_graph_delta_v1"),
+            new ResourceLocation("roadbuilder", "road_graph_delta_v2"),
             RoadGraphDeltaS2CPacket::new
     );
 

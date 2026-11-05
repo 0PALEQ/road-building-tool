@@ -39,6 +39,9 @@ public final class ServerLevelPlacementBlockWorld implements PlacementBlockWorld
     }
 
     @Override
+    public int maximumBuildHeight() { return level.getMaxBuildHeight(); }
+
+    @Override
     public BlockState blockState(BlockPos position) {
         return level.getBlockState(position);
     }

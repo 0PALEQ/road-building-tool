@@ -616,7 +616,7 @@ class RoadGraphTest {
     }
 
     @Test
-    void elevatedCrossingKeepsTheExistingRoadAndSlopesTheNewRoadToItsNode() {
+    void nearGradeCrossingKeepsTheExistingRoadAndSlopesTheNewRoadToItsNode() {
         AtomicLong ids = new AtomicLong(1_500);
         RoadGraph graph = new RoadGraph(
                 Level.OVERWORLD,
@@ -633,8 +633,8 @@ class RoadGraphTest {
 
         PreparedRoadNetworkMutation mutation = graph.prepareStraightRoadNetwork(
                 new StraightGeometry(
-                        new RoadPoint(5.5, 70.0, -12.5),
-                        new RoadPoint(5.5, 70.0, 12.5)
+                        new RoadPoint(5.5, 65.0, -12.5),
+                        new RoadPoint(5.5, 65.0, 12.5)
                 ),
                 PRESET_ID,
                 PRESET,

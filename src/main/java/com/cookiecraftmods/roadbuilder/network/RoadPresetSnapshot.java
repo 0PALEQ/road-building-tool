@@ -19,7 +19,8 @@ public record RoadPresetSnapshot(
         List<LaneComponent> lanes,
         List<RoadSurfaceBand> surfaceBands,
         RoadClassification classification,
-        RoadIntersectionStyle intersectionStyle
+        RoadIntersectionStyle intersectionStyle,
+        boolean sunkenRoad
 ) {
     public RoadPresetSnapshot(
             int surfaceBlockWidth,
@@ -50,6 +51,17 @@ public record RoadPresetSnapshot(
                 RoadClassification.DEFAULT,
                 RoadIntersectionStyle.defaults(surfaceBlock)
         );
+    }
+
+    public RoadPresetSnapshot(int surfaceBlockWidth, ResourceLocation surfaceBlock,
+            List<LaneComponent> lanes, List<RoadSurfaceBand> surfaceBands,
+            RoadClassification classification, RoadIntersectionStyle intersectionStyle) {
+        this(surfaceBlockWidth, surfaceBlock, lanes, surfaceBands, classification, intersectionStyle, false);
+    }
+
+    public RoadPresetSnapshot withSunkenRoad(boolean enabled) {
+        return new RoadPresetSnapshot(surfaceBlockWidth, surfaceBlock, lanes, surfaceBands,
+                classification, intersectionStyle, enabled);
     }
 
     public RoadPresetSnapshot {

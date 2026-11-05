@@ -577,6 +577,7 @@ public final class RoadBuilderNetworkSavedData extends SavedData {
         tag.putString(SOURCE_ID_KEY, segment.presetId().toString());
         tag.putInt(SOURCE_REVISION_KEY, segment.presetRevision());
         tag.putInt(SURFACE_WIDTH_KEY, snapshot.surfaceBlockWidth());
+        if (snapshot.sunkenRoad()) tag.putBoolean("sunken_road", true);
         tag.putString(SURFACE_BLOCK_KEY, snapshot.surfaceBlock().toString());
 
         ListTag surfaceBands = new ListTag();
@@ -981,15 +982,16 @@ public final class RoadBuilderNetworkSavedData extends SavedData {
         if (!(rawTag instanceof CompoundTag tag)) {
             throw malformed(path + " must be a compound");
         }
-        requireExactKeys(
-                tag,
-                graphSchemaVersion >= 2
-                        ? PRESET_V2_KEYS
-                        : tag.contains(SURFACE_BANDS_KEY)
-                                ? PRESET_KEYS
-                                : LEGACY_PRESET_KEYS,
-                path
-        );
+        Set<String> presetKeys = new HashSet<>(graphSchemaVersion >= 2
+                ? PRESET_V2_KEYS : tag.contains(SURFACE_BANDS_KEY) ? PRESET_KEYS : LEGACY_PRESET_KEYS);
+        if (tag.contains("sunken_road")) {
+            presetKeys.add("sunken_road");
+            if (!tag.contains("sunken_road", Tag.TAG_BYTE)
+                    || (tag.getByte("sunken_road") != 0 && tag.getByte("sunken_road") != 1)) {
+                throw malformed(path + ".sunken_road must be a boolean");
+            }
+        }
+        requireExactKeys(tag, presetKeys, path);
         ResourceLocation sourceId = readResourceId(tag.get(SOURCE_ID_KEY), path + ".source_id");
         int sourceRevision = readInt(tag.get(SOURCE_REVISION_KEY), path + ".source_revision");
         if (sourceRevision < 1) {
@@ -1109,7 +1111,8 @@ public final class RoadBuilderNetworkSavedData extends SavedData {
                         lanes,
                         surfaceBands,
                         classification,
-                        intersectionStyle
+                        intersectionStyle,
+                        tag.getBoolean("sunken_road")
                 )
         );
     }

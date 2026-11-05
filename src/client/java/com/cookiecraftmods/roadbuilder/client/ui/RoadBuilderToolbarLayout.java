@@ -202,6 +202,12 @@ public record RoadBuilderToolbarLayout(
     public UiRectangle roadNodeSnappingButton() { return modeCell(toolModePanel, 3, 0, 3); }
     public UiRectangle roadGuidelineSnappingButton() { return modeCell(toolModePanel, 3, 1, 3); }
     public UiRectangle roadAngleSnappingButton() { return modeCell(toolModePanel, 3, 2, 3); }
+    public UiRectangle sunkenRoadButton() {
+        UiRectangle row = modeCell(toolModePanel, 4, 0, 1);
+        int padding = toolModePanel.width() < 70 ? 2 : PADDING;
+        return new UiRectangle(toolModePanel.x() + padding, row.y(),
+                Math.max(1, toolModePanel.width() - padding * 2), row.height());
+    }
     public UiRectangle parallelLowerButton() { return modeCell(toolModePanel, 2, 0, 4); }
     public UiRectangle parallelDisplay() { return modeCell(toolModePanel, 2, 1, 4); }
     public UiRectangle parallelRaiseButton() { return modeCell(toolModePanel, 2, 2, 4); }
@@ -224,7 +230,7 @@ public record RoadBuilderToolbarLayout(
         int available = Math.max(count, panel.width() - labelWidth - padding * 2 - gap * (count - 1));
         int width = available / count;
         int remainder = available % count;
-        int rowHeight = Math.max(1, (panel.height() - padding * 2 - gap * 3) / 4);
+        int rowHeight = Math.max(1, (panel.height() - padding * 2 - gap * 4) / 5);
         return new UiRectangle(panel.x() + padding + labelWidth + index * (width + gap) + Math.min(index, remainder),
                 panel.y() + padding + row * (rowHeight + gap),
                 width + (index < remainder ? 1 : 0), rowHeight);

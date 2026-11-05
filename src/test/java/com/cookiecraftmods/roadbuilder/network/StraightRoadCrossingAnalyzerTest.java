@@ -43,15 +43,15 @@ class StraightRoadCrossingAnalyzerTest {
     }
 
     @Test
-    void excludesCrossingsBeyondSixBlocksAndNonProperContacts() {
+    void excludesCrossingsBeyondOneBlockAndNonProperContacts() {
         StraightGeometry proposed = new StraightGeometry(
                 new RoadPoint(5.0, 64.0, -5.0),
                 new RoadPoint(5.0, 64.0, 5.0)
         );
         RoadSegment bridge = segment(
                 1,
-                new RoadPoint(0.0, 71.0, 0.0),
-                new RoadPoint(10.0, 71.0, 0.0)
+                new RoadPoint(0.0, 66.0, 0.0),
+                new RoadPoint(10.0, 66.0, 0.0)
         );
         RoadSegment endpoint = segment(
                 2,
@@ -71,10 +71,10 @@ class StraightRoadCrossingAnalyzerTest {
     }
 
     @Test
-    void joinsAtTheExistingRoadHeightAtTheSixBlockBoundary() {
+    void joinsAtTheExistingRoadHeightAtTheOneBlockBoundary() {
         StraightGeometry proposed = new StraightGeometry(
-                new RoadPoint(5.0, 70.0, -5.0),
-                new RoadPoint(5.0, 70.0, 5.0)
+                new RoadPoint(5.0, 65.0, -5.0),
+                new RoadPoint(5.0, 65.0, 5.0)
         );
         RoadSegment crossed = segment(
                 1,
@@ -87,7 +87,7 @@ class StraightRoadCrossingAnalyzerTest {
                 List.of(crossed)
         ).get(0);
 
-        assertEquals(6.0, candidate.verticalGap());
+        assertEquals(1.0, candidate.verticalGap());
         assertEquals(new RoadPoint(5.0, 64.0, 0.0), candidate.nodePosition());
     }
 

@@ -18,7 +18,7 @@ public record RoadGraphSnapshotS2CPacket(
     public static final int MAX_TRANSFER_BYTES = 64 * 1024 * 1024;
 
     public static final PacketType<RoadGraphSnapshotS2CPacket> TYPE = PacketType.create(
-            new ResourceLocation("roadbuilder", "road_graph_snapshot_v1"),
+            new ResourceLocation("roadbuilder", "road_graph_snapshot_v2"),
             RoadGraphSnapshotS2CPacket::new
     );
 

@@ -12,6 +12,8 @@ public interface PlacementBlockWorld {
         return -64;
     }
 
+    default int maximumBuildHeight() { return 320; }
+
     BlockState blockState(BlockPos position);
 
     boolean hasBlockEntity(BlockPos position);

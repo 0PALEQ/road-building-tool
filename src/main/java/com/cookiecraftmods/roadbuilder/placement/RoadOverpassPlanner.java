@@ -6,8 +6,11 @@ import java.util.*;
 
 /** Fits separated crossings above and below roads before graph materialization. */
 public final class RoadOverpassPlanner {
-    public static final int MINIMUM_FREE_HEIGHT = 2;
-    private record Span(double start, double end, double lift, double approach) {}
+    public static final int MINIMUM_FREE_HEIGHT = 5;
+    // Two railing blocks above the surface need one empty block below the deck.
+    static final int STRUCTURE_FREE_HEIGHT = Math.max(MINIMUM_FREE_HEIGHT, 3);
+    private static final double MAXIMUM_ADDED_GRADE = 0.25;
+    private record Span(double start, double end, double lift, double from, double to) {}
 
     public ReferenceGeometry adjust(ReferenceGeometry geometry, int width, Collection<RoadSegment> existing) {
         return adjust(geometry,width,existing,width/2.0+0.5);
@@ -18,34 +21,43 @@ public final class RoadOverpassPlanner {
         if (geometry instanceof RoundaboutGeometry) return geometry;
         geometry = new LaneConnectionPlanner().adjust(geometry, width, existing,minimumRadius);
         List<Span> spans = new ArrayList<>();
-        for (Coverage cover : coverage(geometry,width,existing)) {
+        List<Coverage> crossings = coverage(geometry,width,existing);
+        if (crossings.isEmpty()) return geometry;
+        double approachStart = attachmentHold(geometry, width, existing, false);
+        double approachEnd = geometry.length() - attachmentHold(geometry, width, existing, true);
+        for (Coverage cover : crossings) {
             double start=cover.start, end=cover.end;
             double lift=cover.lift+Math.copySign(0.15,cover.lift);
-            double approach=Math.max(24,Math.abs(lift)*12);
-            // A clipped approach still needs enough distance for both halves of
-            // the easing curve. Never squeeze a descent into the last few blocks.
-            double minimumApproach=Math.abs(lift)*10;
-            if(start<minimumApproach || geometry.length()-end<minimumApproach)
+            // Use all available approach distance, while leaving the lane-port
+            // contact surfaces at their host height.
+            double from=approachStart,to=approachEnd;
+            for (Coverage other : crossings) if (Math.signum(other.lift)!=Math.signum(lift)) {
+                if (other.end<=start) from=Math.max(from,(other.end+start)/2);
+                else if (other.start>=end) to=Math.min(to,(end+other.start)/2);
+                else throw new IllegalArgumentException("overlapping overpass and underpass constraints");
+            }
+            double minimumApproach=2*Math.abs(lift)/MAXIMUM_ADDED_GRADE;
+            if(start-from<minimumApproach || to-end<minimumApproach)
                 throw new IllegalArgumentException("not enough room for a smooth separated crossing approach");
-            spans.add(new Span(start,end,lift,approach));
+            spans.add(new Span(start,end,lift,from,to));
         }
         if (spans.isEmpty()) return geometry;
         for(int i=0;i<spans.size();i++) for(int j=i+1;j<spans.size();j++) {
             var a=spans.get(i);var b=spans.get(j);
             if(Math.signum(a.lift)!=Math.signum(b.lift)
-                    && a.start-a.approach<b.end+b.approach
-                    && b.start-b.approach<a.end+a.approach)
+                    && a.from<b.to
+                    && b.from<a.to)
                 throw new IllegalArgumentException("not enough room between overpass and underpass approaches");
         }
         List<CubicBezierGeometry> bases=cubicSpans(geometry);
-        if(!bases.isEmpty()) return raiseCubics(bases,geometry.length(),spans);
+        if(!bases.isEmpty()) return validateProfile(raiseCubics(bases,geometry.length(),spans),width,existing);
         // Existing serialized multi-curves retain the profile across saves and network sync.
         int count = Math.max(2, Math.min(32, (int)Math.ceil(geometry.length()/2)));
         SortedSet<Double> distances = new TreeSet<>();
         for (int i=0; i<=count; i++) distances.add(geometry.length() * (i / (double) count));
         for (Span span : spans) {
-            double from=Math.max(0,span.start-span.approach);
-            double to=Math.min(geometry.length(),span.end+span.approach);
+            double from=span.from;
+            double to=span.to;
             distances.add(from);
             distances.add((from+span.start)/2);
             distances.add(span.start);
@@ -59,8 +71,8 @@ public final class RoadOverpassPlanner {
             RoadPoint point = geometry.sample(distance).position();
             double y = point.y();
             for (Span span : spans) {
-                double from = Math.max(0, span.start-span.approach);
-                double to = Math.min(geometry.length(), span.end+span.approach);
+                double from = span.from;
+                double to = span.to;
                 if (distance < from || distance > to) continue;
                 double target;
                 if (distance < span.start) {
@@ -75,7 +87,45 @@ public final class RoadOverpassPlanner {
             if (distance==0 || distance==geometry.length()) y=point.y();
             points.add(new RoadPoint(point.x(),y,point.z()));
         }
-        return new MultiCurveGeometry(points);
+        return validateProfile(new MultiCurveGeometry(points),width,existing);
+    }
+
+    private static ReferenceGeometry validateProfile(ReferenceGeometry geometry, int width,
+                                                      Collection<RoadSegment> roads) {
+        if (!coverage(geometry,width,roads).isEmpty())
+            throw new IllegalArgumentException("the fitted crossing does not clear the existing road structures");
+        int count=Math.max(1,(int)Math.ceil(geometry.length()/0.25));
+        for(int i=0;i<=count;i++) {
+            var tangent=geometry.sample(geometry.length()*(i/(double)count)).tangent();
+            if(Math.abs(tangent.y())>ConstructionLimits.DEFAULT_MAXIMUM_GRADE*tangent.horizontalLength()+1e-8)
+                throw new IllegalArgumentException("the fitted crossing approach exceeds the maximum grade");
+        }
+        return geometry;
+    }
+
+    private static double attachmentHold(ReferenceGeometry geometry, int width,
+                                         Collection<RoadSegment> roads, boolean reverse) {
+        var port = AuxiliaryLanePorts.matching(geometry, !reverse, width, AuxiliaryLanePorts.ports(roads));
+        if (port.isEmpty()) return 0;
+        var hosts = LaneConnectionPlanner.connectedHost(port.orElseThrow(), width, roads);
+        record Sample(RoadPoint point, double radius) {}
+        List<Sample> samples = new ArrayList<>();
+        for (var road : roads) if (hosts.contains(road.id())) {
+            var host = road.referenceGeometry();
+            int count = Math.max(1, (int)Math.ceil(host.length()));
+            for (int i=0; i<=count; i++) samples.add(new Sample(
+                    host.sample(host.length()*(i/(double)count)).position(),
+                    (width+road.presetSnapshot().surfaceBlockWidth())/2.0+1));
+        }
+        int count = Math.max(1, (int)Math.ceil(geometry.length()/0.5));
+        for (int i=0; i<=count; i++) {
+            double distance=geometry.length()*(i/(double)count);
+            var point=geometry.sample(reverse ? geometry.length()-distance : distance).position();
+            boolean overlaps=samples.stream().anyMatch(sample -> Math.hypot(
+                    point.x()-sample.point.x(),point.z()-sample.point.z())<=sample.radius);
+            if (!overlaps) return distance;
+        }
+        return geometry.length();
     }
 
     private static List<CubicBezierGeometry> cubicSpans(ReferenceGeometry geometry) {
@@ -106,7 +156,7 @@ public final class RoadOverpassPlanner {
             addProfileMark(breaks,span.end);
         }
         for(var span:spans) {
-            double from=Math.max(0,span.start-span.approach),to=Math.min(length,span.end+span.approach);
+            double from=span.from,to=span.to;
             for(double mark:new double[]{from,to,(from+span.start)/2,(span.end+to)/2})
                 if(breaks.size()<22) addProfileMark(breaks,mark);
         }
@@ -147,7 +197,7 @@ public final class RoadOverpassPlanner {
     private static double[] lift(double distance,double length,List<Span> spans) {
         double height=0,slope=0;
         for(var span:spans) {
-            double from=Math.max(0,span.start-span.approach),to=Math.min(length,span.end+span.approach);
+            double from=span.from,to=span.to;
             if(distance<=from || distance>=to) continue;
             double value=span.lift,derivative=0;
             if(distance<span.start) {
@@ -194,12 +244,12 @@ public final class RoadOverpassPlanner {
                 // Keep at-grade intersections intact. The existing vertical order
                 // determines whether this road passes above or below the host.
                 double separationY=point.y()-lowerY;
-                boolean above=separationY>1;
+                boolean above=separationY>RoadPathCrossingAnalyzer.DEFAULT_MAXIMUM_VERTICAL_GAP;
                 double required=above
-                        ? Math.floor(lowerY+0.5)+1+MINIMUM_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS
-                        : Math.floor(lowerY+0.5)-RoadStructurePlanner.DECK_THICKNESS-MINIMUM_FREE_HEIGHT-1;
+                        ? Math.floor(lowerY+0.75)+1+STRUCTURE_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS
+                        : Math.floor(lowerY+0.25)-RoadStructurePlanner.DECK_THICKNESS-STRUCTURE_FREE_HEIGHT-1;
                 double deficit=required-point.y();
-                boolean overlaps=nearest<=radius && Math.abs(separationY)>1
+                boolean overlaps=nearest<=radius && Math.abs(separationY)>RoadPathCrossingAnalyzer.DEFAULT_MAXIMUM_VERTICAL_GAP
                         && (above ? deficit>1e-9 : deficit< -1e-9);
                 if(runStart>=0 && overlaps && Math.signum(lift)!=Math.signum(deficit)) {
                     result.add(new Coverage(runStart,distance,lift));

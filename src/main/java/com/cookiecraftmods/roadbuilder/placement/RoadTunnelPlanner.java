@@ -123,6 +123,7 @@ public final class RoadTunnelPlanner {
         // Sweep the lateral boundaries. A rasterized footprint also has steps and
         // end faces; extruding those faces creates columns across the portal.
         for (RoadSegment segment : segments) {
+            if (segment.presetSnapshot().sunkenRoad()) continue;
             ReferenceGeometry geometry = segment.referenceGeometry();
             double halfWidth = segment.presetSnapshot().surfaceBlockWidth() / 2.0;
             for (double distance = 0; distance <= geometry.length(); distance += 0.25) {
@@ -146,6 +147,7 @@ public final class RoadTunnelPlanner {
             }
         }
         for (RoadSegment segment : segments) {
+            if (segment.presetSnapshot().sunkenRoad()) continue;
             addMedianAndPillars(
                     targets,
                     tunnelSurfaces,
@@ -181,6 +183,7 @@ public final class RoadTunnelPlanner {
     ) {
         Set<BlockPos> detected = new HashSet<>();
         for (RoadSegment segment : segments) {
+            if (segment.presetSnapshot().sunkenRoad()) continue;
             if (segment.referenceGeometry().length() < MINIMUM_SEGMENT_LENGTH) continue;
             Set<BlockPos> segmentSurfaces = new HashSet<>();
             double coveredLength = 0;

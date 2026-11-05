@@ -26,7 +26,8 @@ public record RoadPathIntentC2SPacket(
         long expectedGraphRevision,
         PathType pathType,
         List<RoadPoint> points,
-        double parallelOffset
+        double parallelOffset,
+        boolean sunkenRoad
 ) implements FabricPacket {
     public static final int MAXIMUM_POINTS = 64;
     public static final double MAXIMUM_CONTROL_POLYGON_LENGTH = 8_192.0;
@@ -35,7 +36,7 @@ public record RoadPathIntentC2SPacket(
             PacketType.create(
                     new ResourceLocation(
                             "roadbuilder",
-                            "road_path_intent_v2"
+                            "road_path_intent_v3"
                     ),
                     RoadPathIntentC2SPacket::new
             );
@@ -86,9 +87,21 @@ public record RoadPathIntentC2SPacket(
                 expectedGraphRevision, pathType, points, 0);
     }
 
+    public RoadPathIntentC2SPacket(int protocolVersion, UUID requestId, ResourceLocation dimensionId,
+            ResourceLocation presetId, int expectedPresetRevision, long expectedGraphRevision,
+            PathType pathType, List<RoadPoint> points, double parallelOffset) {
+        this(protocolVersion, requestId, dimensionId, presetId, expectedPresetRevision,
+                expectedGraphRevision, pathType, points, parallelOffset, false);
+    }
+
+    public RoadPathIntentC2SPacket withSunkenRoad(boolean enabled) {
+        return new RoadPathIntentC2SPacket(protocolVersion, requestId, dimensionId, presetId,
+                expectedPresetRevision, expectedGraphRevision, pathType, points, parallelOffset, enabled);
+    }
+
     public RoadPathIntentC2SPacket withParallelOffset(double offset) {
         return new RoadPathIntentC2SPacket(protocolVersion, requestId, dimensionId, presetId,
-                expectedPresetRevision, expectedGraphRevision, pathType, points, offset);
+                expectedPresetRevision, expectedGraphRevision, pathType, points, offset, sunkenRoad);
     }
 
     public RoadPathIntentC2SPacket(FriendlyByteBuf buffer) {
@@ -176,6 +189,7 @@ public record RoadPathIntentC2SPacket(
             buffer.writeDouble(point.z());
         }
         buffer.writeDouble(parallelOffset);
+        buffer.writeBoolean(sunkenRoad);
     }
 
     @Override
@@ -193,7 +207,8 @@ public record RoadPathIntentC2SPacket(
                 fields.expectedGraphRevision,
                 fields.pathType,
                 fields.points,
-                fields.parallelOffset
+                fields.parallelOffset,
+                fields.sunkenRoad
         );
     }
 
@@ -225,6 +240,7 @@ public record RoadPathIntentC2SPacket(
             points.add(point);
         }
         double offset = buffer.readDouble();
+        boolean sunkenRoad = buffer.readBoolean();
         PacketValidation.requireFullyRead(buffer, "road path intent");
         return new WireFields(
                 protocol,
@@ -235,7 +251,8 @@ public record RoadPathIntentC2SPacket(
                 graphRevision,
                 type,
                 List.copyOf(points),
-                offset
+                offset,
+                sunkenRoad
         );
     }
 
@@ -336,7 +353,8 @@ public record RoadPathIntentC2SPacket(
             long expectedGraphRevision,
             PathType pathType,
             List<RoadPoint> points,
-            double parallelOffset
+            double parallelOffset,
+            boolean sunkenRoad
     ) {
     }
 }

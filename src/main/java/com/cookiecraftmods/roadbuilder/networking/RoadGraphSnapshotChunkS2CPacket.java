@@ -27,7 +27,7 @@ public record RoadGraphSnapshotChunkS2CPacket(
             PacketType.create(
                     new ResourceLocation(
                             "roadbuilder",
-                            "road_graph_snapshot_chunk_v1"
+                            "road_graph_snapshot_chunk_v2"
                     ),
                     RoadGraphSnapshotChunkS2CPacket::new
             );
