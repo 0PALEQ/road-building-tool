@@ -110,10 +110,6 @@ public final class RoadBuilderModeController {
         pendingMouseRestore |= restoreMouseGrab;
         restoreMouseGrab = false;
         restoreMouseWhenReady(client);
-
-        if (reason == RoadBuilderModeExitReason.USER_TOGGLED && client.player != null) {
-            client.player.displayClientMessage(Component.translatable("message.roadbuilder.mode_disabled"), true);
-        }
     }
 
     private void tryEnter(Minecraft client) {
@@ -133,7 +129,6 @@ public final class RoadBuilderModeController {
         client.mouseHandler.releaseMouse();
         cameraController.enter(client);
         straightRoadTool.onModeEntered(client);
-        client.player.displayClientMessage(Component.translatable("message.roadbuilder.mode_enabled"), true);
     }
 
     public boolean handleMouseButton(
