@@ -50,6 +50,12 @@ public final class RoadBuilderClient implements ClientModInitializer {
                 );
             }
         });
+        WorldRenderEvents.LAST.register(context -> {
+            if (MODE_CONTROLLER.isActive()) {
+                com.cookiecraftmods.roadbuilder.client.render.RoadPreviewMeasurementsRenderer.renderOverlay(
+                        context, MODE_CONTROLLER.straightRoadTool());
+            }
+        });
         WorldRenderEvents.AFTER_ENTITIES.register(context -> {
             var tool = MODE_CONTROLLER.straightRoadTool();
             if (MODE_CONTROLLER.isActive()) {

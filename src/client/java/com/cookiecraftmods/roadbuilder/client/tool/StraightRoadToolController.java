@@ -464,6 +464,37 @@ public final class StraightRoadToolController {
         return visibleNodeMarkers;
     }
 
+    public record AttachmentAngle(RoadPoint point, RoadVector roadDirection, RoadVector previewDirection) { }
+
+    private RawRoadPreview measuredPreview;
+    private RoadGraphSnapshot measuredGraph;
+    private List<AttachmentAngle> attachmentAngles = List.of();
+
+    public List<AttachmentAngle> previewAttachmentAngles() {
+        if (rawPreview == null) return List.of();
+        if (measuredPreview == rawPreview && measuredGraph == indexedGraph) return attachmentAngles;
+        measuredPreview = rawPreview;
+        measuredGraph = indexedGraph;
+        var geometry = rawPreview.geometry();
+        List<AttachmentAngle> result = new ArrayList<>();
+        for (boolean atStart : new boolean[] {true, false}) {
+            var sample = geometry.sample(atStart ? 0 : geometry.length());
+            var outgoing = sample.tangent().scale(atStart ? 1 : -1);
+            var port = atStart ? startLanePort : hoveredLanePort;
+            if (port != null && port.position().distanceTo(sample.position()) < 0.05) {
+                result.add(new AttachmentAngle(sample.position(),
+                        port.direction().scale(port.incoming() ? -1 : 1), outgoing));
+            } else {
+                RoadSnapResolver.attachmentDirection(sample.position(),
+                        snapIndex.segmentsNear(sample.position(), null, 1.0), outgoing)
+                        .ifPresent(direction -> result.add(
+                                new AttachmentAngle(sample.position(), direction, outgoing)));
+            }
+        }
+        attachmentAngles = List.copyOf(result);
+        return attachmentAngles;
+    }
+
     public List<RoadSnapGuide> snapGuides() {
         if ((activeTool != RoadBuilderTool.COMPLEX_CURVE && activeTool != RoadBuilderTool.FREEHAND_DRAW) || startTarget == null) {
             return snapGuides;

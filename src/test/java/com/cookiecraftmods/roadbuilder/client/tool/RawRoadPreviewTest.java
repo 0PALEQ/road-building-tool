@@ -16,6 +16,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RawRoadPreviewTest {
     @Test
+    void measurementRunExcludesElevationAndFollowsCurves() {
+        RawRoadPreview slope = new RawRoadPreview(new StraightGeometry(
+                new RoadPoint(0, 0, 0), new RoadPoint(3, 12, 4)), 6);
+        assertEquals(5.0, slope.horizontalLength(), 1.0e-9);
+        assertEquals(13.0, slope.geometry().length(), 1.0e-9);
+        RawRoadPreview curve = new RawRoadPreview(new QuadraticBezierGeometry(
+                new RoadPoint(0, 0, 0), new RoadPoint(0, 0, 20),
+                new RoadPoint(20, 0, 20)), 6);
+        assertTrue(curve.horizontalLength() > Math.hypot(20, 20));
+        assertEquals(curve.geometry().length(), curve.horizontalLength(), 0.1);
+    }
+
+    @Test
     void longWideHighwayPreviewSucceedsBeyondOldBlockCap() {
         StraightGeometry highway = new StraightGeometry(
                 new RoadPoint(0.0, 64.0, 0.0),

@@ -17,6 +17,8 @@ public final class RawRoadPreview {
 
     private final List<CrossSection> crossSections;
     private final double width;
+    private final ReferenceGeometry geometry;
+    private final double horizontalLength;
 
     public RawRoadPreview(ReferenceGeometry geometry, double width) {
         Objects.requireNonNull(geometry, "geometry");
@@ -26,9 +28,22 @@ public final class RawRoadPreview {
             );
         }
         this.width = width;
+        this.geometry = geometry;
         this.crossSections = Collections.unmodifiableList(
                 build(geometry, width)
         );
+        double run = 0.0;
+        RoadPoint previous = geometry.start();
+        for (int index = 1; index < crossSections.size(); index++) {
+            CrossSection section = crossSections.get(index);
+            RoadPoint next = new RoadPoint(
+                    (section.left().x() + section.right().x()) / 2.0,
+                    section.left().y(),
+                    (section.left().z() + section.right().z()) / 2.0);
+            run += Math.hypot(next.x() - previous.x(), next.z() - previous.z());
+            previous = next;
+        }
+        this.horizontalLength = run;
     }
 
     public record CrossSection(RoadPoint left, RoadPoint right) {
@@ -40,6 +55,15 @@ public final class RawRoadPreview {
 
     public double width() {
         return width;
+    }
+
+    public ReferenceGeometry geometry() {
+        return geometry;
+    }
+
+    /** Sampled horizontal travel along the preview, including curves. */
+    public double horizontalLength() {
+        return horizontalLength;
     }
 
     private static List<CrossSection> build(

@@ -31,6 +31,32 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadSnapResolverTest {
     @Test
+    void attachmentAnglesUseExistingArmsAtBothEndsAndBothSidesOfInterior() {
+        RoadPoint start = new RoadPoint(0, 64, 0);
+        RoadPoint end = new RoadPoint(20, 64, 0);
+        RoadSegment arm = sharedSegment(80, node(80, start).id(), start, end, 7);
+        assertEquals(List.of(new RoadVector(1, 0, 0)),
+                RoadSnapResolver.attachmentDirections(start, List.of(arm)));
+        assertEquals(List.of(new RoadVector(-1, 0, 0)),
+                RoadSnapResolver.attachmentDirections(end, List.of(arm)));
+        var middle = RoadSnapResolver.attachmentDirections(new RoadPoint(10, 64, 0), List.of(arm));
+        assertEquals(2, middle.size());
+        assertTrue(middle.contains(new RoadVector(1, 0, 0)));
+        assertTrue(middle.contains(new RoadVector(-1, 0, 0)));
+        RoadPoint contact = new RoadPoint(10, 64, 0);
+        assertEquals(new RoadVector(1, 0, 0), RoadSnapResolver.attachmentDirection(
+                contact, List.of(arm), new RoadVector(1, 0, 1)).orElseThrow());
+        assertEquals(new RoadVector(-1, 0, 0), RoadSnapResolver.attachmentDirection(
+                contact, List.of(arm), new RoadVector(-1, 0, 1)).orElseThrow());
+        assertTrue(RoadSnapResolver.attachmentDirection(contact, List.of(arm),
+                new RoadVector(0, 0, 1)).isPresent());
+        assertTrue(RoadSnapResolver.attachmentDirection(contact, List.of(),
+                new RoadVector(0, 0, 1)).isEmpty());
+        assertTrue(RoadSnapResolver.attachmentDirections(new RoadPoint(10, 80, 0), List.of(arm)).isEmpty());
+        assertTrue(RoadSnapResolver.attachmentDirections(new RoadPoint(10, 64, 5), List.of(arm)).isEmpty());
+    }
+
+    @Test
     void freehandNodeTangentsContinueBothReferenceOrientationsAndLeaveJunctionsFree() {
         RoadNode anchor = node(70, new RoadPoint(0, 64, 0));
         RoadSegment arm = sharedSegment(70, anchor.id(), anchor.position(),

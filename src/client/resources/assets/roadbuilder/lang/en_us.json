@@ -1,4 +1,8 @@
 {
+  "preview.roadbuilder.length": "Length: %s blocks",
+  "preview.roadbuilder.elevation": "Elevation: %s (Δ %s)",
+  "preview.roadbuilder.grade": "Grade: %s",
+  "preview.roadbuilder.angle": "Angle: %s°",
   "toolbar.roadbuilder.sunken_road": "Sunken Road",
   "tooltip.roadbuilder.sunken_road": "Build an open cutting with natural slopes instead of retaining walls or tunnels. Set the road elevation below the terrain.",
   "result.roadbuilder.placement.too_sharp_turn": "Too sharp turn",

@@ -27,3 +27,4 @@ run
 debug/logs/
 docs/logs
 docs/logs/*
+logs

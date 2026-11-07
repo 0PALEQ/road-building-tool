@@ -750,6 +750,22 @@ public final class RoadSnapResolver {
         return bestCandidate(candidates);
     }
 
+    /** Rays pointing from a contact point into each existing road arm. */
+    static List<RoadVector> attachmentDirections(RoadPoint point, Collection<RoadSegment> segments) {
+        return directionsAt(point, segments).stream()
+                .map(candidate -> candidate.direction().scale(-1.0)).toList();
+    }
+
+    /** One guide per attachment: choose the arm with the smallest horizontal angle. */
+    static java.util.Optional<RoadVector> attachmentDirection(RoadPoint point,
+            Collection<RoadSegment> segments, RoadVector outgoing) {
+        return attachmentDirections(point, segments).stream()
+                .filter(direction -> direction.horizontalLength() > 1.0e-9)
+                .max(java.util.Comparator.comparingDouble(direction ->
+                        (direction.x() * outgoing.x() + direction.z() * outgoing.z())
+                                / direction.horizontalLength()));
+    }
+
     private static List<DirectionCandidate> directionsAt(
             RoadPoint point,
             Collection<RoadSegment> segments
