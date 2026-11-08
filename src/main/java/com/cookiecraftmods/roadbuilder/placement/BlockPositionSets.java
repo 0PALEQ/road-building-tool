@@ -12,6 +12,15 @@ import java.util.Set;
 public final class BlockPositionSets {
     private BlockPositionSets() { }
 
+    /** Blocks a following planner must preserve, excluding planned excavation. */
+    public static Set<BlockPos> nonAirTargets(BlockPlacementPlan plan) {
+        Set<BlockPos> positions = new HashSet<>();
+        for (PlannedBlock block : Objects.requireNonNull(plan, "plan").blocks()) {
+            if (!block.targetState().isAir()) positions.add(block.position().immutable());
+        }
+        return Collections.unmodifiableSet(positions);
+    }
+
     public static Set<BlockPos> copyOf(Collection<BlockPos> positions) {
         Set<BlockPos> copy = new HashSet<>();
         for (BlockPos position : Objects.requireNonNull(positions, "positions")) {

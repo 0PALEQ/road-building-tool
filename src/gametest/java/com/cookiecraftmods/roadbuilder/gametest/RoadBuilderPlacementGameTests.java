@@ -1348,7 +1348,7 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
         helper.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 120)
+    @GameTest(template = "roadbuilder:crossing_bounds", batch = "roadbuilderCrossingBounds", timeoutTicks = 120)
     public void crossingPlacementPublishesSharedNodeAndIndependentChildOwnership(
             GameTestHelper helper
     ) {
@@ -1536,7 +1536,9 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
                             && level.getBlockState(position.below()).is(Blocks.SMOOTH_STONE);
                     helper.assertTrue((!state.is(Blocks.SMOOTH_STONE) || supportedGuardrail)
                                     && !state.is(Blocks.GRAY_CONCRETE),
-                            "short junction must not leak past road ends at " + position);
+                            "short junction must not leak past road ends at " + position
+                                    + ": " + state + ", above=" + level.getBlockState(position.above())
+                                    + ", below=" + level.getBlockState(position.below()));
                 }
             }
         }

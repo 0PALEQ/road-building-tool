@@ -91,6 +91,86 @@ class SunkenRoadPlannerTest {
         assertFalse(plan.blocks().stream().anyMatch(b -> b.targetState().is(Blocks.POLISHED_ANDESITE)));
     }
 
+    @Test void junctionCanClearAnExistingSlabAlreadyScheduledForRemoval() {
+        var floor = new BlockPos(551, 63, 1274);
+        var oldSlab = floor.above();
+        var junction = BlockPlacementPlan.create(Level.OVERWORLD, List.of(
+                new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState()),
+                new PlannedBlock(oldSlab, Blocks.AIR.defaultBlockState())));
+        var world = new Terrain(62) {
+            @Override public BlockState blockState(BlockPos pos) {
+                return pos.equals(oldSlab) ? Blocks.SMOOTH_STONE_SLAB.defaultBlockState()
+                        : super.blockState(pos);
+            }
+        };
+        var plan = assertInstanceOf(BlockPlanResult.Success.class,
+                new SunkenRoadPlanner().excavate(junction, Set.of(floor), world,
+                        oldSlab::equals, 20000)).plan();
+        assertTrue(plan.blocks().stream().anyMatch(block ->
+                block.position().equals(oldSlab) && block.targetState().isAir()));
+        var unplannedRemoval = BlockPlacementPlan.create(Level.OVERWORLD,
+                List.of(new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        assertInstanceOf(BlockPlanResult.Failure.class,
+                new SunkenRoadPlanner().excavate(unplannedRemoval, Set.of(floor), world,
+                        oldSlab::equals, 20000));
+    }
+
+    @Test void junctionExcavationCanOverlapVegetationClearedByTheProposedRoad() {
+        var floor = new BlockPos(586, 63, 1308);
+        var grass = new BlockPos(586, 71, 1308);
+        var roadBlock = floor.offset(1, 0, 0);
+        var proposedRoad = BlockPlacementPlan.create(Level.OVERWORLD, List.of(
+                new PlannedBlock(roadBlock, Blocks.GRAY_CONCRETE.defaultBlockState()),
+                new PlannedBlock(grass, Blocks.AIR.defaultBlockState())));
+        var junction = BlockPlacementPlan.create(Level.OVERWORLD,
+                List.of(new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        var world = new Terrain(62) {
+            @Override public BlockState blockState(BlockPos pos) {
+                return pos.equals(grass) ? Blocks.GRASS.defaultBlockState() : super.blockState(pos);
+            }
+        };
+        var protectedTargets = BlockPositionSets.nonAirTargets(proposedRoad);
+        var plan = assertInstanceOf(BlockPlanResult.Success.class,
+                new SunkenRoadPlanner().excavate(junction, Set.of(floor), world,
+                        protectedTargets::contains, 20000)).plan();
+        assertTrue(protectedTargets.contains(roadBlock));
+        assertTrue(plan.blocks().stream().anyMatch(block ->
+                block.position().equals(grass) && block.targetState().isAir()));
+        assertInstanceOf(BlockPlanResult.Failure.class,
+                new SunkenRoadPlanner().excavate(junction, Set.of(floor), world,
+                        BlockPositionSets.copyOf(proposedRoad.positions())::contains, 20000));
+    }
+
+    @Test void plannedRoadSurfaceIsKeptAndExplicitClearingStillProtectsFluidsAndBlockEntities() {
+        var floor = new BlockPos(0, 63, 0);
+        var above = floor.above();
+        var planner = new SunkenRoadPlanner();
+        var surface = BlockPlacementPlan.create(Level.OVERWORLD, List.of(
+                new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState()),
+                new PlannedBlock(above, Blocks.SMOOTH_STONE_SLAB.defaultBlockState())));
+        var plan = assertInstanceOf(BlockPlanResult.Success.class,
+                planner.excavate(surface, Set.of(floor), new Terrain(64),
+                        above::equals, 20000)).plan();
+        assertTrue(plan.blocks().stream().anyMatch(block -> block.position().equals(above)
+                && block.targetState().is(Blocks.SMOOTH_STONE_SLAB)));
+        var clearing = BlockPlacementPlan.create(Level.OVERWORLD, List.of(
+                new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState()),
+                new PlannedBlock(above, Blocks.AIR.defaultBlockState())));
+        for (boolean fluid : List.of(false, true)) {
+            var world = new Terrain(64) {
+                @Override public BlockState blockState(BlockPos pos) {
+                    return fluid && pos.equals(above) ? Blocks.WATER.defaultBlockState()
+                            : super.blockState(pos);
+                }
+                @Override public boolean hasBlockEntity(BlockPos pos) {
+                    return !fluid && pos.equals(above);
+                }
+            };
+            assertInstanceOf(BlockPlanResult.Failure.class, planner.excavate(
+                    clearing, Set.of(floor), world, above::equals, 20000));
+        }
+    }
+
     private static class Terrain implements PlacementBlockWorld {
         private final int height;
         Terrain(int height) { this.height = height; }

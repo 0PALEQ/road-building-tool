@@ -1,5 +1,7 @@
 package com.cookiecraftmods.roadbuilder.networking;
 
+import com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld;
+import com.cookiecraftmods.roadbuilder.placement.PlacementBlockWorld;
 import com.cookiecraftmods.roadbuilder.network.ApproachKey;
 import com.cookiecraftmods.roadbuilder.network.JunctionApproachOverride;
 import com.cookiecraftmods.roadbuilder.network.JunctionCrossingPolicy;
@@ -41,7 +43,6 @@ import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
-
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -273,14 +274,17 @@ public final class CrosswalkToggleEndpoint {
         );
     }
 
-    private BlockPlacementPlan nodePlan(
+    BlockPlacementPlan nodePlan(
             RoadGraph graph,
             RoadNode node,
             List<RoadSegment> incident,
             JunctionDefinition definition,
-            ServerLevelPlacementBlockWorld world,
+            PlacementBlockWorld world,
             PlacementOwnershipLedger ledger
     ) {
+        var previous = ledger.operation(RoadMaterializationOwner.node(node.id()));
+        var planningWorld = new MaterializationRebuildWorld(
+                world, ledger, previous.map(operation -> List.of(operation.id())).orElse(List.of()));
         if (incident.size() == 1) {
             RoadSegment segment = incident.get(0);
             ApproachKey key = ApproachKey.at(segment, node.id());
@@ -306,13 +310,12 @@ public final class CrosswalkToggleEndpoint {
         }
         BlockPlacementPlan base = null;
         if (SmoothRoadTransitionMaterializer.supports(node, incident)) {
-            BlockPlanResult transition = new RoadTransitionPlanPreparer().plan(
+            BlockPlanResult transition = new SmoothRoadTransitionMaterializer().plan(
                     graph.dimension(),
                     node,
                     incident,
-                    world,
-                    ledger::isMaterializedRoadPosition,
-                    limits
+                    limits.maximumAffectedBlocks(),
+                    limits.maximumPlanningCandidates()
             );
             if (!(transition instanceof BlockPlanResult.Success success)) {
                 throw new IllegalStateException("crosswalk transition failed");
@@ -367,9 +370,9 @@ public final class CrosswalkToggleEndpoint {
             return markingPlan;
         }
         if (markingPlan == null) {
-            return base;
+            return completeNodePlan(base, node, incident, planningWorld);
         }
-        return BlockPlacementPlans.mergeLayered(
+        return completeNodePlan(BlockPlacementPlans.mergeLayered(
                 graph.dimension(),
                 List.of(
                         new LayeredBlockPlan(
@@ -385,11 +388,22 @@ public final class CrosswalkToggleEndpoint {
                                 node.id().toString()
                         )
                 )
-        );
+        ), node, incident, planningWorld);
     }
 
-    private static BlockPlacementPlan finalStateOverlay(
-            ServerLevelPlacementBlockWorld world,
+    private BlockPlacementPlan completeNodePlan(BlockPlacementPlan surface, RoadNode node,
+            List<RoadSegment> incident,
+            MaterializationRebuildWorld world) {
+        BlockPlanResult result = new RoadTransitionPlanPreparer().complete(
+                surface, node, incident, world, world::isMaterializedRoadPosition, limits);
+        if (!(result instanceof BlockPlanResult.Success success)) {
+            throw new IllegalStateException("crosswalk junction structures failed");
+        }
+        return success.plan();
+    }
+
+    static BlockPlacementPlan finalStateOverlay(
+            PlacementBlockWorld world,
             PlacementOwnershipLedger ledger,
             Collection<PlacementOperationId> removedIds,
             Collection<BlockPlacementPlan> newPlans

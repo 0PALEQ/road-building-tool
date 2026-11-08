@@ -1,5 +1,8 @@
 package com.cookiecraftmods.roadbuilder.networking;
 
+import com.cookiecraftmods.roadbuilder.placement.RoadTransitionPlanPreparer;
+import com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld;
+import com.cookiecraftmods.roadbuilder.placement.PlacementBlockWorld;
 import com.cookiecraftmods.roadbuilder.network.JunctionDefinition;
 import com.cookiecraftmods.roadbuilder.network.JunctionSolveResult;
 import com.cookiecraftmods.roadbuilder.network.JunctionSolver;
@@ -44,7 +47,6 @@ import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -304,17 +306,20 @@ public final class LaneConnectorEditEndpoint {
         return PlacementResultCode.ACCEPTED;
     }
 
-    private BlockPlacementPlan nodePlan(
+    BlockPlacementPlan nodePlan(
             RoadGraph graph,
             RoadNodeId nodeId,
             Collection<LaneConnector> connectors,
-            ServerLevelPlacementBlockWorld world,
+            PlacementBlockWorld world,
             PlacementOwnershipLedger ledger
     ) {
         RoadNode node = graph.node(nodeId).orElse(null);
         if (node == null) {
             return null;
         }
+        var previous = ledger.operation(RoadMaterializationOwner.node(nodeId));
+        var planningWorld = new MaterializationRebuildWorld(
+                world, ledger, previous.map(operation -> List.of(operation.id())).orElse(List.of()));
         List<RoadSegment> incident = graph.snapshot().segments().values().stream()
                 .filter(segment -> segment.startNodeId().equals(nodeId)
                         || segment.endNodeId().equals(nodeId))
@@ -373,9 +378,9 @@ public final class LaneConnectorEditEndpoint {
                 limits.maximumAffectedBlocks()
         );
         if (!(markings instanceof BlockPlanResult.Success markingSuccess)) {
-            return base;
+            return completeNodePlan(base, node, incident, planningWorld);
         }
-        return BlockPlacementPlans.mergeLayered(
+        return completeNodePlan(BlockPlacementPlans.mergeLayered(
                 graph.dimension(),
                 List.of(
                         new LayeredBlockPlan(
@@ -391,7 +396,18 @@ public final class LaneConnectorEditEndpoint {
                                 nodeId.toString()
                         )
                 )
-        );
+        ), node, incident, planningWorld);
+    }
+
+    private BlockPlacementPlan completeNodePlan(BlockPlacementPlan surface, RoadNode node,
+            List<RoadSegment> incident,
+            MaterializationRebuildWorld world) {
+        BlockPlanResult result = new RoadTransitionPlanPreparer()
+                .complete(surface, node, incident, world, world::isMaterializedRoadPosition, limits);
+        if (!(result instanceof BlockPlanResult.Success success)) {
+            throw new IllegalStateException("lane connector junction structures failed");
+        }
+        return success.plan();
     }
 
     private static boolean isJunction(
@@ -441,8 +457,8 @@ public final class LaneConnectorEditEndpoint {
         return null;
     }
 
-    private static BlockPlacementPlan finalStateOverlay(
-            ServerLevelPlacementBlockWorld world,
+    static BlockPlacementPlan finalStateOverlay(
+            PlacementBlockWorld world,
             PlacementOwnershipLedger ledger,
             Collection<PlacementOperationId> removedIds,
             Collection<BlockPlacementPlan> newPlans

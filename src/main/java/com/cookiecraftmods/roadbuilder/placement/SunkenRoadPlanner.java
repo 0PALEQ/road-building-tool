@@ -59,11 +59,14 @@ public final class SunkenRoadPlanner {
                 BlockPos position = new BlockPos(floor.getX(), y, floor.getZ());
                 var state = world.blockState(position);
                 if (state.isAir()) continue;
-                if (existingRoad.test(position) || world.hasBlockEntity(position)
+                PlannedBlock planned = targets.get(position);
+                // Junction rebuilding already plans which old surface blocks to
+                // keep or clear, including slab companions above the new floor.
+                // Protect other roads without rejecting those explicit changes.
+                if ((existingRoad.test(position) && planned == null) || world.hasBlockEntity(position)
                         || !state.getFluidState().isEmpty()) {
                     return new BlockPlanResult.Failure(BlockPlanFailureCode.INVALID_GEOMETRY);
                 }
-                PlannedBlock planned = targets.get(position);
                 if (planned != null && !planned.targetState().isAir()) continue;
                 cutTerrain |= RoadTunnelPlanner.isTerrain(state);
                 targets.put(position, new PlannedBlock(position, Blocks.AIR.defaultBlockState()));

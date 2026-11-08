@@ -38,6 +38,18 @@ class BlockTransitionStateMatcherTest {
     }
 
     @Test
+    void acceptsBothHalvesOfTallFlowersRemovedByPlannedUpdates() {
+        for (var plant : java.util.List.of(Blocks.SUNFLOWER, Blocks.LILAC,
+                Blocks.ROSE_BUSH, Blocks.PEONY)) {
+            for (var half : DoubleBlockHalf.values()) {
+                assertTrue(BlockTransitionStateMatcher.matchesRecordedSource(
+                        Blocks.AIR.defaultBlockState(),
+                        plant.defaultBlockState().setValue(DoublePlantBlock.HALF, half)));
+            }
+        }
+    }
+
+    @Test
     void acceptsNaturalSoilChangesWhileRejectingArbitraryEdits() {
         assertTrue(BlockTransitionStateMatcher.matchesRecordedSource(
                 Blocks.GRASS_BLOCK.defaultBlockState(),

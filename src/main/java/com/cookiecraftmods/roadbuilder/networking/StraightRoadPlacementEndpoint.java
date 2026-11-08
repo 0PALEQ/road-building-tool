@@ -186,7 +186,7 @@ public final class StraightRoadPlacementEndpoint {
                     world,
                     graph,
                     ledger,
-                    BlockPositionSets.copyOf(clearedRoad.plan().positions())
+                    BlockPositionSets.nonAirTargets(clearedRoad.plan())
             );
         } catch (IntersectionPlanningFailure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));

@@ -33,7 +33,18 @@ public final class RoadTransitionPlanPreparer {
         if (!(surface instanceof BlockPlanResult.Success transition)) {
             return surface;
         }
-        BlockPlacementPlan surfacePlan = transition.plan();
+        return complete(transition.plan(), node, incident, world, protectedPosition, limits);
+    }
+
+    public BlockPlanResult complete(
+            BlockPlacementPlan surfacePlan,
+            RoadNode node,
+            List<RoadSegment> incident,
+            PlacementBlockWorld world,
+            Predicate<BlockPos> protectedPosition,
+            ConstructionLimits limits
+    ) {
+        var dimension = surfacePlan.dimension();
         List<RoadStructurePlanner.StructureSpan> structureSpans = incident
                 .stream()
                 .map(segment -> new RoadStructurePlanner.StructureSpan(

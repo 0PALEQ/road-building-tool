@@ -190,7 +190,7 @@ public final class RoadPathPlacementEndpoint {
                     world,
                     graph,
                     ledger,
-                    BlockPositionSets.copyOf(roadPlan.positions())
+                    BlockPositionSets.nonAirTargets(roadPlan)
             );
         } catch (JunctionPlanningFailure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));

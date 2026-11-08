@@ -3,6 +3,7 @@ package com.cookiecraftmods.roadbuilder.placement;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.DoublePlantBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.Objects;
@@ -65,6 +66,9 @@ public final class BlockTransitionStateMatcher {
     ) {
         Objects.requireNonNull(recordedSource, "recordedSource");
         return recordedSource.canBeReplaced()
+                // Tall flowers are not replaceable, but either half disappears
+                // when a planned write removes its support or the other half.
+                || recordedSource.getBlock() instanceof DoublePlantBlock
                 || recordedSource.is(BlockTags.LEAVES);
     }
 
