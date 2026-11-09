@@ -36,8 +36,10 @@ public final class BlockTransitionStateMatcher {
                 && !recordedSource.getFluidState().isEmpty())) {
             return true;
         }
-        return current.isAir()
-                && canDisappearDuringPlannedUpdates(recordedSource);
+        return canDisappearDuringPlannedUpdates(recordedSource)
+                && (current.isAir()
+                || (!recordedSource.getFluidState().isEmpty()
+                && current.equals(recordedSource.getFluidState().createLegacyBlock())));
     }
 
         public static boolean matchesPlannedTarget(
@@ -65,7 +67,8 @@ public final class BlockTransitionStateMatcher {
             BlockState recordedSource
     ) {
         Objects.requireNonNull(recordedSource, "recordedSource");
-        return recordedSource.canBeReplaced()
+        return TerrainRestorationPolicy.isDisposable(recordedSource)
+                || recordedSource.canBeReplaced()
                 // Tall flowers are not replaceable, but either half disappears
                 // when a planned write removes its support or the other half.
                 || recordedSource.getBlock() instanceof DoublePlantBlock

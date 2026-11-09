@@ -275,11 +275,16 @@ public final class BlockPlanCommitter {
         );
 
         try {
+            Map<BlockPos, BlockState> restorationStates = new LinkedHashMap<>(beforeStates);
+            if (!restorationOverlay) {
+                restorationStates.replaceAll((position, state) -> ledger.stack(position).isEmpty()
+                        ? TerrainRestorationPolicy.restorationState(state) : state);
+            }
             if (owner == null) {
                 ledger.recordPlacement(
                         operationId,
                         committedPlan,
-                        beforeStates,
+                        restorationStates,
                         ledgerRevision
                 );
             } else {
@@ -287,7 +292,7 @@ public final class BlockPlanCommitter {
                         operationId,
                         owner,
                         committedPlan,
-                        beforeStates,
+                        restorationStates,
                         ledgerRevision
                 );
             }

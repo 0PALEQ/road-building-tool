@@ -73,6 +73,39 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
     private static final int UPDATE_FLAGS = Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS;
 
     @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 200)
+    public void decorationsRestoreAsStableTerrainAfterSavedDataReload(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos origin = helper.absolutePos(new BlockPos(1, 2, 1));
+        List<BlockState> sources = List.of(Blocks.WHEAT.defaultBlockState(),
+                Blocks.SEA_PICKLE.defaultBlockState().setValue(
+                        net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED, true),
+                Blocks.FARMLAND.defaultBlockState());
+        List<BlockState> expected = List.of(Blocks.AIR.defaultBlockState(),
+                Blocks.WATER.defaultBlockState(), Blocks.DIRT.defaultBlockState());
+        List<PlannedBlock> targets = new ArrayList<>();
+        for (int index = 0; index < sources.size(); index++) {
+            BlockPos pos = origin.offset(index, 0, 0);
+            level.setBlock(pos.below(), Blocks.FARMLAND.defaultBlockState(), Block.UPDATE_CLIENTS);
+            level.setBlock(pos, sources.get(index), Block.UPDATE_CLIENTS);
+            targets.add(new PlannedBlock(pos, Blocks.GRAY_CONCRETE.defaultBlockState()));
+        }
+        var data = RoadBuilderPlacementSavedData.create(level.dimension());
+        var world = new ServerLevelPlacementBlockWorld(level);
+        var id = PlacementOperationId.create();
+        var result = new BlockPlanCommitter().commit(id,
+                BlockPlacementPlan.create(level.dimension(), targets), world, data.ledger());
+        helper.assertTrue(result instanceof PlacementCommitResult.Success, "decorations must allow construction: " + result);
+        var reloaded = RoadBuilderPlacementSavedData.load(level.dimension(), data.save(new CompoundTag()));
+        var removal = new PlacementRemovalService().remove(id, RemovalMode.SAFE, world, reloaded.ledger());
+        helper.assertTrue(removal instanceof PlacementRemovalResult.Success, "demolition must succeed: " + removal);
+        for (int index = 0; index < expected.size(); index++) {
+            helper.assertTrue(level.getBlockState(origin.offset(index, 0, 0)).equals(expected.get(index)),
+                    "incorrect restored terrain at index " + index);
+        }
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 200)
     public void convertsIntersectionIntoRoundaboutWithConsistentSurfaceHistory(GameTestHelper helper) {
         var level = helper.getLevel();
         var origin = helper.absolutePos(new BlockPos(14000, 0, 14000));
@@ -649,8 +682,8 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
                         .orElseThrow()
                         .top()
                         .beforeState()
-                        .is(Blocks.GRASS),
-                "ownership should retain the vegetation state for later demolition"
+                        .isAir(),
+                "demolition should leave cleared vegetation as air"
         );
         helper.succeed();
     }
@@ -982,8 +1015,8 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
                             .orElseThrow()
                             .top()
                             .beforeState()
-                            .is(Blocks.TALL_GRASS),
-                    "queued placement should retain the update-removed lower plant"
+                            .isAir(),
+                    "queued placement should record air for the update-removed lower plant"
             );
             helper.assertTrue(
                     placementData.ledger().stack(updateDrivenLeaf)

@@ -50,6 +50,20 @@ class BlockTransitionStateMatcherTest {
     }
 
     @Test
+    void acceptsUnsupportedDecorationDisappearingIntoAirOrItsWater() {
+        assertTrue(BlockTransitionStateMatcher.matchesRecordedSource(
+                Blocks.AIR.defaultBlockState(), Blocks.TORCH.defaultBlockState()));
+        var wetDecoration = Blocks.SEA_PICKLE.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED, true);
+        assertTrue(BlockTransitionStateMatcher.matchesRecordedSource(
+                Blocks.WATER.defaultBlockState(), wetDecoration));
+        assertFalse(BlockTransitionStateMatcher.matchesRecordedSource(
+                Blocks.LAVA.defaultBlockState(), wetDecoration));
+        assertFalse(BlockTransitionStateMatcher.matchesRecordedSource(
+                Blocks.AIR.defaultBlockState(), Blocks.CHEST.defaultBlockState()));
+    }
+
+    @Test
     void acceptsNaturalSoilChangesWhileRejectingArbitraryEdits() {
         assertTrue(BlockTransitionStateMatcher.matchesRecordedSource(
                 Blocks.GRASS_BLOCK.defaultBlockState(),

@@ -310,7 +310,12 @@ public final class IncrementalPlacementJobService {
                     transition.position(),
                     committedState
             ));
-            beforeStates.put(transition.position(), transition.beforeState());
+            // Keep the journal's real source for conflict detection and cancellation.
+            // Only the published terrain baseline is simplified; overlapping roads
+            // must retain their exact materialization (including slabs and stairs).
+            beforeStates.put(transition.position(), ledger.stack(transition.position()).isEmpty()
+                    ? TerrainRestorationPolicy.restorationState(transition.beforeState())
+                    : transition.beforeState());
         }
         BlockPlacementPlan plan = BlockPlacementPlan.create(
                 world.dimension(),

@@ -33,6 +33,72 @@ class PlacementTransactionTest {
     }
 
     @Test
+    void demolitionRestoresStableTerrainInsteadOfPartialBlocks() {
+        BlockState wetDecoration = Blocks.SEA_PICKLE.defaultBlockState()
+                .setValue(BlockStateProperties.WATERLOGGED, true);
+        List<BlockState> sources = List.of(Blocks.WHEAT.defaultBlockState(),
+                Blocks.TORCH.defaultBlockState(), wetDecoration,
+                Blocks.FARMLAND.defaultBlockState(), Blocks.DIRT_PATH.defaultBlockState(),
+                Blocks.STONE.defaultBlockState());
+        List<BlockState> restored = List.of(Blocks.AIR.defaultBlockState(),
+                Blocks.AIR.defaultBlockState(), Blocks.WATER.defaultBlockState(),
+                Blocks.DIRT.defaultBlockState(), Blocks.DIRT.defaultBlockState(),
+                Blocks.STONE.defaultBlockState());
+        for (int index = 0; index < sources.size(); index++) {
+            MapBackedPlacementBlockWorld world = worldWith(ORIGIN, sources.get(index));
+            PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(Level.OVERWORLD);
+            PlacementOperationId id = operationId(200 + index);
+            assertInstanceOf(PlacementCommitResult.Success.class,
+                    commit(id, world, ledger, ORIGIN, Blocks.GRAY_CONCRETE.defaultBlockState()));
+            assertEquals(restored.get(index), ledger.stack(ORIGIN).orElseThrow().top().beforeState());
+            assertInstanceOf(PlacementRemovalResult.Success.class,
+                    new PlacementRemovalService().remove(id, RemovalMode.SAFE, world, ledger));
+            assertEquals(restored.get(index), world.blockState(ORIGIN));
+        }
+    }
+
+    @Test
+    void failedPlacementRollsBackActualDecorationAndOverlapPreservesRoadSlab() {
+        BlockState decoration = Blocks.TORCH.defaultBlockState();
+        MapBackedPlacementBlockWorld world = worldWith(ORIGIN, decoration);
+        PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(Level.OVERWORLD);
+        BlockPos second = ORIGIN.below();
+        world.rejectWritesAt(second);
+        assertInstanceOf(PlacementCommitResult.Failure.class, new BlockPlanCommitter().commit(
+                BlockPlacementPlan.create(Level.OVERWORLD, List.of(
+                        new PlannedBlock(ORIGIN, Blocks.STONE.defaultBlockState()),
+                        new PlannedBlock(second, Blocks.STONE.defaultBlockState()))), world, ledger));
+        assertEquals(decoration, world.blockState(ORIGIN));
+        assertTrue(ledger.operations().isEmpty());
+
+        BlockState slab = Blocks.STONE_SLAB.defaultBlockState();
+        assertInstanceOf(PlacementCommitResult.Success.class,
+                commit(operationId(210), world, ledger, ORIGIN, slab));
+        assertInstanceOf(PlacementCommitResult.Success.class,
+                commit(operationId(211), world, ledger, ORIGIN, Blocks.STONE.defaultBlockState()));
+        assertInstanceOf(PlacementRemovalResult.Success.class,
+                new PlacementRemovalService().remove(operationId(211), RemovalMode.SAFE, world, ledger));
+        assertEquals(slab, world.blockState(ORIGIN));
+        assertInstanceOf(PlacementRemovalResult.Success.class,
+                new PlacementRemovalService().remove(operationId(210), RemovalMode.SAFE, world, ledger));
+        assertTrue(world.blockState(ORIGIN).isAir());
+    }
+
+    @Test
+    void partialBlockEntitiesAreStillProtected() {
+        for (BlockState state : List.of(Blocks.CHEST.defaultBlockState(),
+                Blocks.OAK_SIGN.defaultBlockState())) {
+            MapBackedPlacementBlockWorld world = worldWith(ORIGIN, state);
+            PlacementOwnershipLedger ledger = new PlacementOwnershipLedger(Level.OVERWORLD);
+            PlacementCommitResult.Failure failure = assertInstanceOf(PlacementCommitResult.Failure.class,
+                    commit(operationId(212), world, ledger, ORIGIN, Blocks.STONE.defaultBlockState()));
+            assertEquals(PlacementCommitFailureCode.CURRENT_BLOCK_ENTITY_UNSUPPORTED, failure.code());
+            assertEquals(state, world.blockState(ORIGIN));
+            assertEquals(state, TerrainRestorationPolicy.restorationState(state));
+        }
+    }
+
+    @Test
     void positionSnapshotIsOrderedReadOnlyAndDetachedFromLaterChanges() {
         BlockPos east = ORIGIN.offset(1, 0, 0);
         MapBackedPlacementBlockWorld world = worldWith(ORIGIN, Blocks.DIRT.defaultBlockState());
@@ -393,7 +459,7 @@ class PlacementTransactionTest {
                 .orElseThrow()
                 .layer(operationId)
                 .orElseThrow();
-        assertEquals(Blocks.GRASS.defaultBlockState(), vegetationLayer.beforeState());
+        assertEquals(Blocks.AIR.defaultBlockState(), vegetationLayer.beforeState());
         assertEquals(Blocks.AIR.defaultBlockState(), vegetationLayer.afterState());
     }
 

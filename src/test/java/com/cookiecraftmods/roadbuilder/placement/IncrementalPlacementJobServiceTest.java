@@ -60,6 +60,38 @@ class IncrementalPlacementJobServiceTest {
     }
 
     @Test
+    void resumedPlacementKeepsActualSourcesButPublishesStableRestorationStates() {
+        Fixture fixture = fixture();
+        var wetDecoration = Blocks.SEA_PICKLE.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED, true);
+        fixture.world.states.put(position(0), Blocks.TORCH.defaultBlockState());
+        fixture.world.states.put(position(1), wetDecoration);
+        fixture.world.states.put(position(2), Blocks.FARMLAND.defaultBlockState());
+        IncrementalPlacementJobService service = new IncrementalPlacementJobService(1);
+        ConstructionJob job = assertInstanceOf(IncrementalPlacementJobService.EnqueueResult.Queued.class,
+                service.enqueueIfExpensive(PLAYER_ID, OPERATION_ID, fixture.plan,
+                        Optional.of(RoadMaterializationOwner.segment(fixture.mutation.placedSegments().get(0).id())),
+                        List.of(), fixture.mutation, fixture.world, fixture.ledger, fixture.graph, fixture.jobs)).job();
+        job = RoadBuilderConstructionJobSavedData.load(Level.OVERWORLD,
+                fixture.jobs.save(new CompoundTag())).job(job.id()).orElseThrow();
+        assertEquals(Blocks.TORCH.defaultBlockState(), job.transitions().get(0).beforeState());
+        assertEquals(wetDecoration, job.transitions().get(1).beforeState());
+        // Neighbor updates can remove these decorations between queued batches.
+        fixture.world.states.put(position(0), Blocks.AIR.defaultBlockState());
+        fixture.world.states.put(position(1), Blocks.WATER.defaultBlockState());
+        for (int index = 0; index < 3; index++) {
+            var result = service.tick(job, 1, fixture.world, fixture.ledger, fixture.graph);
+            job = result.job();
+            if (index == 2) assertEquals(IncrementalPlacementJobService.TickOutcome.COMPLETED, result.outcome());
+        }
+        assertInstanceOf(PlacementRemovalResult.Success.class,
+                new PlacementRemovalService().remove(OPERATION_ID, RemovalMode.SAFE, fixture.world, fixture.ledger));
+        assertEquals(Blocks.AIR.defaultBlockState(), fixture.world.blockState(position(0)));
+        assertEquals(Blocks.WATER.defaultBlockState(), fixture.world.blockState(position(1)));
+        assertEquals(Blocks.DIRT.defaultBlockState(), fixture.world.blockState(position(2)));
+    }
+
+    @Test
     void persistedPlacementAppliesInBatchesThenPublishesOwnershipAndGraph() {
         Fixture fixture = fixture();
         IncrementalPlacementJobService service =

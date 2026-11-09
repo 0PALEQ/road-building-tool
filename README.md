@@ -9,6 +9,14 @@ See [Planned Features](docs/PLANNED_FEATURES.md) for the product scope and
 [Development Plan](docs/DEVELOPMENT_PLAN.md) for implementation decisions and
 acceptance criteria.
 
+New roads record stable terrain for demolition: non-full collision blocks without
+block entities (including crops and surface decorations) restore as air, or as
+their contained fluid when waterlogged. Farmland and dirt paths restore as dirt.
+Full blocks and previously built road layers retain their states. Transaction
+rollback still uses the original states, and blocks with block entities remain
+protected because their contents are not stored by the terrain ledger. Existing
+roads keep the restoration snapshots saved when they were built.
+
 ## Development setup
 
 Road Builder currently targets:
