@@ -124,6 +124,9 @@ public final class IncrementalPlacementJobService {
                     block.targetState()
             );
             if (unsupported != null) {
+                RoadBuilder.LOGGER.warn(
+                        "Rejected incremental placement transition: code={}, position={}, before={}, target={}",
+                        unsupported, position.toShortString(), before, block.targetState());
                 return EnqueueResult.failure(unsupported, position);
             }
             transitions.add(new ConstructionJobBlockTransition(

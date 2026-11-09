@@ -60,10 +60,7 @@ public final class CubicBezierGeometry implements ReferenceGeometry {
     }
 
     public double parameterAtDistance(double distance) {
-        if(distance<0 || distance>length() || !Double.isFinite(distance)) throw new IllegalArgumentException("distance outside curve");
-        double low=0,high=1;
-        for(int i=0;i<45;i++) { double middle=(low+high)/2; if(samples.distanceAtParameter(middle)<distance) low=middle; else high=middle; }
-        return distance==0 ? 0 : distance==length() ? 1 : (low+high)/2;
+        return samples.parameterAtDistance(distance);
     }
 
     public CubicBezierGeometry slice(double from,double to) {

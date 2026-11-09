@@ -125,6 +125,7 @@ public final class RoadPathPlacementEndpoint {
                     packet.expectedPresetRevision()
             );
         } catch (IllegalArgumentException invalid) {
+            RoadBuilder.LOGGER.warn("Rejected road-path intent", invalid);
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
         RoadPathPlanningResult result =
@@ -158,6 +159,7 @@ public final class RoadPathPlacementEndpoint {
                         planned.presetId(), planned.preset(), trafficHandedness);
             }
         } catch (IllegalArgumentException invalid) {
+            RoadBuilder.LOGGER.warn("Rejected road-path network geometry", invalid);
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
 
@@ -167,6 +169,12 @@ public final class RoadPathPlacementEndpoint {
         mutation = graph.withTunnelPortals(mutation, world, ledger::isMaterializedRoadPosition);
         if (mutation.allUpsertedSegments().stream().anyMatch(segment ->
                 segment.referenceGeometry().length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)) {
+            RoadBuilder.LOGGER.warn("Rejected road-path mutation containing a fragment shorter than {} blocks: {}",
+                    RoadSegment.MINIMUM_BUILD_LENGTH, mutation.allUpsertedSegments().stream()
+                            .filter(segment -> segment.referenceGeometry().length() < RoadSegment.MINIMUM_BUILD_LENGTH)
+                            .limit(4).map(segment -> segment.id() + ": length=" + segment.referenceGeometry().length()
+                                    + ", start=" + segment.referenceGeometry().start()
+                                    + ", end=" + segment.referenceGeometry().end()).toList());
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
         BlockPlanResult roadMaterialization = new RoadMaterializationPlanner().plan(
@@ -602,6 +610,7 @@ public final class RoadPathPlacementEndpoint {
     private static PlacementResultCode mapPlanFailure(
             BlockPlanFailureCode code
     ) {
+        RoadBuilder.LOGGER.warn("Rejected road-path block plan: {}", code);
         return switch (code) {
             case UNKNOWN_PRESET -> PlacementResultCode.UNKNOWN_PRESET;
             case PRESET_REVISION_MISMATCH ->
@@ -638,6 +647,7 @@ public final class RoadPathPlacementEndpoint {
     private static PlacementResultCode mapCommitFailure(
             PlacementCommitFailureCode code
     ) {
+        RoadBuilder.LOGGER.warn("Rejected road-path commit: {}", code);
         return switch (code) {
             case DIMENSION_MISMATCH ->
                     PlacementResultCode.DIMENSION_MISMATCH;

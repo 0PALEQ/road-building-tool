@@ -1246,12 +1246,12 @@ public final class StraightRoadToolController {
         double radius = RoadCurveValidation.minimumRadius(width,
                 RoadBuilderClientNetworking.selectedPreset().map(RoadPresetCatalogEntry::roadClass)
                         .orElse(com.cookiecraftmods.roadbuilder.preset.RoadClass.LOCAL));
-        rawPreview = new RawRoadPreview(geometry, width);
         try {
             var graph = currentGraph(client);
             if (graph.isPresent()) displayGeometry = new com.cookiecraftmods.roadbuilder.placement.RoadOverpassPlanner()
                     .adjust(geometry, (int)Math.ceil(width), graph.get().segments().values(),radius);
         } catch (IllegalArgumentException invalid) {
+            rawPreview = new RawRoadPreview(geometry, width);
             previewProblem = StraightRoadPreviewProblem.planningFailure(
                     com.cookiecraftmods.roadbuilder.placement.BlockPlanFailureCode.INVALID_GEOMETRY);
             return;

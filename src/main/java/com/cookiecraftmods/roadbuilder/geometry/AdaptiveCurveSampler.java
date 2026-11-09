@@ -194,6 +194,18 @@ final class AdaptiveCurveSampler {
                     * fraction;
         }
 
+        double parameterAtDistance(double distance) {
+            requireDistance(distance);
+            if (distance == 0.0) return 0.0;
+            if (distance == length) return 1.0;
+            int upper = upperBound(cumulativeLengths, distance);
+            int lower = upper - 1;
+            double fraction = (distance - cumulativeLengths[lower])
+                    / (cumulativeLengths[upper] - cumulativeLengths[lower]);
+            return knots.get(lower).parameter()
+                    + (knots.get(upper).parameter() - knots.get(lower).parameter()) * fraction;
+        }
+
         PathSample sample(double distance) {
             requireDistance(distance);
             if (distance == 0.0) {

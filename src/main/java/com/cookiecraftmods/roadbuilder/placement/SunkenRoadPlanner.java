@@ -65,6 +65,10 @@ public final class SunkenRoadPlanner {
                 // Protect other roads without rejecting those explicit changes.
                 if ((existingRoad.test(position) && planned == null) || world.hasBlockEntity(position)
                         || !state.getFluidState().isEmpty()) {
+                    com.cookiecraftmods.roadbuilder.RoadBuilder.LOGGER.warn(
+                            "Rejected sunken-road excavation: position={}, state={}, protectedRoad={}, blockEntity={}, fluid={}",
+                            position.toShortString(), state, existingRoad.test(position) && planned == null,
+                            world.hasBlockEntity(position), !state.getFluidState().isEmpty());
                     return new BlockPlanResult.Failure(BlockPlanFailureCode.INVALID_GEOMETRY);
                 }
                 if (planned != null && !planned.targetState().isAir()) continue;

@@ -153,6 +153,7 @@ public final class StraightRoadPlacementEndpoint {
                 trafficHandedness
         );
         } catch (IllegalArgumentException invalid) {
+            RoadBuilder.LOGGER.warn("Rejected straight-road network geometry", invalid);
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
         ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(
@@ -161,6 +162,12 @@ public final class StraightRoadPlacementEndpoint {
         graphMutation = graph.withTunnelPortals(graphMutation, world, ledger::isMaterializedRoadPosition);
         if (graphMutation.allUpsertedSegments().stream().anyMatch(segment ->
                 segment.referenceGeometry().length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)) {
+            RoadBuilder.LOGGER.warn("Rejected straight-road mutation containing a fragment shorter than {} blocks: {}",
+                    RoadSegment.MINIMUM_BUILD_LENGTH, graphMutation.allUpsertedSegments().stream()
+                            .filter(segment -> segment.referenceGeometry().length() < RoadSegment.MINIMUM_BUILD_LENGTH)
+                            .limit(4).map(segment -> segment.id() + ": length=" + segment.referenceGeometry().length()
+                                    + ", start=" + segment.referenceGeometry().start()
+                                    + ", end=" + segment.referenceGeometry().end()).toList());
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
         BlockPlanResult clearedRoadResult = new RoadMaterializationPlanner().plan(
@@ -697,6 +704,7 @@ public final class StraightRoadPlacementEndpoint {
     }
 
     private static PlacementResultCode mapPlanFailure(BlockPlanFailureCode code) {
+        RoadBuilder.LOGGER.warn("Rejected straight-road block plan: {}", code);
         return switch (code) {
             case UNKNOWN_PRESET -> PlacementResultCode.UNKNOWN_PRESET;
             case PRESET_REVISION_MISMATCH -> PlacementResultCode.PRESET_REVISION_MISMATCH;
@@ -723,6 +731,7 @@ public final class StraightRoadPlacementEndpoint {
     }
 
     private static PlacementResultCode mapCommitFailure(PlacementCommitFailureCode code) {
+        RoadBuilder.LOGGER.warn("Rejected straight-road commit: {}", code);
         return switch (code) {
             case DIMENSION_MISMATCH -> PlacementResultCode.DIMENSION_MISMATCH;
             case OWNERSHIP_LIMIT_EXCEEDED -> PlacementResultCode.CONSTRUCTION_LIMIT_EXCEEDED;

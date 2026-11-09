@@ -226,11 +226,12 @@ public final class RoadOverpassPlanner {
             for(int i=0;i<=chords;i++) points.add(lower.sample(lower.length() * (i / (double) chords)).position());
             double runStart=-1, lift=0;
             double radius=(width+road.presetSnapshot().surfaceBlockWidth())/2.0+1;
+            ChordIndex index = new ChordIndex(points, radius);
             for(int i=0;i<=count;i++) {
                 double distance=geometry.length() * (i / (double) count);
                 var point=proposedPoints.get(i);
                 double nearest=Double.POSITIVE_INFINITY, lowerY=0;
-                for(int j=0;j<chords;j++) {
+                for(int j : index.candidates(point)) {
                     var first=points.get(j);var last=points.get(j+1);
                     if(point.x()<Math.min(first.x(),last.x())-radius || point.x()>Math.max(first.x(),last.x())+radius
                             || point.z()<Math.min(first.z(),last.z())-radius || point.z()>Math.max(first.z(),last.z())+radius) continue;

@@ -17,6 +17,27 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConstructionJobTest {
+    @Test
+    void progressReusesValidatedImmutableTransitions() {
+        ConstructionJob prepared = job(4);
+        ConstructionJob applying = prepared.start().advance(2);
+        org.junit.jupiter.api.Assertions.assertSame(prepared.transitions(), applying.transitions());
+        org.junit.jupiter.api.Assertions.assertSame(prepared.transitions(),
+                applying.requestCancellation().rollback(1).transitions());
+        assertThrows(UnsupportedOperationException.class, () -> prepared.transitions().clear());
+        assertThrows(UnsupportedOperationException.class,
+                () -> prepared.transitions().set(0, prepared.transitions().get(1)));
+    }
+
+    @Test
+    void validatedTransitionsAreIsolatedFromCallerEdits() {
+        var source = new java.util.ArrayList<>(job(4).transitions());
+        var prepared = ConstructionJob.prepared(UUID.randomUUID(), UUID.randomUUID(),
+                ConstructionJobAction.PLACE, source);
+        source.clear();
+        assertEquals(4, prepared.start().transitions().size());
+    }
+
     @BeforeAll
     static void bootstrapMinecraft() {
         MinecraftBootstrap.bootstrap();

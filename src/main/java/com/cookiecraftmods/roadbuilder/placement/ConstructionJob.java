@@ -27,22 +27,7 @@ public record ConstructionJob(
         Objects.requireNonNull(requestedBy, "requestedBy");
         Objects.requireNonNull(action, "action");
         Objects.requireNonNull(phase, "phase");
-        transitions = List.copyOf(Objects.requireNonNull(transitions, "transitions"));
-        if (transitions.isEmpty()) {
-            throw new IllegalArgumentException("a construction job needs transitions");
-        }
-        Set<BlockPos> positions = new HashSet<>(transitions.size());
-        for (ConstructionJobBlockTransition transition : transitions) {
-            ConstructionJobBlockTransition value = Objects.requireNonNull(
-                    transition,
-                    "transitions contains null"
-            );
-            if (!positions.add(value.position())) {
-                throw new IllegalArgumentException(
-                        "duplicate job transition at " + value.position().toShortString()
-                );
-            }
-        }
+        transitions = ValidatedTransitions.copyOf(transitions);
         if (cursor < 0 || cursor > transitions.size()) {
             throw new IllegalArgumentException("job cursor is outside its transition list");
         }
@@ -307,6 +292,43 @@ public record ConstructionJob(
                 Optional.empty(),
                 placementMetadata
         );
+    }
+
+    /** Immutable, validated once and shared by all progress snapshots of a job. */
+    private static final class ValidatedTransitions
+            extends java.util.AbstractList<ConstructionJobBlockTransition>
+            implements java.util.RandomAccess {
+        private final List<ConstructionJobBlockTransition> values;
+
+        private ValidatedTransitions(List<ConstructionJobBlockTransition> values) {
+            this.values = values;
+        }
+
+        static List<ConstructionJobBlockTransition> copyOf(
+                List<ConstructionJobBlockTransition> source) {
+            Objects.requireNonNull(source, "transitions");
+            if (source instanceof ValidatedTransitions) return source;
+            List<ConstructionJobBlockTransition> values = List.copyOf(source);
+            if (values.isEmpty()) {
+                throw new IllegalArgumentException("a construction job needs transitions");
+            }
+            Set<BlockPos> positions = new HashSet<>(values.size());
+            for (ConstructionJobBlockTransition value : values) {
+                if (!positions.add(value.position())) {
+                    throw new IllegalArgumentException(
+                            "duplicate job transition at " + value.position().toShortString());
+                }
+            }
+            return new ValidatedTransitions(values);
+        }
+
+        @Override public ConstructionJobBlockTransition get(int index) {
+            return values.get(index);
+        }
+
+        @Override public int size() {
+            return values.size();
+        }
     }
 
     private void requirePhase(ConstructionJobPhase expected) {

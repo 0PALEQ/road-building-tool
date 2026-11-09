@@ -129,6 +129,9 @@ public final class BlockPlanCommitter {
             BlockState beforeState = world.blockState(position);
             PlacementCommitFailureCode unsupported = unsupportedTransition(world, position, beforeState, block.targetState());
             if (unsupported != null) {
+                com.cookiecraftmods.roadbuilder.RoadBuilder.LOGGER.warn(
+                        "Rejected placement transition: code={}, position={}, before={}, target={}",
+                        unsupported, position.toShortString(), beforeState, block.targetState());
                 return PlacementCommitResult.Failure.at(unsupported, position);
             }
             beforeStates.put(position, beforeState);
