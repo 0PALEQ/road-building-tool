@@ -172,7 +172,7 @@ public final class StraightRoadPlacementEndpoint {
         }
         BlockPlanResult clearedRoadResult = new RoadMaterializationPlanner().plan(
                 dimension,
-                graphMutation.placedSegments(),
+                graphMutation,
                 world,
                 ledger,
                 limits

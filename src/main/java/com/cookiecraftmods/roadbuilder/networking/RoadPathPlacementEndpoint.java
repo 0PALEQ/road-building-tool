@@ -179,7 +179,7 @@ public final class RoadPathPlacementEndpoint {
         }
         BlockPlanResult roadMaterialization = new RoadMaterializationPlanner().plan(
                 dimension,
-                mutation.placedSegments(),
+                mutation,
                 world,
                 ledger,
                 limits

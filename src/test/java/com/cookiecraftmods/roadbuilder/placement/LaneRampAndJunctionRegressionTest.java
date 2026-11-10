@@ -98,7 +98,7 @@ class LaneRampAndJunctionRegressionTest {
         assertTrue(parts.get(0).sample(parts.get(0).length()).tangent().dot(parts.get(1).sample(0).tangent())>0.99999);
     }
 
-    @Test void slopingJunctionSurfaceFollowsItsApproachesInsteadOfAFlatNodeDeck() {
+    @Test void slopingJunctionHasLevelCoreAndQuadraticApproaches() {
         var center=new RoadNode(id(),new RoadPoint(0.5,70,0.5));
         List<RoadSegment> roads=List.of(
                 road(new StraightGeometry(center.position(),new RoadPoint(-60,58,0.5)),center.id(),id(),11,false),
@@ -107,10 +107,19 @@ class LaneRampAndJunctionRegressionTest {
                 road(new StraightGeometry(center.position(),new RoadPoint(0.5,70,60)),center.id(),id(),11,false));
         var plan=assertInstanceOf(BlockPlanResult.Success.class,new StraightRoadIntersectionMaterializer().plan(
                 Level.OVERWORLD,center,roads,GRAY,new ResourceLocation("minecraft","smooth_stone"),20000,200000)).plan();
-        var slope=plan.blocks().stream().filter(b->!b.targetState().isAir() && b.position().getX()<=-5 && Math.abs(b.position().getZ())<=1).toList();
+        var slope=plan.blocks().stream().filter(b->!b.targetState().isAir() && b.position().getX()>=-8 && b.position().getX()<=-5 && Math.abs(b.position().getZ())<=1).toList();
         assertFalse(slope.isEmpty());
-        assertTrue(slope.stream().anyMatch(b->b.position().getY()<70),"the junction must follow the falling approach");
+        assertTrue(slope.stream().allMatch(b->b.position().getY()==70),"the junction core must be level");
         var field=new JunctionSurfaceElevation(center,roads);
+        assertEquals(70,field.height(5.5,0.5),1e-8);
+        assertTrue(field.height(20.5,0.5)>70);
+        assertTrue(field.height(20.5,0.5)<74.1);
+        // The end of the rebuilt approach meets both the old height and grade.
+        var arm=roads.get(1).referenceGeometry();
+        double end=arm.length()/2;
+        var join=arm.sample(end).position();
+        assertEquals(join.y(),field.height(join.x(),join.z()),1e-8);
+        assertEquals(12/59.5,(field.height(join.x(),join.z())-field.height(join.x()-0.01,join.z()))/0.01,0.001);
         for(var b:slope) assertEquals(field.height(b.position().getX()+0.5,b.position().getZ()+0.5),b.position().getY(),0.51);
         var markings=assertInstanceOf(BlockPlanResult.Success.class,new JunctionMarkingMaterializer().plan(
                 Level.OVERWORLD,center,roads,JunctionDefinition.automatic(center.id()),20000)).plan();

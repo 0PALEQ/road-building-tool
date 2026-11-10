@@ -16,6 +16,24 @@ public final class RoadMaterializationPlanner {
     private final RoadClearancePlanner clearancePlanner;
     private final RoadTunnelPlanner tunnelPlanner;
 
+    public BlockPlanResult plan(
+            ResourceKey<Level> dimension,
+            com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation mutation,
+            PlacementBlockWorld world,
+            PlacementOwnershipLedger ledger,
+            ConstructionLimits limits
+    ) {
+        var resolver = new RoadMaterializationResolver(limits);
+        var replaced = mutation.segmentSplits().stream()
+                .map(split -> resolver.resolve(split.original(), dimension, ledger))
+                .flatMap(java.util.Optional::stream)
+                .map(PlacementOperation::id).toList();
+        if (replaced.isEmpty()) return plan(dimension, mutation.placedSegments(), world, ledger, limits);
+        var rebuilding = new MaterializationRebuildWorld(world, ledger, replaced);
+        return plan(dimension, mutation.placedSegments(), rebuilding,
+                rebuilding::isMaterializedRoadPosition, limits);
+    }
+
     public RoadMaterializationPlanner() {
         this(
                 new StraightRoadSegmentMaterializer(),

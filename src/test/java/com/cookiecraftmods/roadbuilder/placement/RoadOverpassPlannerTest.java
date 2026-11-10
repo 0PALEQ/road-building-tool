@@ -14,6 +14,26 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RoadOverpassPlannerTest {
+    @Test void slopingWideRoadCanBeContinuedAtEitherEnd() {
+        var graph = new RoadGraph(Level.OVERWORLD);
+        var preset = new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION, 1, 29,
+                new ResourceLocation("minecraft", "gray_concrete"), List.of(
+                new LaneComponent(LaneType.VEHICLE, 3, -8, LaneTravelDirection.BACKWARD),
+                new LaneComponent(LaneType.VEHICLE, 3, -4, LaneTravelDirection.BACKWARD),
+                new LaneComponent(LaneType.VEHICLE, 3, 4, LaneTravelDirection.FORWARD),
+                new LaneComponent(LaneType.VEHICLE, 3, 8, LaneTravelDirection.FORWARD)));
+        var host = new StraightGeometry(new RoadPoint(8885.5, 67, 9174.5),
+                new RoadPoint(9019.5, 76, 9194.5));
+        var roads = graph.prepareRoadNetwork(host, ID, preset, TrafficHandedness.RHT).placedSegments();
+        var delta = host.start().vectorTo(host.end());
+        for (var continuation : List.of(
+                new StraightGeometry(host.end(), host.end().add(delta)),
+                new StraightGeometry(host.start().add(delta.scale(-1)), host.start()))) {
+            var adjusted = assertDoesNotThrow(() -> new RoadOverpassPlanner().adjust(continuation, 29, roads));
+            assertSame(continuation, adjusted);
+        }
+    }
+
     @Test void underpassLowersTheWholeFootprintWithGentleApproaches() {
         var original=upper(59);
         var adjusted=new RoadOverpassPlanner().adjust(original,11,List.of(lower()));

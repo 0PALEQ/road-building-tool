@@ -221,6 +221,9 @@ public final class RoadOverpassPlanner {
         for(int i=0;i<=count;i++) proposedPoints.add(geometry.sample(geometry.length() * (i / (double) count)).position());
         for(var road:roads) {
             var lower=road.referenceGeometry();
+            var junctions = new RoadPathCrossingAnalyzer().analyze(geometry, List.of(road));
+            boolean joinsStart = joinsEndpoint(geometry, lower.start());
+            boolean joinsEnd = joinsEndpoint(geometry, lower.end());
             int chords=Math.max(1,(int)Math.ceil(lower.length()/2));
             List<RoadPoint> points=new ArrayList<>();
             for(int i=0;i<=chords;i++) points.add(lower.sample(lower.length() * (i / (double) chords)).position());
@@ -231,6 +234,7 @@ public final class RoadOverpassPlanner {
                 double distance=geometry.length() * (i / (double) count);
                 var point=proposedPoints.get(i);
                 double nearest=Double.POSITIVE_INFINITY, lowerY=0;
+                boolean joinedEndCap = false;
                 for(int j : index.candidates(point)) {
                     var first=points.get(j);var last=points.get(j+1);
                     if(point.x()<Math.min(first.x(),last.x())-radius || point.x()>Math.max(first.x(),last.x())+radius
@@ -240,7 +244,12 @@ public final class RoadOverpassPlanner {
                     if(divisor<1e-10) continue;
                     double t=Math.max(0,Math.min(1,((point.x()-first.x())*dx+(point.z()-first.z())*dz)/divisor));
                     double separation=Math.hypot(point.x()-first.x()-t*dx,point.z()-first.z()-t*dz);
-                    if(separation<nearest){nearest=separation;lowerY=first.y()+(last.y()-first.y())*t;}
+                    if(separation<nearest){
+                        nearest=separation;
+                        lowerY=first.y()+(last.y()-first.y())*t;
+                        joinedEndCap = j == 0 && t == 0 && joinsStart
+                                || j == chords - 1 && t == 1 && joinsEnd;
+                    }
                 }
                 // Keep at-grade intersections intact. The existing vertical order
                 // determines whether this road passes above or below the host.
@@ -250,7 +259,15 @@ public final class RoadOverpassPlanner {
                         ? Math.floor(lowerY+0.75)+1+STRUCTURE_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS
                         : Math.floor(lowerY+0.25)-RoadStructurePlanner.DECK_THICKNESS-STRUCTURE_FREE_HEIGHT-1;
                 double deficit=required-point.y();
-                boolean overlaps=nearest<=radius && Math.abs(separationY)>RoadPathCrossingAnalyzer.DEFAULT_MAXIMUM_VERTICAL_GAP
+                boolean junctionOverlap = junctions.stream().anyMatch(crossing -> {
+                    var a = geometry.sample(geometry.length()*crossing.proposedPathFraction()).tangent();
+                    var b = lower.sample(lower.length()*crossing.crossedPathFraction()).tangent();
+                    double sine = Math.abs(a.x()*b.z()-a.z()*b.x())
+                            / (a.horizontalLength()*b.horizontalLength());
+                    double reach = radius / Math.max(0.05, sine) + 1;
+                    return Math.abs(distance-geometry.length()*crossing.proposedPathFraction()) <= reach;
+                });
+                boolean overlaps=!junctionOverlap && !joinedEndCap && nearest<=radius && Math.abs(separationY)>RoadPathCrossingAnalyzer.DEFAULT_MAXIMUM_VERTICAL_GAP
                         && (above ? deficit>1e-9 : deficit< -1e-9);
                 if(runStart>=0 && overlaps && Math.signum(lift)!=Math.signum(deficit)) {
                     result.add(new Coverage(runStart,distance,lift));
@@ -276,6 +293,11 @@ public final class RoadOverpassPlanner {
             } else merged.add(next);
         }
         return merged;
+    }
+
+    private static boolean joinsEndpoint(ReferenceGeometry geometry, RoadPoint endpoint) {
+        return geometry.start().distanceTo(endpoint) <= 0.05
+                || geometry.end().distanceTo(endpoint) <= 0.05;
     }
 
     /** Two quadratic halves join with equal slope and level ends. */

@@ -331,10 +331,12 @@ class JunctionMarkingMaterializerTest {
         BlockPlacementPlan plan = assertInstanceOf(BlockPlanResult.Success.class,
                 new JunctionMarkingMaterializer().plan(
                         Level.OVERWORLD, NODE, arms, definition, 10_000)).plan();
+        var elevation = new JunctionSurfaceElevation(NODE, arms);
         for (int distance = start; distance <= start + 4; distance++) {
             RoadPoint center = geometry.sample(distance).position();
             BlockPos expected = BlockPos.containing(center.x(),
-                    Math.floor(center.y() + 0.5), center.z());
+                    Math.floor(elevation.height(Math.floor(center.x()) + 0.5,
+                            Math.floor(center.z()) + 0.5) + 0.5), center.z());
             assertTrue(plan.blocks().stream().anyMatch(block -> block.position().equals(expected)),
                     "Junction crossing must follow its curved arm at " + expected);
         }
