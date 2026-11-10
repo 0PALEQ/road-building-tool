@@ -177,7 +177,7 @@ public final class RoadPathPlacementEndpoint {
                                     + ", end=" + segment.referenceGeometry().end()).toList());
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
-        BlockPlanResult roadMaterialization = new RoadMaterializationPlanner().plan(
+        BlockPlanResult roadMaterialization = new RoadMaterializationPlanner().planRoads(
                 dimension,
                 mutation,
                 world,
@@ -229,6 +229,12 @@ public final class RoadPathPlacementEndpoint {
             plan = com.cookiecraftmods.roadbuilder.placement.RoundaboutIslandPlanner.addIsland(
                     plan, ring, planned.preset().surfaceBlockWidth());
         }
+        var restoredPlan = new RoadMaterializationPlanner().restoreReplacedFootprint(
+                plan, mutation, world, ledger, limits);
+        if (restoredPlan instanceof BlockPlanResult.Failure failure) {
+            return rejected(packet, mapPlanFailure(failure.code()));
+        }
+        plan = ((BlockPlanResult.Success) restoredPlan).plan();
         ConstructionValidationResult planValidation =
                 authorizer.validate(player, plan, limits);
         if (!planValidation.isAllowed()) {
@@ -249,10 +255,11 @@ public final class RoadPathPlacementEndpoint {
         Set<RoadNodeId> inheritedJunctionOwners = RoadMaterializationRepartitioner.convertedJunctionOwners(mutation)
                 .entrySet().stream().filter(entry -> ledger.operation(RoadMaterializationOwner.node(entry.getKey())).isPresent())
                 .map(Map.Entry::getValue).collect(java.util.stream.Collectors.toSet());
+        boolean rebuildingGeometry = mutation.rebuildsExistingGeometry();
         Map<RoadNodeId, BlockPlacementPlan> newlyOwnedJunctionPlans =
                 junctionPlans.entrySet().stream()
                         .filter(entry -> !inheritedJunctionOwners.contains(entry.getKey()))
-                        .filter(entry -> ledger.operation(
+                        .filter(entry -> rebuildingGeometry || ledger.operation(
                                 RoadMaterializationOwner.node(entry.getKey())
                         ).isEmpty())
                         .collect(java.util.stream.Collectors.toMap(
@@ -292,7 +299,7 @@ public final class RoadPathPlacementEndpoint {
             );
             repartitions.add(repartitioner.prepare(
                     prepared,
-                    mutation.placedSegments(),
+                    mutation.materializedSegments(),
                     dimension,
                     newlyOwnedJunctionPlans
             ));
@@ -341,7 +348,7 @@ public final class RoadPathPlacementEndpoint {
                 (PlacementCommitResult.Success) commit;
         try {
             if (repartitionsPlacement) {
-                ledger.repartitionMaterializations(repartitions);
+                ledger.publishNetworkRepartitions(repartitions);
             }
             graph.applyNetworkMutation(mutation);
         } catch (RuntimeException graphFailure) {
@@ -379,6 +386,12 @@ public final class RoadPathPlacementEndpoint {
             PlacementOwnershipLedger ledger,
             Set<BlockPos> proposedRoadPositions
     ) {
+        com.cookiecraftmods.roadbuilder.placement.PlacementBlockWorld planningWorld = world;
+        if (mutation.rebuildsExistingGeometry()) planningWorld = new com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld(
+                world,ledger,RoadMaterializationPlanner.replacedOperations(mutation,dimension,ledger,limits));
+        java.util.function.Predicate<BlockPos> existingRoad = planningWorld instanceof com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld rebuild
+                ? rebuild::isMaterializedRoadPosition : ledger::isMaterializedRoadPosition;
+
         StraightRoadIntersectionMaterializer materializer =
                 new StraightRoadIntersectionMaterializer();
         RoadClearancePlanner clearancePlanner = new RoadClearancePlanner();
@@ -395,8 +408,8 @@ public final class RoadPathPlacementEndpoint {
                         dimension,
                         node,
                         incident,
-                        world,
-                        position -> ledger.isMaterializedRoadPosition(position)
+                        planningWorld,
+                        position -> existingRoad.test(position)
                                 || proposedRoadPositions.contains(position),
                         limits
                 );
@@ -501,14 +514,14 @@ public final class RoadPathPlacementEndpoint {
                     ))
                     .toList();
             decoratedSurface = structurePlanner.prepareStructureSurface(
-                    decoratedSurface, structureSpans, world,
-                    position -> ledger.isMaterializedRoadPosition(position)
+                    decoratedSurface, structureSpans, planningWorld,
+                    position -> existingRoad.test(position)
                             || proposedRoadPositions.contains(position));
             BlockPlanResult structured = structurePlanner.addStructures(
                     decoratedSurface,
-                    world,
+                    planningWorld,
                     structureSpans,
-                    position -> ledger.isMaterializedRoadPosition(position)
+                    position -> existingRoad.test(position)
                             || proposedRoadPositions.contains(position),
                     limits.maximumAffectedBlocks()
             );
@@ -522,8 +535,8 @@ public final class RoadPathPlacementEndpoint {
             );
             BlockPlanResult cleared = clearancePlanner.addClearance(
                     decoratedSurface,
-                     world,
-                     position -> ledger.isMaterializedRoadPosition(position)
+                     planningWorld,
+                     position -> existingRoad.test(position)
                              || proposedRoadPositions.contains(position)
                              || structurePositions.contains(position),
                      limits.maximumAffectedBlocks()
@@ -561,7 +574,7 @@ public final class RoadPathPlacementEndpoint {
         Map<RoadNodeId, RoadNode> nodes = new LinkedHashMap<>();
         mutation.addedNodes().forEach(node -> nodes.put(node.id(), node));
         Map<RoadNodeId, RoadNode> existing = graph.snapshot().nodes();
-        mutation.placedSegments().forEach(segment -> {
+        mutation.allUpsertedSegments().forEach(segment -> {
             RoadNode start = existing.get(segment.startNodeId());
             RoadNode end = existing.get(segment.endNodeId());
             if (start != null) {

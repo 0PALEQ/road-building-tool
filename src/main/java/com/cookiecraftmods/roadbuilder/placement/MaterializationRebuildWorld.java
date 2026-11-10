@@ -61,8 +61,13 @@ public final class MaterializationRebuildWorld implements PlacementBlockWorld {
     }
 
     public boolean isMaterializedRoadPosition(BlockPos position) {
-        return ledger.stack(position).map(stack -> stack.layers().stream()
-                .anyMatch(layer -> !removedIds.contains(layer.operationId()))).orElse(false);
+        var stack = ledger.stack(position).orElse(null);
+        if (stack == null) return false;
+        for (int index = stack.layers().size() - 1; index >= 0; index--) {
+            var layer = stack.layers().get(index);
+            if (!removedIds.contains(layer.operationId())) return !layer.afterState().isAir();
+        }
+        return false;
     }
 
     @Override

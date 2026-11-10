@@ -72,6 +72,52 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class RoadBuilderPlacementGameTests implements FabricGameTest {
     private static final int UPDATE_FLAGS = Block.UPDATE_ALL | Block.UPDATE_SUPPRESS_DROPS;
 
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 300, batch = "slopingJunctionRebuild")
+    public void slopingIntersectionRebuildsExistingRoadGeometryAndBlocks(GameTestHelper helper) {
+        var level=helper.getLevel();
+        var origin=helper.absolutePos(new BlockPos(384,0,384));
+        var material=new ResourceLocation("minecraft","gray_concrete");
+        var preset=new com.cookiecraftmods.roadbuilder.preset.RoadPreset(
+                com.cookiecraftmods.roadbuilder.preset.RoadPreset.CURRENT_SCHEMA_VERSION,1,11,material,List.of(
+                new com.cookiecraftmods.roadbuilder.preset.LaneComponent(com.cookiecraftmods.roadbuilder.preset.LaneType.VEHICLE,
+                        3,0,com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection.FORWARD)));
+        for(int distance=-85;distance<=85;distance++) for(int lateral=-8;lateral<=8;lateral++) {
+            level.setBlock(new BlockPos(origin.getX()+distance,63,origin.getZ()+lateral),Blocks.STONE.defaultBlockState(),UPDATE_FLAGS);
+            level.setBlock(new BlockPos(origin.getX()+lateral,63,origin.getZ()+distance),Blocks.STONE.defaultBlockState(),UPDATE_FLAGS);
+        }
+        var player=testPlayer(level,true); player.setPos(origin.getX(),75,origin.getZ());
+        var graph=new RoadGraph(level.dimension());
+        var ledger=new PlacementOwnershipLedger(level.dimension());
+        var endpoint=new StraightRoadPlacementEndpoint(new StraightRoadPlanningService(id -> java.util.Optional.of(preset),
+                new StraightRoadPlanner()),ConstructionAuthorizer.creativeOnly(),ConstructionLimits.defaults(),new BlockPlanCommitter());
+        var centre=new RoadPoint(origin.getX()+0.5,72,origin.getZ()+0.5);
+        for(var points:List.of(List.of(new RoadPoint(centre.x()-80,64,centre.z()),new RoadPoint(centre.x()+80,80,centre.z())),
+                List.of(new RoadPoint(centre.x(),72,centre.z()-80),new RoadPoint(centre.x(),72,centre.z()+80)))) {
+            var a=points.get(0); var b=points.get(1);
+            var result=endpoint.handle(StraightRoadIntentC2SPacket.current(UUID.randomUUID(),level.dimension().location(),material,1,
+                    a.x(),a.y(),a.z(),b.x(),b.y(),b.z()),player,ledger,graph);
+            helper.assertTrue(result.resultCode()==PlacementResultCode.ACCEPTED,"sloping crossing must build: "+result.resultCode());
+        }
+        helper.assertTrue(RoadGraphMaterializationConsistency.validate(graph,ledger).isEmpty(),"rebuilt owners must match graph");
+        for(var road:graph.snapshot().segments().values()) {
+            var geometry=road.referenceGeometry();
+            double junctionDistance=geometry.start().distanceTo(centre)<0.01?0:geometry.length();
+            helper.assertTrue(Math.abs(geometry.sample(junctionDistance).tangent().y())<1e-7,"junction tangent must be level");
+            for(double distance=20;distance<geometry.length()-20;distance+=5) {
+                var sample=geometry.sample(distance);
+                helper.assertTrue(Math.abs(sample.tangent().y()/sample.tangent().horizontalLength())<0.15,"approach must be gentle");
+
+            }
+            var surface=requireType(helper,new com.cookiecraftmods.roadbuilder.placement.StraightRoadSegmentMaterializer()
+                    .plan(level.dimension(),road,ConstructionLimits.defaults()),BlockPlanResult.Success.class,"refitted surface must rasterize").plan();
+            for(var block:surface.blocks()) if(Math.hypot(block.position().getX()-centre.x(),block.position().getZ()-centre.z())>20)
+                helper.assertTrue(level.getBlockState(block.position()).equals(block.targetState()),
+                        "world pavement must follow refreshed geometry at "+block.position());
+
+        }
+        helper.succeed();
+    }
+
     @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 200)
     public void decorationsRestoreAsStableTerrainAfterSavedDataReload(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();

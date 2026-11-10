@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Objects;
 
 public final class MultiCurveGeometry implements ReferenceGeometry {
+    public static final int MAXIMUM_EXPLICIT_CONTROL_POINTS = 256;
     private final List<RoadPoint> anchors;
     private final List<CubicBezierGeometry> spans;
     private final double[] cumulativeLengths;

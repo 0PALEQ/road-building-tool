@@ -707,7 +707,8 @@ public final class RoadGraphPacketCodecs {
         } else if (geometry instanceof MultiCurveGeometry multi) {
             buffer.writeDouble(Double.NaN);
             buffer.writeByte(multi.hasExplicitSpans() ? 5 : 3);
-            writePoints(buffer, multi.hasExplicitSpans() ? multi.controlPoints() : multi.anchors());
+            writePoints(buffer, multi.hasExplicitSpans() ? multi.controlPoints() : multi.anchors(),
+                    multi.hasExplicitSpans() ? MultiCurveGeometry.MAXIMUM_EXPLICIT_CONTROL_POINTS : 64);
         } else if (geometry instanceof FreehandGeometry freehand) {
             buffer.writeDouble(Double.NaN);
             buffer.writeByte(freehand.anchors().size() == 2 ? 4 : 3);
@@ -736,7 +737,7 @@ public final class RoadGraphPacketCodecs {
             );
         }
         int type = buffer.readUnsignedByte();
-        List<RoadPoint> points = readPoints(buffer);
+        List<RoadPoint> points = readPoints(buffer, type==5 ? MultiCurveGeometry.MAXIMUM_EXPLICIT_CONTROL_POINTS : 64);
         return switch (type) {
             case 1 -> {
                 requirePointCount(points, 3, "quadratic geometry");
@@ -769,17 +770,21 @@ public final class RoadGraphPacketCodecs {
             FriendlyByteBuf buffer,
             List<RoadPoint> points
     ) {
-        if (points.size() < 2 || points.size() > 64) {
+        writePoints(buffer,points,64);
+    }
+
+    private static void writePoints(FriendlyByteBuf buffer,List<RoadPoint> points,int maximum) {
+        if (points.size() < 2 || points.size() > maximum) {
             throw new IllegalArgumentException(
-                    "reference geometry must contain between 2 and 64 points"
+                    "reference geometry must contain between 2 and " + maximum + " points"
             );
         }
         buffer.writeVarInt(points.size());
         points.forEach(point -> writePoint(buffer, point));
     }
 
-    private static List<RoadPoint> readPoints(FriendlyByteBuf buffer) {
-        int count = readCount(buffer, 64, "reference geometry points");
+    private static List<RoadPoint> readPoints(FriendlyByteBuf buffer,int maximum) {
+        int count = readCount(buffer, maximum, "reference geometry points");
         if (count < 2) {
             throw new IllegalArgumentException(
                     "reference geometry needs at least two points"

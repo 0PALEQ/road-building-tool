@@ -57,6 +57,50 @@ class MaterializationRebuildWorldTest {
         assertEquals(Blocks.GOLD_BLOCK.defaultBlockState(), edited.blockState(pos));
     }
 
+    @Test
+    void excavationHistoryDoesNotProtectTerrainAsARoad() {
+        var pos = new BlockPos(9099, 86, 9229);
+        var operation = PlacementOperationId.create();
+        var grass = Blocks.GRASS_BLOCK.defaultBlockState();
+        var ledger = PlacementOwnershipLedger.restore(Level.OVERWORLD, Map.of(pos,
+                PositionChangeStack.of(new BlockChangeLayer(operation, grass,
+                        Blocks.AIR.defaultBlockState()))), () -> {});
+        var terrain = new PlacementBlockWorld() {
+            public ResourceKey<Level> dimension() { return Level.OVERWORLD; }
+            public int maximumBuildHeight() { return 100; }
+            public BlockState blockState(BlockPos p) {
+                return p.equals(pos) ? grass : Blocks.AIR.defaultBlockState();
+            }
+            public boolean hasBlockEntity(BlockPos p) { return false; }
+            public boolean setBlockState(BlockPos p, BlockState state) { throw new AssertionError(); }
+        };
+        var view = new MaterializationRebuildWorld(terrain, ledger, List.of());
+        var floor = pos.below(2);
+        var surface = BlockPlacementPlan.create(Level.OVERWORLD, List.of(
+                new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        assertFalse(ledger.isMaterializedRoadPosition(pos));
+        assertFalse(view.isMaterializedRoadPosition(pos));
+        assertInstanceOf(BlockPlanResult.Success.class, new SunkenRoadPlanner().excavate(
+                surface, java.util.Set.of(floor), view, view::isMaterializedRoadPosition, 1000));
+        assertTrue(ledger.stack(pos).isPresent(), "Undo history must remain intact");
+    }
+
+    @Test
+    void protectsTheTopRemainingSolidLayerOnly() {
+        var pos = new BlockPos(1, 64, 2);
+        var road = PlacementOperationId.create();
+        var clearing = PlacementOperationId.create();
+        var surface = Blocks.GRAY_CONCRETE.defaultBlockState();
+        var ledger = PlacementOwnershipLedger.restore(Level.OVERWORLD, Map.of(pos,
+                PositionChangeStack.of(new BlockChangeLayer(road, Blocks.STONE.defaultBlockState(), surface))
+                        .push(new BlockChangeLayer(clearing, surface, Blocks.AIR.defaultBlockState()))), () -> {});
+        assertFalse(ledger.isMaterializedRoadPosition(pos));
+        assertFalse(new MaterializationRebuildWorld(world(Blocks.AIR.defaultBlockState()), ledger,
+                List.of(road)).isMaterializedRoadPosition(pos));
+        assertTrue(new MaterializationRebuildWorld(world(Blocks.AIR.defaultBlockState()), ledger,
+                List.of(clearing)).isMaterializedRoadPosition(pos));
+    }
+
     private static PlacementBlockWorld world(BlockState state) {
         return new PlacementBlockWorld() {
             public ResourceKey<Level> dimension() { return Level.OVERWORLD; }

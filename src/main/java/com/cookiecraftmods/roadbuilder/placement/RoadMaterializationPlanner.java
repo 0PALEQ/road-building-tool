@@ -23,15 +23,49 @@ public final class RoadMaterializationPlanner {
             PlacementOwnershipLedger ledger,
             ConstructionLimits limits
     ) {
-        var resolver = new RoadMaterializationResolver(limits);
-        var replaced = mutation.segmentSplits().stream()
-                .map(split -> resolver.resolve(split.original(), dimension, ledger))
-                .flatMap(java.util.Optional::stream)
-                .map(PlacementOperation::id).toList();
+        var result = planRoads(dimension, mutation, world, ledger, limits);
+        if (!(result instanceof BlockPlanResult.Success success)) return result;
+        return restoreReplacedFootprint(success.plan(), mutation, world, ledger, limits);
+    }
+
+    public BlockPlanResult planRoads( //the terrain musn't protect junction excavation cos server rejects the placement
+            ResourceKey<Level> dimension,
+            com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation mutation,
+            PlacementBlockWorld world, PlacementOwnershipLedger ledger, ConstructionLimits limits) {
+        var replaced = replacedOperations(mutation,dimension,ledger,limits);
         if (replaced.isEmpty()) return plan(dimension, mutation.placedSegments(), world, ledger, limits);
         var rebuilding = new MaterializationRebuildWorld(world, ledger, replaced);
-        return plan(dimension, mutation.placedSegments(), rebuilding,
+        return plan(dimension, mutation.materializedSegments(), rebuilding,
                 rebuilding::isMaterializedRoadPosition, limits);
+    }
+
+    public BlockPlanResult restoreReplacedFootprint(BlockPlacementPlan plan,
+            com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation mutation,
+            PlacementBlockWorld world, PlacementOwnershipLedger ledger, ConstructionLimits limits) {
+        if (!mutation.rebuildsExistingGeometry()) return new BlockPlanResult.Success(plan);
+        var dimension = plan.dimension();
+        var replaced = replacedOperations(mutation, dimension, ledger, limits);
+        var rebuilding = new MaterializationRebuildWorld(world, ledger, replaced);
+        java.util.Map<BlockPos,PlannedBlock> targets = new java.util.LinkedHashMap<>();
+        for (var id : replaced) ledger.operation(id).ifPresent(operation -> operation.positions().forEach(position ->
+                targets.put(position,new PlannedBlock(position,rebuilding.blockState(position)))));
+        plan.blocks().forEach(block -> targets.put(block.position(),block));
+        if (targets.size()>limits.maximumAffectedBlocks()) return new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED);
+        return new BlockPlanResult.Success(BlockPlacementPlan.create(dimension,targets.values()));
+    }
+
+    public static List<PlacementOperationId> replacedOperations(
+            com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation mutation,
+            ResourceKey<Level> dimension, PlacementOwnershipLedger ledger, ConstructionLimits limits) {
+        var resolver = new RoadMaterializationResolver(limits);
+        java.util.Set<PlacementOperationId> ids = new java.util.LinkedHashSet<>();
+        mutation.segmentSplits().forEach(split -> resolver.resolve(split.original(),dimension,ledger)
+                .map(PlacementOperation::id).ifPresent(ids::add));
+        if (mutation.rebuildsExistingGeometry()) mutation.allUpsertedSegments().forEach(segment -> {
+            ledger.operation(RoadMaterializationOwner.node(segment.startNodeId())).map(PlacementOperation::id).ifPresent(ids::add);
+            ledger.operation(RoadMaterializationOwner.node(segment.endNodeId())).map(PlacementOperation::id).ifPresent(ids::add);
+        });
+        return List.copyOf(ids);
     }
 
     public RoadMaterializationPlanner() {

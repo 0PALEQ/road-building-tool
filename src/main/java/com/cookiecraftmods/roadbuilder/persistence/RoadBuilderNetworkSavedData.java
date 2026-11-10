@@ -906,7 +906,8 @@ public final class RoadBuilderNetworkSavedData extends SavedData {
         requireExactKeys(tag, CURVE_GEOMETRY_KEYS, path);
         List<RoadPoint> points = readGeometryPoints(
                 tag.get(CONTROL_POINTS_KEY),
-                path + ".control_points"
+                path + ".control_points",
+                type.equals("joined_cubics") ? MultiCurveGeometry.MAXIMUM_EXPLICIT_CONTROL_POINTS : 64
         );
         return switch (type) {
             case "quadratic" -> {
@@ -938,14 +939,14 @@ public final class RoadBuilderNetworkSavedData extends SavedData {
 
     private static List<RoadPoint> readGeometryPoints(
             Tag rawTag,
-            String path
+            String path, int maximum
     ) {
         if (!(rawTag instanceof ListTag tags)
                 || tags.getElementType() != Tag.TAG_COMPOUND) {
             throw malformed(path + " must be a compound list");
         }
-        if (tags.size() < 2 || tags.size() > 64) {
-            throw malformed(path + " must contain between 2 and 64 points");
+        if (tags.size() < 2 || tags.size() > maximum) {
+            throw malformed(path + " must contain between 2 and " + maximum + " points");
         }
         List<RoadPoint> points = new ArrayList<>(tags.size());
         for (int index = 0; index < tags.size(); index++) {

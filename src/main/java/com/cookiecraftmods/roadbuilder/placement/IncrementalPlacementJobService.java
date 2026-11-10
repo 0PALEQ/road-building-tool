@@ -338,7 +338,7 @@ public final class IncrementalPlacementJobService {
                     beforeStates,
                     ledgerRevision
             );
-            ledger.repartitionMaterializations(metadata.repartitions());
+            ledger.publishNetworkRepartitions(metadata.repartitions());
         }
         graph.applyDelta(metadata.graphDelta());
     }

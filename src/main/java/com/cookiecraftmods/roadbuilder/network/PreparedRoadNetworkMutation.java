@@ -44,6 +44,22 @@ public record PreparedRoadNetworkMutation(
                 removedConnectorIds, addedConnectors);
     }
 
+    public boolean rebuildsExistingGeometry() {
+        return segmentSplits.stream().anyMatch(split -> {
+            var children=split.replacements();
+            if (!children.get(0).referenceGeometry().start().equals(split.original().referenceGeometry().start())
+                    || !children.get(children.size()-1).referenceGeometry().end().equals(split.original().referenceGeometry().end()))
+                return false; // Roundabout conversion trims/replaces topology, not elevation.
+            for(int i=1;i<children.size();i++) if(!children.get(i-1).endNodeId().equals(children.get(i).startNodeId())) return false;
+            return Math.abs(split.original().referenceGeometry().length()
+                    - children.stream().mapToDouble(s -> s.referenceGeometry().length()).sum())>1e-6;
+        });
+    }
+
+    public List<RoadSegment> materializedSegments() {
+        return rebuildsExistingGeometry() ? allUpsertedSegments() : placedSegments;
+    }
+
     public List<RoadSegment> replacementSegments() {
         return segmentSplits.stream()
                 .flatMap(split -> split.replacements().stream())

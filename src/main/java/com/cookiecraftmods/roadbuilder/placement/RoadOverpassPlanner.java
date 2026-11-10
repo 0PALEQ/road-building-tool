@@ -259,7 +259,8 @@ public final class RoadOverpassPlanner {
                         ? Math.floor(lowerY+0.75)+1+STRUCTURE_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS
                         : Math.floor(lowerY+0.25)-RoadStructurePlanner.DECK_THICKNESS-STRUCTURE_FREE_HEIGHT-1;
                 double deficit=required-point.y();
-                boolean junctionOverlap = junctions.stream().anyMatch(crossing -> {
+                boolean junctionOverlap = endpointJunctionOverlap(geometry, lower, distance, radius)
+                        || junctions.stream().anyMatch(crossing -> {
                     var a = geometry.sample(geometry.length()*crossing.proposedPathFraction()).tangent();
                     var b = lower.sample(lower.length()*crossing.crossedPathFraction()).tangent();
                     double sine = Math.abs(a.x()*b.z()-a.z()*b.x())
@@ -298,6 +299,23 @@ public final class RoadOverpassPlanner {
     private static boolean joinsEndpoint(ReferenceGeometry geometry, RoadPoint endpoint) {
         return geometry.start().distanceTo(endpoint) <= 0.05
                 || geometry.end().distanceTo(endpoint) <= 0.05;
+    }
+
+    private static boolean endpointJunctionOverlap(ReferenceGeometry proposed, ReferenceGeometry host,
+                                                    double distance, double radius) {
+        // the crossing analyzer handles interior splits. Shared graph nodes also form junctions: protect their entire footprint, not only the end cap.
+        for (double proposedDistance : new double[]{0, proposed.length()}) {
+            var a = proposed.sample(proposedDistance);
+            for (double hostDistance : new double[]{0, host.length()}) {
+                var b = host.sample(hostDistance);
+                if (a.position().distanceTo(b.position()) > 0.05) continue;
+                double sine = Math.abs(a.tangent().x()*b.tangent().z()
+                        - a.tangent().z()*b.tangent().x())
+                        / (a.tangent().horizontalLength()*b.tangent().horizontalLength());
+                if (Math.abs(distance-proposedDistance) <= radius/Math.max(0.05, sine)+1) return true;
+            }
+        }
+        return false;
     }
 
     /** Two quadratic halves join with equal slope and level ends. */

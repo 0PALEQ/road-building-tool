@@ -211,7 +211,22 @@ public final class PlacementOwnershipLedger {
     }
 
     public boolean isMaterializedRoadPosition(BlockPos position) {
-        return stack(position).isPresent();
+        return stack(position).map(value -> !value.top().afterState().isAir()).orElse(false);
+    }
+
+    public void publishNetworkRepartitions(List<OperationMaterializationRepartition> repartitions) {
+        Set<RoadMaterializationOwner> owners = new HashSet<>();
+        boolean rebuild = false;
+        for (var repartition : repartitions) for (var partition : repartition.partitions())
+            if (!owners.add(partition.owner())) rebuild = true;
+        if (!rebuild) { repartitionMaterializations(repartitions); return; }
+        var overlay = repartitions.get(repartitions.size()-1);
+        Set<BlockPos> covered = BlockPositionSets.copyOf(operation(overlay.sourceOperationId()).orElseThrow().positions());
+        List<PlacementOperationId> replaced = repartitions.subList(0,repartitions.size()-1).stream()
+                .map(OperationMaterializationRepartition::sourceOperationId).toList();
+        for (var id : replaced) if (!covered.containsAll(operation(id).orElseThrow().positions()))
+            throw new IllegalArgumentException("network rebuild must cover each replaced footprint");
+        publishMaterializationRebuild(replaced,overlay.sourceOperationId(),overlay.partitions());
     }
 
         public void repartitionMaterializations(

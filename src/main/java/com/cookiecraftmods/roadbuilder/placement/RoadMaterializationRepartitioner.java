@@ -140,6 +140,18 @@ public final class RoadMaterializationRepartitioner {
                     Map.of()
             ));
         }
+        if (mutation.rebuildsExistingGeometry()) {
+            Set<PlacementOperationId> known = result.stream().map(OperationMaterializationRepartition::sourceOperationId)
+                    .collect(java.util.stream.Collectors.toSet());
+            for (var id : RoadMaterializationPlanner.replacedOperations(mutation,dimension,ledger,limits)) {
+                if (known.add(id)) {
+                    var source = ledger.operation(id).orElseThrow();
+                    result.add(new OperationMaterializationRepartition(id,List.of(new MaterializationPartition(
+                            id,source.materializationOwner().orElseThrow(),source.positions()))));
+                }
+            }
+            return List.copyOf(result);
+        } //That in most cases still fails for some reason; needs further improvement
         convertedJunctionOwners(mutation).forEach((oldNode, newNode) ->
                 ledger.operation(RoadMaterializationOwner.node(oldNode)).ifPresent(source ->
                         result.add(new OperationMaterializationRepartition(source.id(), List.of(

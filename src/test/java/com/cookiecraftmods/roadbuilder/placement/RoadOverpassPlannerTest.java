@@ -14,6 +14,24 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RoadOverpassPlannerTest {
+    @Test void slopingRoadAllowsSideBranchAtItsSharedEndpoint() {
+        var graph = new RoadGraph(Level.OVERWORLD);
+        var preset = new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION, 1, 29,
+                new ResourceLocation("minecraft", "gray_concrete"), List.of(
+                new LaneComponent(LaneType.VEHICLE, 3, 0, LaneTravelDirection.FORWARD)));
+        var node = new RoadPoint(9118.5, 85, 9220.5);
+        var host = new CubicBezierGeometry(new RoadPoint(9019.5, 76, 9194.5),
+                new RoadPoint(9053.345092264211, 79, 9199.551506308091),
+                new RoadPoint(9086.540314843469, 82, 9208.269443551128), node);
+        var roads = graph.prepareRoadNetwork(host, ID, preset, TrafficHandedness.RHT).placedSegments();
+        for (double angle : new double[]{60, 90, 120}) {
+            double radians = Math.toRadians(angle);
+            var branch = new StraightGeometry(node,
+                    node.add(new RoadVector(84 * Math.cos(radians), 3, 84 * Math.sin(radians))));
+            assertDoesNotThrow(() -> new RoadOverpassPlanner().adjust(branch, 29, roads));
+        }
+    }
+
     @Test void slopingWideRoadCanBeContinuedAtEitherEnd() {
         var graph = new RoadGraph(Level.OVERWORLD);
         var preset = new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION, 1, 29,

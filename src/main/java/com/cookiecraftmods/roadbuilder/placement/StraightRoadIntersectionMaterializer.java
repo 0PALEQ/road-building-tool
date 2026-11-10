@@ -290,17 +290,6 @@ public final class StraightRoadIntersectionMaterializer {
             blocks = removeSidewalkIslands(blocks, sidewalkAtLevel, pavementAtLevel);
         }
         try {
-            var approachBlocks=elevations.approaches(dimension,node,maximumAffectedBlocks,maximumPlanningCandidates);
-            if (!approachBlocks.isEmpty()) {
-                Set<Long> junctionColumns=new HashSet<>();
-                for (var block:blocks) junctionColumns.add(((long)block.position().getX()<<32)
-                        ^(block.position().getZ()&0xffffffffL));
-                List<PlannedBlock> joined=new ArrayList<>();
-                for (var block:approachBlocks) if (!junctionColumns.contains(((long)block.position().getX()<<32)
-                        ^(block.position().getZ()&0xffffffffL))) joined.add(block);
-                joined.addAll(blocks);
-                blocks=joined;
-            }
             if(auxiliary) blocks=LaneMergeMarkingPlanner.restore(dimension,node,incidentSegments,blocks,
                     maximumAffectedBlocks,maximumPlanningCandidates);
             blocks=JunctionSurfaceElevation.clearSupersededSurfaces(dimension,blocks,node,incidentSegments,

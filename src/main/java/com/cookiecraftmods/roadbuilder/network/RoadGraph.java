@@ -1217,7 +1217,7 @@ public final class RoadGraph {
                     preset,
                     handedness
             );
-            return new PreparedRoadNetworkMutation(
+            return withJunctionElevations(new PreparedRoadNetworkMutation(
                     addition.expectedRevision(),
                     addition.road(),
                     addition.createsRoad(),
@@ -1226,7 +1226,7 @@ public final class RoadGraph {
                     List.of(addition.segment()),
                     List.of(),
                     addition.connectors()
-            );
+            ));
         }
 
         Set<UUID> generated = new HashSet<>();
@@ -1443,7 +1443,70 @@ public final class RoadGraph {
                 addedConnectors
         );
         validateNetworkMutation(mutation);
-        return mutation;
+        return withJunctionElevations(mutation);
+    }
+
+    private PreparedRoadNetworkMutation withJunctionElevations(PreparedRoadNetworkMutation mutation) {
+        Map<RoadSegmentId,RoadSegment> resulting = new HashMap<>(segments);
+        mutation.segmentSplits().forEach(split -> resulting.remove(split.original().id()));
+        mutation.allUpsertedSegments().forEach(segment -> resulting.put(segment.id(),segment));
+        Map<RoadNodeId,RoadNode> allNodes = new HashMap<>(nodes);
+        mutation.addedNodes().forEach(node -> allNodes.put(node.id(),node));
+        Set<RoadNodeId> touched = new HashSet<>();
+        mutation.allUpsertedSegments().forEach(segment -> {
+            touched.add(segment.startNodeId()); touched.add(segment.endNodeId());
+        });
+        Map<RoadNodeId,Double> holds = new HashMap<>();
+        for (var id : touched) {
+            var incident = resulting.values().stream().filter(s -> s.startNodeId().equals(id)||s.endNodeId().equals(id)).toList();
+            var node = allNodes.get(id);
+            if (incident.size()>=3 && node!=null && !RoadForkJunction.isFork(node,incident)
+                    && AuxiliaryLanePorts.attachments(id,incident).isEmpty()) {
+                holds.put(id,incident.stream().mapToDouble(s -> s.presetSnapshot().surfaceBlockWidth()).max().orElse(1)/2+2);
+            }
+        }
+        if (holds.isEmpty()) return mutation;
+        Map<RoadSegmentId,RoadSegment> adjusted = new HashMap<>();
+        Set<RoadNodeId> affected = new HashSet<>();
+        for (var segment : resulting.values()) {
+            double start = holds.getOrDefault(segment.startNodeId(),0.0);
+            double end = holds.getOrDefault(segment.endNodeId(),0.0);
+            if (start==0 && end==0) continue;
+            var geometry = com.cookiecraftmods.roadbuilder.geometry.JunctionElevationProfile.fit(segment.referenceGeometry(),start,end);
+            if (geometry==segment.referenceGeometry() || geometry.equals(segment.referenceGeometry())) continue;
+            var replacement = recreateSegment(segment,segment.id(),segment.startNodeId(),segment.endNodeId(),geometry,
+                    segment.lanes().stream().map(RoadLane::id).toList());
+            adjusted.put(segment.id(),replacement);
+            affected.add(segment.startNodeId()); affected.add(segment.endNodeId());
+        }
+        if (adjusted.isEmpty()) return mutation;
+        resulting.putAll(adjusted);
+        List<PreparedSegmentSplit> splits = new ArrayList<>();
+        Set<RoadSegmentId> accounted = new HashSet<>();
+        for (var split : mutation.segmentSplits()) {
+            splits.add(new PreparedSegmentSplit(split.original(),split.replacements().stream()
+                    .map(s -> adjusted.getOrDefault(s.id(),s)).toList()));
+            split.replacements().forEach(s -> accounted.add(s.id()));
+        }
+        var placed = mutation.placedSegments().stream().map(s -> adjusted.getOrDefault(s.id(),s)).toList();
+        placed.forEach(s -> accounted.add(s.id()));
+        for (var entry : adjusted.entrySet()) if (!accounted.contains(entry.getKey()))
+            splits.add(new PreparedSegmentSplit(segments.get(entry.getKey()),List.of(entry.getValue())));
+        Set<RoadLaneId> changedLanes = new HashSet<>();
+        adjusted.values().forEach(s -> s.lanes().forEach(l -> changedLanes.add(l.id())));
+        List<LaneConnectorId> removed = new ArrayList<>(mutation.removedConnectorIds());
+        connectors.values().stream().filter(c -> changedLanes.contains(c.fromLaneId())||changedLanes.contains(c.toLaneId()))
+                .map(LaneConnector::id).filter(id -> !removed.contains(id)).forEach(removed::add);
+        List<LaneConnector> added = new ArrayList<>(mutation.addedConnectors().stream()
+                .filter(c -> !changedLanes.contains(c.fromLaneId())&&!changedLanes.contains(c.toLaneId())).toList());
+        Set<UUID> generated = new HashSet<>();
+        for (var connector : rebuildStraightConnectors(resulting.values(),affected,removed,generated))
+            if (added.stream().noneMatch(c -> c.fromLaneId().equals(connector.fromLaneId())&&c.toLaneId().equals(connector.toLaneId())))
+                added.add(connector);
+        var result = new PreparedRoadNetworkMutation(mutation.expectedRevision(),mutation.road(),mutation.createsRoad(),
+                mutation.addedNodes(),splits,placed,removed,added);
+        validateNetworkMutation(result);
+        return result;
     }
 
     private record IndexedCrossing(

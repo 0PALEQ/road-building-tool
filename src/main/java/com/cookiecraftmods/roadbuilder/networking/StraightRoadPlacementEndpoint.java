@@ -4,7 +4,6 @@ import com.cookiecraftmods.roadbuilder.placement.BlockPositionSets;
 import com.cookiecraftmods.roadbuilder.RoadBuilder;
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation;
-import com.cookiecraftmods.roadbuilder.network.PreparedSegmentSplit;
 import com.cookiecraftmods.roadbuilder.network.RoadGraph;
 import com.cookiecraftmods.roadbuilder.network.RoadNode;
 import com.cookiecraftmods.roadbuilder.network.RoadNodeId;
@@ -23,7 +22,6 @@ import com.cookiecraftmods.roadbuilder.placement.PlacementCommitResult;
 import com.cookiecraftmods.roadbuilder.placement.PlacementOwnershipLedger;
 import com.cookiecraftmods.roadbuilder.placement.PlacementOperation;
 import com.cookiecraftmods.roadbuilder.placement.PlacementOperationId;
-import com.cookiecraftmods.roadbuilder.placement.MaterializationPartition;
 import com.cookiecraftmods.roadbuilder.placement.IncrementalPlacementJobService;
 import com.cookiecraftmods.roadbuilder.placement.OperationMaterializationRepartition;
 import com.cookiecraftmods.roadbuilder.placement.JunctionMarkingMaterializer;
@@ -34,7 +32,7 @@ import com.cookiecraftmods.roadbuilder.placement.ResolvedStraightRoadPlan;
 import com.cookiecraftmods.roadbuilder.placement.RoadClearancePlanner;
 import com.cookiecraftmods.roadbuilder.placement.RoadMaterializationOwner;
 import com.cookiecraftmods.roadbuilder.placement.RoadMaterializationPlanner;
-import com.cookiecraftmods.roadbuilder.placement.RoadMaterializationResolver;
+import com.cookiecraftmods.roadbuilder.placement.RoadMaterializationRepartitioner;
 import com.cookiecraftmods.roadbuilder.placement.RoadStructurePlanner;
 import com.cookiecraftmods.roadbuilder.placement.ServerLevelPlacementBlockWorld;
 import com.cookiecraftmods.roadbuilder.placement.StraightRoadIntent;
@@ -43,7 +41,6 @@ import com.cookiecraftmods.roadbuilder.placement.SmoothRoadTransitionMaterialize
 import com.cookiecraftmods.roadbuilder.placement.RoadTransitionPlanPreparer;
 import com.cookiecraftmods.roadbuilder.placement.StraightRoadPlanningService;
 import com.cookiecraftmods.roadbuilder.placement.StraightRoadPlanningResult;
-import com.cookiecraftmods.roadbuilder.placement.StraightRoadSegmentMaterializer;
 import net.minecraft.core.BlockPos;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import com.cookiecraftmods.roadbuilder.preset.TrafficHandedness;
@@ -56,7 +53,6 @@ import com.cookiecraftmods.roadbuilder.persistence.RoadBuilderConstructionJobSav
 
 import java.util.Objects;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -170,7 +166,7 @@ public final class StraightRoadPlacementEndpoint {
                                     + ", end=" + segment.referenceGeometry().end()).toList());
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
-        BlockPlanResult clearedRoadResult = new RoadMaterializationPlanner().plan(
+        BlockPlanResult clearedRoadResult = new RoadMaterializationPlanner().planRoads(
                 dimension,
                 graphMutation,
                 world,
@@ -220,6 +216,12 @@ public final class StraightRoadPlacementEndpoint {
                 player.serverLevel().dimension(),
                 materializationPlans
         );
+        var restoredPlan = new RoadMaterializationPlanner().restoreReplacedFootprint(
+                materializationPlan, graphMutation, world, ledger, limits);
+        if (restoredPlan instanceof BlockPlanResult.Failure failure) {
+            return rejected(packet, mapPlanFailure(failure.code()));
+        }
+        materializationPlan = ((BlockPlanResult.Success) restoredPlan).plan();
         ConstructionValidationResult planValidation = authorizer.validate(
                 player,
                 materializationPlan,
@@ -236,9 +238,10 @@ public final class StraightRoadPlacementEndpoint {
             return rejected(packet, mapValidationFailure(planValidation.code()));
         }
 
+        boolean rebuildingGeometry = graphMutation.rebuildsExistingGeometry();
         Map<RoadNodeId, BlockPlacementPlan> newlyOwnedIntersectionPlans =
                 intersectionPlans.entrySet().stream()
-                        .filter(entry -> ledger.operation(
+                        .filter(entry -> rebuildingGeometry || ledger.operation(
                                 RoadMaterializationOwner.node(entry.getKey())
                         ).isEmpty())
                         .collect(java.util.stream.Collectors.toMap(
@@ -276,7 +279,7 @@ public final class StraightRoadPlacementEndpoint {
             );
             allRepartitions.add(prepareRepartition(
                     preparedOperation,
-                    graphMutation.placedSegments(),
+                    graphMutation.materializedSegments(),
                     player.serverLevel().dimension(),
                     newlyOwnedIntersectionPlans
             ));
@@ -326,7 +329,7 @@ public final class StraightRoadPlacementEndpoint {
         PlacementCommitResult.Success success = (PlacementCommitResult.Success) commitResult;
         try {
             if (repartitionsPlacement) {
-                ledger.repartitionMaterializations(allRepartitions);
+                ledger.publishNetworkRepartitions(allRepartitions);
             }
             graph.applyNetworkMutation(graphMutation);
         } catch (RuntimeException graphFailure) {
@@ -361,69 +364,7 @@ public final class StraightRoadPlacementEndpoint {
             ResourceKey<Level> dimension,
             Map<RoadNodeId, BlockPlacementPlan> nodePlans
     ) {
-        Objects.requireNonNull(nodePlans, "nodePlans");
-        List<Set<BlockPos>> childPositions = new ArrayList<>(children.size());
-        StraightRoadSegmentMaterializer materializer = new StraightRoadSegmentMaterializer();
-        for (RoadSegment child : children) {
-            BlockPlanResult result = materializer.plan(dimension, child, limits);
-            if (!(result instanceof BlockPlanResult.Success success)) {
-                throw new IllegalStateException("could not rematerialize split child");
-            }
-            childPositions.add(new HashSet<>(success.plan().positions()));
-        }
-
-        List<List<BlockPos>> partitions = new ArrayList<>(children.size());
-        for (int index = 0; index < children.size(); index++) {
-            partitions.add(new ArrayList<>());
-        }
-        for (BlockPos position : source.positions()) {
-            if (nodePlans.values().stream().anyMatch(plan ->
-                    plan.positions().contains(position))) {
-                continue;
-            }
-            boolean assigned = false;
-            for (int index = 0; index < children.size(); index++) {
-                if (childPositions.get(index).contains(position)) {
-                    partitions.get(index).add(position);
-                    assigned = true;
-                }
-            }
-            if (!assigned) {
-                partitions.get(nearestChild(position, children)).add(position);
-            }
-        }
-        for (int index = 0; index < partitions.size(); index++) {
-            if (!partitions.get(index).isEmpty()) {
-                continue;
-            }
-            RoadSegment child = children.get(index);
-            BlockPos closest = source.positions().stream()
-                    .min(java.util.Comparator.comparingDouble(position ->
-                            distanceSquared(position, child)))
-                    .orElseThrow();
-            partitions.get(index).add(closest);
-        }
-
-        List<MaterializationPartition> materializations =
-                new ArrayList<>(children.size());
-        for (int index = 0; index < children.size(); index++) {
-            materializations.add(new MaterializationPartition(
-                    index == 0 ? source.id() : PlacementOperationId.create(),
-                    RoadMaterializationOwner.segment(children.get(index).id()),
-                    partitions.get(index)
-            ));
-        }
-        for (Map.Entry<RoadNodeId, BlockPlacementPlan> entry : nodePlans.entrySet()) {
-            materializations.add(new MaterializationPartition(
-                    PlacementOperationId.create(),
-                    RoadMaterializationOwner.node(entry.getKey()),
-                    entry.getValue().positions()
-            ));
-        }
-        return new OperationMaterializationRepartition(
-                source.id(),
-                materializations
-        );
+        return new RoadMaterializationRepartitioner(limits).prepare(source,children,dimension,nodePlans);
     }
 
     private List<OperationMaterializationRepartition> prepareExistingRepartitions(
@@ -431,22 +372,7 @@ public final class StraightRoadPlacementEndpoint {
             ResourceKey<Level> dimension,
             PlacementOwnershipLedger ledger
     ) {
-        List<OperationMaterializationRepartition> repartitions =
-                new ArrayList<>(mutation.segmentSplits().size());
-        for (PreparedSegmentSplit split : mutation.segmentSplits()) {
-            PlacementOperation source = new RoadMaterializationResolver(limits)
-                    .resolve(split.original(), dimension, ledger)
-                    .orElseThrow(() -> new IllegalStateException(
-                            "crossed segment has no materialization history"
-                    ));
-            repartitions.add(prepareRepartition(
-                    source,
-                    split.replacements(),
-                    dimension,
-                    Map.of()
-            ));
-        }
-        return List.copyOf(repartitions);
+        return new RoadMaterializationRepartitioner(limits).prepareExisting(mutation,dimension,ledger);
     }
 
     private Map<RoadNodeId, BlockPlacementPlan> prepareIntersectionPlans(
@@ -458,6 +384,12 @@ public final class StraightRoadPlacementEndpoint {
             PlacementOwnershipLedger ledger,
             Set<BlockPos> proposedRoadPositions
     ) {
+        com.cookiecraftmods.roadbuilder.placement.PlacementBlockWorld planningWorld = world;
+        if (mutation.rebuildsExistingGeometry()) planningWorld = new com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld(
+                world,ledger,RoadMaterializationPlanner.replacedOperations(mutation,dimension,ledger,limits));
+        java.util.function.Predicate<BlockPos> existingRoad = planningWorld instanceof com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld rebuild
+                ? rebuild::isMaterializedRoadPosition : ledger::isMaterializedRoadPosition;
+
         StraightRoadIntersectionMaterializer materializer =
                 new StraightRoadIntersectionMaterializer();
         RoadClearancePlanner clearancePlanner = new RoadClearancePlanner();
@@ -474,8 +406,8 @@ public final class StraightRoadPlacementEndpoint {
                         dimension,
                         node,
                         incident,
-                        world,
-                        position -> ledger.isMaterializedRoadPosition(position)
+                        planningWorld,
+                        position -> existingRoad.test(position)
                                 || proposedRoadPositions.contains(position),
                         limits
                 );
@@ -578,14 +510,14 @@ public final class StraightRoadPlacementEndpoint {
                     ))
                     .toList();
             decoratedSurface = structurePlanner.prepareStructureSurface(
-                    decoratedSurface, structureSpans, world,
-                    position -> ledger.isMaterializedRoadPosition(position)
+                    decoratedSurface, structureSpans, planningWorld,
+                    position -> existingRoad.test(position)
                             || proposedRoadPositions.contains(position));
             BlockPlanResult structuredResult = structurePlanner.addStructures(
                     decoratedSurface,
-                    world,
+                    planningWorld,
                     structureSpans,
-                    position -> ledger.isMaterializedRoadPosition(position)
+                    position -> existingRoad.test(position)
                             || proposedRoadPositions.contains(position),
                     limits.maximumAffectedBlocks()
             );
@@ -600,8 +532,8 @@ public final class StraightRoadPlacementEndpoint {
             );
             BlockPlanResult clearedResult = clearancePlanner.addClearance(
                     decoratedSurface,
-                     world,
-                     position -> ledger.isMaterializedRoadPosition(position)
+                     planningWorld,
+                     position -> existingRoad.test(position)
                              || proposedRoadPositions.contains(position)
                              || structurePositions.contains(position),
                      limits.maximumAffectedBlocks()
@@ -639,7 +571,7 @@ public final class StraightRoadPlacementEndpoint {
         Map<RoadNodeId, RoadNode> nodes = new LinkedHashMap<>();
         mutation.addedNodes().forEach(node -> nodes.put(node.id(), node));
         Map<RoadNodeId, RoadNode> existing = graph.snapshot().nodes();
-        mutation.placedSegments().forEach(segment -> {
+        mutation.allUpsertedSegments().forEach(segment -> {
             RoadNode start = existing.get(segment.startNodeId());
             RoadNode end = existing.get(segment.endNodeId());
             if (start != null) {
