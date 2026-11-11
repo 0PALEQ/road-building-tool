@@ -10,6 +10,41 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SlopingCrossingTest {
+    @Test void joinsUpToFourBlocksButKeepsSixBlockCrossingsSeparated() {
+        var material = new ResourceLocation("minecraft", "gray_concrete");
+        var preset = new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION, 1, 11, material,
+                List.of(new LaneComponent(LaneType.VEHICLE, 3, 0, LaneTravelDirection.FORWARD)));
+        for (double base : new double[]{32, 80}) {
+            for (double gap : new double[]{-6, -4.001, -4, -3, -2, 0, 2, 3, 4, 4.001, 6}) {
+                var graph = new RoadGraph(Level.OVERWORLD);
+                graph.applyNetworkMutation(graph.prepareRoadNetwork(new StraightGeometry(
+                        new RoadPoint(-100, base - 5, 0), new RoadPoint(100, base + 5, 0)),
+                        material, preset, TrafficHandedness.RHT));
+                var proposed = new StraightGeometry(new RoadPoint(0, base + gap, -100),
+                        new RoadPoint(0, base + gap, 100));
+                var adjusted = assertDoesNotThrow(() -> new RoadOverpassPlanner().adjust(proposed, 11,
+                        graph.snapshot().segments().values()), "gap=" + gap);
+                var mutation = graph.prepareRoadNetwork(adjusted, material, preset, TrafficHandedness.RHT);
+                if (Math.abs(gap) <= 4) {
+                    assertSame(proposed, adjusted);
+                    assertEquals(1, mutation.segmentSplits().size(), "gap=" + gap);
+                    assertEquals(2, mutation.placedSegments().size());
+                    var node = mutation.addedNodes().stream().filter(n -> Math.abs(n.position().x()) < 1e-8
+                            && Math.abs(n.position().z()) < 1e-8).findFirst().orElseThrow();
+                    assertEquals(base, node.position().y(), 1e-8);
+                    assertInstanceOf(BlockPlanResult.Success.class, new StraightRoadIntersectionMaterializer().plan(
+                            Level.OVERWORLD, node, mutation.allUpsertedSegments(), material,
+                            new ResourceLocation("minecraft", "smooth_stone"), 131072, 1000000));
+                } else {
+                    assertTrue(mutation.segmentSplits().isEmpty(), "gap=" + gap);
+                    assertEquals(1, mutation.placedSegments().size());
+                    double y = adjusted.sample(adjusted.length() / 2).position().y();
+                    assertTrue(gap > 0 ? y >= base + 6 : y <= base - 6);
+                }
+            }
+        }
+    }
+
     @org.junit.jupiter.api.BeforeAll static void bootstrap() {
         com.cookiecraftmods.roadbuilder.test.MinecraftBootstrap.bootstrap();
     }

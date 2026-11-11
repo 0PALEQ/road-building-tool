@@ -43,15 +43,15 @@ class StraightRoadCrossingAnalyzerTest {
     }
 
     @Test
-    void excludesCrossingsBeyondOneBlockAndNonProperContacts() {
+    void excludesCrossingsBeyondFourBlocksAndNonProperContacts() {
         StraightGeometry proposed = new StraightGeometry(
                 new RoadPoint(5.0, 64.0, -5.0),
                 new RoadPoint(5.0, 64.0, 5.0)
         );
         RoadSegment bridge = segment(
                 1,
-                new RoadPoint(0.0, 66.0, 0.0),
-                new RoadPoint(10.0, 66.0, 0.0)
+                new RoadPoint(0.0, 68.001, 0.0),
+                new RoadPoint(10.0, 68.001, 0.0)
         );
         RoadSegment endpoint = segment(
                 2,

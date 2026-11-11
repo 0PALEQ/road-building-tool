@@ -77,7 +77,7 @@ class RoadOverpassPlannerTest {
     }
 
     @Test void underpassNearEndpointCannotCreateAnAbruptRamp() {
-        var shortExit=new StraightGeometry(new RoadPoint(0.5,60,0.5),new RoadPoint(70.5,60,0.5));
+        var shortExit=new StraightGeometry(new RoadPoint(0.5,59,0.5),new RoadPoint(70.5,59,0.5));
         assertThrows(IllegalArgumentException.class,
                 ()->new RoadOverpassPlanner().adjust(shortExit,11,List.of(lower())));
     }

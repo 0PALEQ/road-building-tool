@@ -20,6 +20,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RoadPathCrossingAnalyzerTest {
     @Test
+    void fourBlockToleranceIsInclusiveForCrossingsAndTJunctionsInBothDirections() {
+        var trunk = segment(1, new StraightGeometry(
+                new RoadPoint(-20, 64, 0), new RoadPoint(20, 64, 0)));
+        for (double gap : new double[]{-6, -4.001, -4, -2, 0, 2, 4, 4.001, 6}) {
+            for (double startZ : new double[]{-20, 0}) {
+                var proposed = new StraightGeometry(new RoadPoint(0, 64 + gap, startZ),
+                        new RoadPoint(0, 64 + gap, 20));
+                var crossings = new RoadPathCrossingAnalyzer().analyze(proposed, List.of(trunk));
+                assertEquals(Math.abs(gap) <= 4 ? 1 : 0, crossings.size(), "gap=" + gap);
+                if (!crossings.isEmpty()) assertEquals(64, crossings.get(0).nodePosition().y());
+                if (startZ < 0) assertEquals(crossings.size(),
+                        new StraightRoadCrossingAnalyzer().analyze(proposed, List.of(trunk)).size());
+            }
+        }
+    }
+
+    @Test
     void detectsLineCurveAndCurveCurveCrossings() {
         RoadSegment curve = segment(
                 1,
@@ -81,8 +98,8 @@ class RoadPathCrossingAnalyzerTest {
 
         assertTrue(new RoadPathCrossingAnalyzer().analyze(
                 new StraightGeometry(
-                        new RoadPoint(5.0, 66.0, 0.0),
-                        new RoadPoint(5.0, 66.0, 8.0)
+                        new RoadPoint(5.0, 68.001, 0.0),
+                        new RoadPoint(5.0, 68.001, 8.0)
                 ),
                 List.of(trunk)
         ).isEmpty());
