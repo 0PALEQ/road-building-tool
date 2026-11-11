@@ -13,10 +13,10 @@ import java.util.Objects;
 import java.util.Set;
 
 public final class RoadPathCrossingAnalyzer {
-    public static final double DEFAULT_MAXIMUM_VERTICAL_GAP = 1.0;
+    public static final double DEFAULT_MAXIMUM_VERTICAL_GAP = 4.0;
     public static final double DEFAULT_MAXIMUM_CHORD_LENGTH = 0.25;
     public static final int MAXIMUM_CHORDS_PER_PATH = 8_192;
-    public static final double ENDPOINT_ON_PATH_TOLERANCE = 0.05;
+    //public static final double ENDPOINT_ON_PATH_TOLERANCE = 0.05;
     public static final double ENDPOINT_SURFACE_MARGIN = 0.5;
 
     private static final double ENDPOINT_TOLERANCE = 1.0e-6;
