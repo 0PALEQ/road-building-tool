@@ -20,13 +20,16 @@ final class JunctionSurfaceElevation {
         for (var road : incident) {
             var geometry = road.referenceGeometry();
             boolean atStart = road.startNodeId().equals(node.id());
-            double sampledReach = Math.min(48, geometry.length());
-            int count = Math.max(1, (int)Math.ceil(sampledReach/0.5));
-            List<Chord> chords = new ArrayList<>();
-            for (int i=0; i<count; i++) {
-                double from=sampledReach*i/count, to=sampledReach*(i+1)/count;
-                chords.add(new Chord(geometry.sample(atStart?from:geometry.length()-from).position(),
-                        geometry.sample(atStart?to:geometry.length()-to).position()));
+            double length = geometry.length();
+            double sampledReach = Math.min(48, length);
+            int count = Math.max(1, (int) Math.ceil(sampledReach / 0.5));
+            List<Chord> chords = new ArrayList<>(count);
+            RoadPoint previous = atStart ? geometry.start() : geometry.end();
+            for (int i = 1; i <= count; i++) {
+                double offset = sampledReach * (i / (double) count);
+                RoadPoint next = geometry.sample(atStart ? offset : length - offset).position();
+                chords.add(new Chord(previous, next));
+                previous = next;
             }
             arms.add(new Arm(chords));
         }

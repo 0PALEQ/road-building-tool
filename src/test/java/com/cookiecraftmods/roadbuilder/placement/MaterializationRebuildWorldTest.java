@@ -86,6 +86,38 @@ class MaterializationRebuildWorldTest {
     }
 
     @Test
+    void excavationUsesVisibleSoilWhenRoadHistoryStillRecordsPavement() {
+        var soilPosition = new BlockPos(8802, 58, 9215);
+        var floor = soilPosition.below();
+        var dirt = Blocks.DIRT.defaultBlockState();
+        var pavement = Blocks.GRAY_CONCRETE.defaultBlockState();
+        var operation = PlacementOperationId.create();
+        var ledger = PlacementOwnershipLedger.restore(Level.OVERWORLD, Map.of(soilPosition,
+                PositionChangeStack.of(new BlockChangeLayer(operation, dirt, pavement))), () -> {});
+        var terrain = new PlacementBlockWorld() {
+            public ResourceKey<Level> dimension() { return Level.OVERWORLD; }
+            public int highestBlockY(int x, int z) {
+                return x == soilPosition.getX() && z == soilPosition.getZ() ? soilPosition.getY() : -65;
+            }
+            public BlockState blockState(BlockPos pos) {
+                return pos.equals(soilPosition) ? dirt : Blocks.AIR.defaultBlockState();
+            }
+            public boolean hasBlockEntity(BlockPos pos) { return false; }
+            public boolean setBlockState(BlockPos pos, BlockState state) { throw new AssertionError(); }
+        };
+        var rebuilding = new MaterializationRebuildWorld(terrain, ledger, List.of());
+        var surface = BlockPlacementPlan.create(Level.OVERWORLD, List.of(new PlannedBlock(floor, pavement)));
+
+        assertTrue(ledger.isMaterializedRoadPosition(soilPosition));
+        assertFalse(ledger.isMaterializedRoadPosition(soilPosition, terrain));
+        assertFalse(rebuilding.isMaterializedRoadPosition(soilPosition));
+        var result = assertInstanceOf(BlockPlanResult.Success.class, new SunkenRoadPlanner().excavate(
+                surface, java.util.Set.of(floor), rebuilding, rebuilding::isMaterializedRoadPosition, 1000));
+        assertTrue(result.plan().blocks().contains(new PlannedBlock(soilPosition, Blocks.AIR.defaultBlockState())));
+        assertEquals(pavement, ledger.expectedVisibleState(soilPosition).orElseThrow());
+    }
+
+    @Test
     void protectsTheTopRemainingSolidLayerOnly() {
         var pos = new BlockPos(1, 64, 2);
         var road = PlacementOperationId.create();

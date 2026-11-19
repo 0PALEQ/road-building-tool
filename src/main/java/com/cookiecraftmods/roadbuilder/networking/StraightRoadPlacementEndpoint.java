@@ -155,7 +155,8 @@ public final class StraightRoadPlacementEndpoint {
         ServerLevelPlacementBlockWorld world = new ServerLevelPlacementBlockWorld(
                 player.serverLevel()
         );
-        graphMutation = graph.withTunnelPortals(graphMutation, world, ledger::isMaterializedRoadPosition);
+        graphMutation = graph.withTunnelPortals(graphMutation, world,
+                position -> ledger.isMaterializedRoadPosition(position, world));
         if (graphMutation.allUpsertedSegments().stream().anyMatch(segment ->
                 segment.referenceGeometry().length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)) {
             RoadBuilder.LOGGER.warn("Rejected straight-road mutation containing a fragment shorter than {} blocks: {}",
@@ -166,17 +167,18 @@ public final class StraightRoadPlacementEndpoint {
                                     + ", end=" + segment.referenceGeometry().end()).toList());
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
-        BlockPlanResult clearedRoadResult = new RoadMaterializationPlanner().planRoads(
+        RoadMaterializationPlanner materializer = new RoadMaterializationPlanner();
+        var plannedRoads = materializer.planRoadsForJunctions(
                 dimension,
                 graphMutation,
                 world,
                 ledger,
                 limits
         );
-        if (!(clearedRoadResult instanceof BlockPlanResult.Success clearedRoad)) {
+        if (!(plannedRoads.result() instanceof BlockPlanResult.Success clearedRoad)) {
             return rejected(
                     packet,
-                    mapPlanFailure(((BlockPlanResult.Failure) clearedRoadResult).code())
+                    mapPlanFailure(((BlockPlanResult.Failure) plannedRoads.result()).code())
             );
         }
 
@@ -189,7 +191,7 @@ public final class StraightRoadPlacementEndpoint {
                     world,
                     graph,
                     ledger,
-                    BlockPositionSets.nonAirTargets(clearedRoad.plan())
+                    plannedRoads.protectedPositions()
             );
         } catch (IntersectionPlanningFailure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));
@@ -216,7 +218,8 @@ public final class StraightRoadPlacementEndpoint {
                 player.serverLevel().dimension(),
                 materializationPlans
         );
-        var restoredPlan = new RoadMaterializationPlanner().restoreReplacedFootprint(
+        BlockPlacementPlan retainedPlan = materializationPlan;
+        var restoredPlan = materializer.restoreReplacedFootprint(
                 materializationPlan, graphMutation, world, ledger, limits);
         if (restoredPlan instanceof BlockPlanResult.Failure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));
@@ -275,7 +278,7 @@ public final class StraightRoadPlacementEndpoint {
             PlacementOperation preparedOperation = PlacementOperation.create(
                     operationId,
                     player.serverLevel().dimension(),
-                    materializationPlan.positions()
+                    retainedPlan.positions()
             );
             allRepartitions.add(prepareRepartition(
                     preparedOperation,
@@ -388,7 +391,8 @@ public final class StraightRoadPlacementEndpoint {
         if (mutation.rebuildsExistingGeometry()) planningWorld = new com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld(
                 world,ledger,RoadMaterializationPlanner.replacedOperations(mutation,dimension,ledger,limits));
         java.util.function.Predicate<BlockPos> existingRoad = planningWorld instanceof com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld rebuild
-                ? rebuild::isMaterializedRoadPosition : ledger::isMaterializedRoadPosition;
+                ? rebuild::isMaterializedRoadPosition
+                : position -> ledger.isMaterializedRoadPosition(position, world);
 
         StraightRoadIntersectionMaterializer materializer =
                 new StraightRoadIntersectionMaterializer();

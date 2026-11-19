@@ -213,6 +213,11 @@ public final class RoadOverpassPlanner {
     }
 
     private record Coverage(double start,double end,double lift) {}
+    private record JunctionClearance(double distance, double reach) {
+        boolean contains(double sampleDistance) {
+            return Math.abs(sampleDistance - distance) <= reach;
+        }
+    }
 
     private static List<Coverage> coverage(ReferenceGeometry geometry,int width,Collection<RoadSegment> roads) {
         List<Coverage> result=new ArrayList<>();
@@ -221,7 +226,6 @@ public final class RoadOverpassPlanner {
         for(int i=0;i<=count;i++) proposedPoints.add(geometry.sample(geometry.length() * (i / (double) count)).position());
         for(var road:roads) {
             var lower=road.referenceGeometry();
-            var junctions = new RoadPathCrossingAnalyzer().analyze(geometry, List.of(road));
             boolean joinsStart = joinsEndpoint(geometry, lower.start());
             boolean joinsEnd = joinsEndpoint(geometry, lower.end());
             int chords=Math.max(1,(int)Math.ceil(lower.length()/2));
@@ -230,6 +234,7 @@ public final class RoadOverpassPlanner {
             double runStart=-1, lift=0;
             double radius=(width+road.presetSnapshot().surfaceBlockWidth())/2.0+1;
             ChordIndex index = new ChordIndex(points, radius);
+            List<JunctionClearance> junctions = null;
             for(int i=0;i<=count;i++) {
                 double distance=geometry.length() * (i / (double) count);
                 var point=proposedPoints.get(i);
@@ -259,17 +264,12 @@ public final class RoadOverpassPlanner {
                         ? Math.floor(lowerY+0.75)+1+STRUCTURE_FREE_HEIGHT+RoadStructurePlanner.DECK_THICKNESS
                         : Math.floor(lowerY+0.25)-RoadStructurePlanner.DECK_THICKNESS-STRUCTURE_FREE_HEIGHT-1;
                 double deficit=required-point.y();
-                boolean junctionOverlap = endpointJunctionOverlap(geometry, lower, distance, radius)
-                        || junctions.stream().anyMatch(crossing -> {
-                    var a = geometry.sample(geometry.length()*crossing.proposedPathFraction()).tangent();
-                    var b = lower.sample(lower.length()*crossing.crossedPathFraction()).tangent();
-                    double sine = Math.abs(a.x()*b.z()-a.z()*b.x())
-                            / (a.horizontalLength()*b.horizontalLength());
-                    double reach = radius / Math.max(0.05, sine) + 1;
-                    return Math.abs(distance-geometry.length()*crossing.proposedPathFraction()) <= reach;
-                });
-                boolean overlaps=!junctionOverlap && !joinedEndCap && nearest<=radius && Math.abs(separationY)>RoadPathCrossingAnalyzer.DEFAULT_MAXIMUM_VERTICAL_GAP
+                boolean overlaps=!joinedEndCap && nearest<=radius && Math.abs(separationY)>RoadPathCrossingAnalyzer.DEFAULT_MAXIMUM_VERTICAL_GAP
                         && (above ? deficit>1e-9 : deficit< -1e-9);
+                if (overlaps) {
+                    if (junctions == null) junctions = junctionClearances(geometry, road, radius);
+                    overlaps = junctions.stream().noneMatch(junction -> junction.contains(distance));
+                }
                 if(runStart>=0 && overlaps && Math.signum(lift)!=Math.signum(deficit)) {
                     result.add(new Coverage(runStart,distance,lift));
                     runStart=-1;lift=0;
@@ -301,21 +301,31 @@ public final class RoadOverpassPlanner {
                 || geometry.end().distanceTo(endpoint) <= 0.05;
     }
 
-    private static boolean endpointJunctionOverlap(ReferenceGeometry proposed, ReferenceGeometry host,
-                                                    double distance, double radius) {
-        // the crossing analyzer handles interior splits. Shared graph nodes also form junctions: protect their entire footprint, not only the end cap.
+    private static List<JunctionClearance> junctionClearances(
+            ReferenceGeometry proposed, RoadSegment road, double radius) {
+        List<JunctionClearance> result = new ArrayList<>();
+        ReferenceGeometry host = road.referenceGeometry(); // shared graph nodes and interior splits both have a junction footprint
         for (double proposedDistance : new double[]{0, proposed.length()}) {
             var a = proposed.sample(proposedDistance);
             for (double hostDistance : new double[]{0, host.length()}) {
                 var b = host.sample(hostDistance);
                 if (a.position().distanceTo(b.position()) > 0.05) continue;
-                double sine = Math.abs(a.tangent().x()*b.tangent().z()
-                        - a.tangent().z()*b.tangent().x())
-                        / (a.tangent().horizontalLength()*b.tangent().horizontalLength());
-                if (Math.abs(distance-proposedDistance) <= radius/Math.max(0.05, sine)+1) return true;
+                result.add(new JunctionClearance(proposedDistance, junctionReach(a.tangent(), b.tangent(), radius)));
             }
         }
-        return false;
+        for (var crossing : new RoadPathCrossingAnalyzer().analyze(proposed, List.of(road))) {
+            double distance = proposed.length() * crossing.proposedPathFraction();
+            var a = proposed.sample(distance).tangent();
+            var b = host.sample(host.length() * crossing.crossedPathFraction()).tangent();
+            result.add(new JunctionClearance(distance, junctionReach(a, b, radius)));
+        }
+        return result;
+    }
+
+    private static double junctionReach(RoadVector a, RoadVector b, double radius) {
+        double sine = Math.abs(a.x() * b.z() - a.z() * b.x())
+                / (a.horizontalLength() * b.horizontalLength());
+        return radius / Math.max(0.05, sine) + 1;
     }
 
     /** Two quadratic halves join with equal slope and level ends. */

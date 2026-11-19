@@ -28,10 +28,13 @@ public final class SunkenRoadPlanner {
         Set<BlockPos> result = new HashSet<>();
         for (var span : spans) {
             if (!span.sunkenRoad()) continue;
-            for (double distance = 0; distance <= span.geometry().length() + 0.5; distance += 0.5) {
+            var geometry = span.geometry();
+            double length = geometry.length();
+            for (double distance = 0; distance <= length + 0.5; distance += 0.5) {
+                var sample = geometry.sample(Math.min(distance, length));
                 for (double lateral = -span.roadWidth() / 2.0 - 0.5;
                         lateral <= span.roadWidth() / 2.0 + 0.5; lateral += 0.5) {
-                    var point = span.geometry().sample(Math.min(distance, span.geometry().length()), lateral).position();
+                    var point = sample.offsetLaterally(lateral).position();
                     var column = new Column((int) Math.floor(point.x()), (int) Math.floor(point.z()));
                     for (BlockPos position : columns.getOrDefault(column, List.of())) {
                         if (Math.abs(position.getY() - point.y()) <= 2) result.add(position);
@@ -55,7 +58,7 @@ public final class SunkenRoadPlanner {
             BlockPos floor = pending.removeFirst();
             if (floor.getY() != floors.get(Column.of(floor))) continue;
             boolean cutTerrain = false;
-            for (int y = world.maximumBuildHeight() - 1; y > floor.getY(); y--) {
+            for (int y = world.highestBlockY(floor.getX(), floor.getZ()); y > floor.getY(); y--) {
                 BlockPos position = new BlockPos(floor.getX(), y, floor.getZ());
                 var state = world.blockState(position);
                 if (state.isAir()) continue;

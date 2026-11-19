@@ -16,6 +16,7 @@ public final class MaterializationRebuildWorld implements PlacementBlockWorld {
     private final PlacementOwnershipLedger ledger;
     private final Set<PlacementOperationId> removedIds;
     private final Map<BlockPos, BlockState> restoredStates = new HashMap<>();
+    private Map<Long, Integer> restorationHeights;
 
     public MaterializationRebuildWorld(PlacementBlockWorld world,
             PlacementOwnershipLedger ledger, Collection<PlacementOperationId> removedIds) {
@@ -38,6 +39,27 @@ public final class MaterializationRebuildWorld implements PlacementBlockWorld {
     public int maximumBuildHeight() { return world.maximumBuildHeight(); }
 
     @Override
+    public int highestBlockY(int x, int z) {
+        if (restorationHeights == null) {
+            restorationHeights = new HashMap<>();
+            for (var id : removedIds) {
+                ledger.operation(id).ifPresent(operation -> {
+                    for (BlockPos position : operation.positions()) {
+                        long column = columnKey(position.getX(), position.getZ());
+                        restorationHeights.merge(column, position.getY(), Math::max);
+                    }
+                });
+            }
+        }
+        return Math.max(world.highestBlockY(x, z),
+                restorationHeights.getOrDefault(columnKey(x, z), minimumBuildHeight() - 1));
+    }
+
+    private static long columnKey(int x, int z) {
+        return ((long) x << 32) | (z & 0xffffffffL);
+    }
+
+    @Override
     public BlockState blockState(BlockPos position) {
         return restoredStates.computeIfAbsent(position.immutable(), this::restoreState);
     }
@@ -45,7 +67,7 @@ public final class MaterializationRebuildWorld implements PlacementBlockWorld {
     private BlockState restoreState(BlockPos position) {
         BlockState current = world.blockState(position);
         PositionChangeStack stack = ledger.stack(position).orElse(null);
-        if (stack == null || !BlockTransitionStateMatcher.matchesPlannedTarget(
+        if (stack == null || !BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                 current, stack.top().afterState())) {
             return current;
         }
@@ -65,7 +87,10 @@ public final class MaterializationRebuildWorld implements PlacementBlockWorld {
         if (stack == null) return false;
         for (int index = stack.layers().size() - 1; index >= 0; index--) {
             var layer = stack.layers().get(index);
-            if (!removedIds.contains(layer.operationId())) return !layer.afterState().isAir();
+            if (!removedIds.contains(layer.operationId())) {
+                return !layer.afterState().isAir()
+                        && PlacementOwnershipLedger.protectsVisibleRoad(layer.afterState(), blockState(position));
+            }
         }
         return false;
     }

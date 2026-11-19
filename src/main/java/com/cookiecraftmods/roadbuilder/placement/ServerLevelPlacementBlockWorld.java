@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.Objects;
 
@@ -40,6 +41,14 @@ public final class ServerLevelPlacementBlockWorld implements PlacementBlockWorld
 
     @Override
     public int maximumBuildHeight() { return level.getMaxBuildHeight(); }
+
+    @Override
+    public int highestBlockY(int x, int z) {
+        // Level#getHeight skips unloaded chunks. Read the same chunk that
+        // blockState() would query so excavation also works beyond the loaded ring.
+        var chunk = level.getChunk(x >> 4, z >> 4);
+        return chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x & 15, z & 15);
+    }
 
     @Override
     public BlockState blockState(BlockPos position) {

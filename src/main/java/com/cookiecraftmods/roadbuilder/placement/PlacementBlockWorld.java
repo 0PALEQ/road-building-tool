@@ -14,6 +14,10 @@ public interface PlacementBlockWorld {
 
     default int maximumBuildHeight() { return 320; }
 
+    default int highestBlockY(int x, int z) {
+        return maximumBuildHeight() - 1;
+    }
+
     BlockState blockState(BlockPos position);
 
     boolean hasBlockEntity(BlockPos position);

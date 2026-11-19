@@ -141,6 +141,32 @@ class SunkenRoadPlannerTest {
                         BlockPositionSets.copyOf(proposedRoad.positions())::contains, 20000));
     }
 
+    @Test void junctionCanRecutProposedRoadFillWhileProtectingTheSurface() {
+        var material = new ResourceLocation("minecraft", "grass_block");
+        var preset = new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION, 1, 3, material,
+                List.of(new LaneComponent(LaneType.VEHICLE, 3, 0, LaneTravelDirection.FORWARD)));
+        var graph = RoadBuilderNetworkSavedData.create(Level.OVERWORLD).graph();
+        var mutation = graph.prepareRoadNetwork(new StraightGeometry(
+                new RoadPoint(0.5, 66, 0.5), new RoadPoint(20.5, 66, 0.5)),
+                material, preset, TrafficHandedness.RHT);
+        var terrain = new Terrain(64);
+        var roads = new RoadMaterializationPlanner().planRoadsForJunctions(
+                Level.OVERWORLD, mutation, terrain, new PlacementOwnershipLedger(Level.OVERWORLD),
+                ConstructionLimits.defaults());
+        var plan = assertInstanceOf(BlockPlanResult.Success.class, roads.result()).plan();
+        var fill = new BlockPos(10, 65, 0);
+        assertTrue(plan.blocks().contains(new PlannedBlock(fill, Blocks.DIRT.defaultBlockState())));
+        assertFalse(roads.protectedPositions().contains(fill));
+        assertTrue(roads.protectedPositions().contains(fill.above()), "Grass pavement still needs protection");
+
+        var junction = BlockPlacementPlan.create(Level.OVERWORLD, List.of(
+                new PlannedBlock(fill.below(), Blocks.GRAY_CONCRETE.defaultBlockState())));
+        var oldDirt = new Terrain(65);
+        var excavation = assertInstanceOf(BlockPlanResult.Success.class, new SunkenRoadPlanner().excavate(
+                junction, Set.of(fill.below()), oldDirt, roads.protectedPositions()::contains, 1000)).plan();
+        assertTrue(excavation.blocks().contains(new PlannedBlock(fill, Blocks.AIR.defaultBlockState())));
+    }
+
     @Test void plannedRoadSurfaceIsKeptAndExplicitClearingStillProtectsFluidsAndBlockEntities() {
         var floor = new BlockPos(0, 63, 0);
         var above = floor.above();

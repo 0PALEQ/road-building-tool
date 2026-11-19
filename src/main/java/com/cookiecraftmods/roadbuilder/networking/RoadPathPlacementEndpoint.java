@@ -166,7 +166,8 @@ public final class RoadPathPlacementEndpoint {
         ServerLevelPlacementBlockWorld world =
                 new ServerLevelPlacementBlockWorld(player.serverLevel());
         mutation = mutation.withSunkenRoad(packet.sunkenRoad());
-        mutation = graph.withTunnelPortals(mutation, world, ledger::isMaterializedRoadPosition);
+        mutation = graph.withTunnelPortals(mutation, world,
+                position -> ledger.isMaterializedRoadPosition(position, world));
         if (mutation.allUpsertedSegments().stream().anyMatch(segment ->
                 segment.referenceGeometry().length() < com.cookiecraftmods.roadbuilder.network.RoadSegment.MINIMUM_BUILD_LENGTH)) {
             RoadBuilder.LOGGER.warn("Rejected road-path mutation containing a fragment shorter than {} blocks: {}",
@@ -177,18 +178,19 @@ public final class RoadPathPlacementEndpoint {
                                     + ", end=" + segment.referenceGeometry().end()).toList());
             return rejected(packet, PlacementResultCode.INVALID_GEOMETRY);
         }
-        BlockPlanResult roadMaterialization = new RoadMaterializationPlanner().planRoads(
+        RoadMaterializationPlanner materializer = new RoadMaterializationPlanner();
+        var plannedRoads = materializer.planRoadsForJunctions(
                 dimension,
                 mutation,
                 world,
                 ledger,
                 limits
         );
-        if (roadMaterialization instanceof BlockPlanResult.Failure failure) {
+        if (plannedRoads.result() instanceof BlockPlanResult.Failure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));
         }
         BlockPlacementPlan roadPlan =
-                ((BlockPlanResult.Success) roadMaterialization).plan();
+                ((BlockPlanResult.Success) plannedRoads.result()).plan();
         Map<RoadNodeId, BlockPlacementPlan> junctionPlans;
         try {
             junctionPlans = prepareJunctionPlans(
@@ -198,7 +200,7 @@ public final class RoadPathPlacementEndpoint {
                     world,
                     graph,
                     ledger,
-                    BlockPositionSets.nonAirTargets(roadPlan)
+                    plannedRoads.protectedPositions()
             );
         } catch (JunctionPlanningFailure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));
@@ -229,7 +231,8 @@ public final class RoadPathPlacementEndpoint {
             plan = com.cookiecraftmods.roadbuilder.placement.RoundaboutIslandPlanner.addIsland(
                     plan, ring, planned.preset().surfaceBlockWidth());
         }
-        var restoredPlan = new RoadMaterializationPlanner().restoreReplacedFootprint(
+        BlockPlacementPlan retainedPlan = plan;
+        var restoredPlan = materializer.restoreReplacedFootprint(
                 plan, mutation, world, ledger, limits);
         if (restoredPlan instanceof BlockPlanResult.Failure failure) {
             return rejected(packet, mapPlanFailure(failure.code()));
@@ -295,7 +298,7 @@ public final class RoadPathPlacementEndpoint {
             PlacementOperation prepared = PlacementOperation.create(
                     operationId,
                     dimension,
-                    plan.positions()
+                    retainedPlan.positions()
             );
             repartitions.add(repartitioner.prepare(
                     prepared,
@@ -390,7 +393,8 @@ public final class RoadPathPlacementEndpoint {
         if (mutation.rebuildsExistingGeometry()) planningWorld = new com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld(
                 world,ledger,RoadMaterializationPlanner.replacedOperations(mutation,dimension,ledger,limits));
         java.util.function.Predicate<BlockPos> existingRoad = planningWorld instanceof com.cookiecraftmods.roadbuilder.placement.MaterializationRebuildWorld rebuild
-                ? rebuild::isMaterializedRoadPosition : ledger::isMaterializedRoadPosition;
+                ? rebuild::isMaterializedRoadPosition
+                : position -> ledger.isMaterializedRoadPosition(position, world);
 
         StraightRoadIntersectionMaterializer materializer =
                 new StraightRoadIntersectionMaterializer();

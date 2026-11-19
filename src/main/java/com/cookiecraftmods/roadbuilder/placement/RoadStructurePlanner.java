@@ -356,6 +356,10 @@ public final class RoadStructurePlanner {
                 world, existingRoadPosition, maximumAffectedBlocks);
     }
 
+    boolean isLandscaping(BlockState state) {
+        return state.is(materials.terrainFill().getBlock()) || state.is(materials.embankmentSurface().getBlock());
+    }
+
     /** Adapts median and railing surfaces to their supporting structures before layer merging. */
     public BlockPlacementPlan prepareStructureSurface(
             BlockPlacementPlan surface, List<StructureSpan> spans,

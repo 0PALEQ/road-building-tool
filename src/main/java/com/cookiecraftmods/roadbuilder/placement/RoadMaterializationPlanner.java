@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.placement;
 
+import com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation;
 import com.cookiecraftmods.roadbuilder.network.RoadSegment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -9,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 
 public final class RoadMaterializationPlanner {
     private final StraightRoadSegmentMaterializer segmentMaterializer;
@@ -18,7 +20,7 @@ public final class RoadMaterializationPlanner {
 
     public BlockPlanResult plan(
             ResourceKey<Level> dimension,
-            com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation mutation,
+            PreparedRoadNetworkMutation mutation,
             PlacementBlockWorld world,
             PlacementOwnershipLedger ledger,
             ConstructionLimits limits
@@ -28,34 +30,52 @@ public final class RoadMaterializationPlanner {
         return restoreReplacedFootprint(success.plan(), mutation, world, ledger, limits);
     }
 
-    public BlockPlanResult planRoads( //the terrain musn't protect junction excavation cos server rejects the placement
+    public BlockPlanResult planRoads(
             ResourceKey<Level> dimension,
-            com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation mutation,
+            PreparedRoadNetworkMutation mutation,
             PlacementBlockWorld world, PlacementOwnershipLedger ledger, ConstructionLimits limits) {
-        var replaced = replacedOperations(mutation,dimension,ledger,limits);
-        if (replaced.isEmpty()) return plan(dimension, mutation.placedSegments(), world, ledger, limits);
+        return planRoads(dimension, mutation, world, ledger, limits, false).result();
+    }
+
+    public PlannedRoads planRoadsForJunctions(
+            ResourceKey<Level> dimension,
+            PreparedRoadNetworkMutation mutation,
+            PlacementBlockWorld world, PlacementOwnershipLedger ledger, ConstructionLimits limits) {
+        return planRoads(dimension, mutation, world, ledger, limits, true);
+    }
+
+    private PlannedRoads planRoads(
+            ResourceKey<Level> dimension,
+            PreparedRoadNetworkMutation mutation,
+            PlacementBlockWorld world, PlacementOwnershipLedger ledger, ConstructionLimits limits,
+            boolean protectJunctionApproaches) {
+        var replaced = replacedOperations(mutation, dimension, ledger, limits);
+        if (replaced.isEmpty()) {
+            return plan(dimension, mutation.placedSegments(), world,
+                    position -> ledger.isMaterializedRoadPosition(position, world), limits, protectJunctionApproaches);
+        }
         var rebuilding = new MaterializationRebuildWorld(world, ledger, replaced);
         return plan(dimension, mutation.materializedSegments(), rebuilding,
-                rebuilding::isMaterializedRoadPosition, limits);
+                rebuilding::isMaterializedRoadPosition, limits, protectJunctionApproaches);
     }
 
     public BlockPlanResult restoreReplacedFootprint(BlockPlacementPlan plan,
-            com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation mutation,
+            PreparedRoadNetworkMutation mutation,
             PlacementBlockWorld world, PlacementOwnershipLedger ledger, ConstructionLimits limits) {
         if (!mutation.rebuildsExistingGeometry()) return new BlockPlanResult.Success(plan);
         var dimension = plan.dimension();
         var replaced = replacedOperations(mutation, dimension, ledger, limits);
         var rebuilding = new MaterializationRebuildWorld(world, ledger, replaced);
         java.util.Map<BlockPos,PlannedBlock> targets = new java.util.LinkedHashMap<>();
+        plan.blocks().forEach(block -> targets.put(block.position(), block));
         for (var id : replaced) ledger.operation(id).ifPresent(operation -> operation.positions().forEach(position ->
-                targets.put(position,new PlannedBlock(position,rebuilding.blockState(position)))));
-        plan.blocks().forEach(block -> targets.put(block.position(),block));
+                targets.computeIfAbsent(position, key -> new PlannedBlock(key, rebuilding.blockState(key)))));
         if (targets.size()>limits.maximumAffectedBlocks()) return new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED);
         return new BlockPlanResult.Success(BlockPlacementPlan.create(dimension,targets.values()));
     }
 
     public static List<PlacementOperationId> replacedOperations(
-            com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation mutation,
+            PreparedRoadNetworkMutation mutation,
             ResourceKey<Level> dimension, PlacementOwnershipLedger ledger, ConstructionLimits limits) {
         var resolver = new RoadMaterializationResolver(limits);
         java.util.Set<PlacementOperationId> ids = new java.util.LinkedHashSet<>();
@@ -118,15 +138,26 @@ public final class RoadMaterializationPlanner {
             PlacementOwnershipLedger ledger,
             ConstructionLimits limits
     ) {
-        return plan(dimension, segments, world, ledger::isMaterializedRoadPosition, limits);
+        return plan(dimension, segments, world, position -> ledger.isMaterializedRoadPosition(position, world), limits);
     }
 
     public BlockPlanResult plan(
             ResourceKey<Level> dimension,
             List<RoadSegment> segments,
             PlacementBlockWorld world,
-            java.util.function.Predicate<BlockPos> existingRoadPosition,
+            Predicate<BlockPos> existingRoadPosition,
             ConstructionLimits limits
+    ) {
+        return plan(dimension, segments, world, existingRoadPosition, limits, false).result();
+    }
+
+    private PlannedRoads plan(
+            ResourceKey<Level> dimension,
+            List<RoadSegment> segments,
+            PlacementBlockWorld world,
+            Predicate<BlockPos> existingRoadPosition,
+            ConstructionLimits limits,
+            boolean protectJunctionApproaches
     ) {
         Objects.requireNonNull(dimension, "dimension");
         segments = List.copyOf(Objects.requireNonNull(segments, "segments"));
@@ -146,7 +177,7 @@ public final class RoadMaterializationPlanner {
                     limits
             );
             if (!(result instanceof BlockPlanResult.Success success)) {
-                return result;
+                return new PlannedRoads(result, Set.of());
             }
             surfaces.add(new SegmentSurface(segment, success.plan()));
             surfaceLayers.add(new LayeredBlockPlan(
@@ -181,7 +212,7 @@ public final class RoadMaterializationPlanner {
                 limits.maximumAffectedBlocks()
         );
         if (!(structures instanceof BlockPlanResult.Success structured)) {
-            return structures;
+            return new PlannedRoads(structures, Set.of());
         }
         BlockPlacementPlan structurePlan = structured.plan();
         Set<BlockPos> structurePositions = BlockPositionSets.copyOf(structurePlan.positions());
@@ -199,9 +230,7 @@ public final class RoadMaterializationPlanner {
                 limits.maximumAffectedBlocks()
         );
         if (tunnels.plan().isEmpty()) {
-            return new BlockPlanResult.Failure(
-                    BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED
-            );
+            return new PlannedRoads(new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED), Set.of());
         }
         BlockPlanResult clearance = clearancePlanner.addClearance(
                 mergedSurface,
@@ -212,7 +241,7 @@ public final class RoadMaterializationPlanner {
                 limits.maximumAffectedBlocks()
         );
         if (!(clearance instanceof BlockPlanResult.Success cleared)) {
-            return clearance;
+            return new PlannedRoads(clearance, Set.of());
         }
         materialLayers.add(new LayeredBlockPlan(
                 cleared.plan(),
@@ -231,12 +260,18 @@ public final class RoadMaterializationPlanner {
                 materialLayers
         );
         if (plan.affectedBlockCount() > limits.maximumAffectedBlocks()) {
-            return new BlockPlanResult.Failure(
-                    BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED
-            );
+            return new PlannedRoads(new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED), Set.of());
         }
-        return new BlockPlanResult.Success(plan);
+        Set<BlockPos> protectedPositions = Set.of();
+        if (protectJunctionApproaches) {
+            Set<BlockPos> surfacePositions = BlockPositionSets.nonAirTargets(mergedSurface);
+            protectedPositions = BlockPositionSets.nonAirTargets(plan, block ->
+                    surfacePositions.contains(block.position()) || !structurePlanner.isLandscaping(block.targetState()));
+        }
+        return new PlannedRoads(new BlockPlanResult.Success(plan), protectedPositions);
     }
+
+    public record PlannedRoads(BlockPlanResult result, Set<BlockPos> protectedPositions) {}
 
     private record SegmentSurface(
             RoadSegment segment,

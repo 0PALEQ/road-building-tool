@@ -98,6 +98,22 @@ class LaneRampAndJunctionRegressionTest {
         assertTrue(parts.get(0).sample(parts.get(0).length()).tangent().dot(parts.get(1).sample(0).tangent())>0.99999);
     }
 
+    @Test void shortSlopingJunctionArmSamplesBothEndsWithinItsLength() {
+        var start = new RoadNode(id(), new RoadPoint(0, 70, 0));
+        var end = new RoadNode(id(), new RoadPoint(12, 72, 0));
+        var geometry = new StraightGeometry(start.position(), end.position());
+        double length = geometry.length();
+        int count = (int) Math.ceil(length / 0.5);
+        assertTrue(length * count / count > length);
+        var segment = road(geometry, start.id(), end.id(), 7, false);
+
+        for (var node : List.of(start, end)) {
+            var field = new JunctionSurfaceElevation(node, List.of(segment));
+            assertEquals(70, field.height(0, 0), 1e-8);
+            assertEquals(72, field.height(12, 0), 1e-8);
+        }
+    }
+
     @Test void slopingJunctionHasLevelCoreAndQuadraticApproaches() {
         var center=new RoadNode(id(),new RoadPoint(0.5,70,0.5));
         List<RoadSegment> roads=List.of(

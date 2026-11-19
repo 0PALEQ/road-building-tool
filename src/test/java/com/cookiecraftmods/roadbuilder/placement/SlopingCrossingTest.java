@@ -139,9 +139,16 @@ class SlopingCrossingTest {
                 new RoadPoint(60.5,82,0.5)),material,preset,TrafficHandedness.RHT);
         graph.applyNetworkMutation(host);
         var states=new java.util.HashMap<net.minecraft.core.BlockPos,net.minecraft.world.level.block.state.BlockState>();
+        var restoredGrass = new net.minecraft.core.BlockPos(10, 90, 15);
         PlacementBlockWorld world=new PlacementBlockWorld() {
             public net.minecraft.resources.ResourceKey<Level> dimension() { return Level.OVERWORLD; }
             public int maximumBuildHeight() { return 100; }
+            public int highestBlockY(int x, int z) {
+                if (x == restoredGrass.getX() && z == restoredGrass.getZ() && blockState(restoredGrass).isAir()) {
+                    return restoredGrass.getY() - 1;
+                }
+                return PlacementBlockWorld.super.highestBlockY(x, z);
+            }
             public boolean hasBlockEntity(net.minecraft.core.BlockPos p) { return false; }
             public net.minecraft.world.level.block.state.BlockState blockState(net.minecraft.core.BlockPos p) {
                 return states.getOrDefault(p,(p.getY()<55?net.minecraft.world.level.block.Blocks.STONE:
@@ -155,7 +162,6 @@ class SlopingCrossingTest {
         var ledger=new PlacementOwnershipLedger(Level.OVERWORLD);
         var oldPlan=assertInstanceOf(BlockPlanResult.Success.class,new RoadMaterializationPlanner().plan(
                 Level.OVERWORLD,host.placedSegments(),world,ledger,limits)).plan();
-        var restoredGrass = new net.minecraft.core.BlockPos(10, 90, 15);
         var grass = net.minecraft.world.level.block.Blocks.GRASS_BLOCK.defaultBlockState();
         states.put(restoredGrass, grass);
         var oldTargets = new java.util.ArrayList<>(oldPlan.blocks());
@@ -195,13 +201,15 @@ class SlopingCrossingTest {
                 && b.targetState().isAir()), "Junction excavation must override terrain restoration");
         var junction=assertInstanceOf(BlockPlanResult.Success.class,new RoadTransitionPlanPreparer().complete(
                 surface,node,mutation.allUpsertedSegments(),rebuilding,rebuilding::isMaterializedRoadPosition,limits)).plan();
-        var plan=BlockPlacementPlans.mergeLayered(Level.OVERWORLD,List.of(
-                new LayeredBlockPlan(roads,MaterialLayer.SEGMENT_SURFACE,"road","test"),
+        var retained=BlockPlacementPlans.mergeLayered(Level.OVERWORLD,List.of(
+                new LayeredBlockPlan(roadTargets,MaterialLayer.SEGMENT_SURFACE,"road","test"),
                 new LayeredBlockPlan(junction,MaterialLayer.JUNCTION_SURFACE,"node","test")));
+        var plan=assertInstanceOf(BlockPlanResult.Success.class,
+                new RoadMaterializationPlanner().restoreReplacedFootprint(retained,mutation,world,ledger,limits)).plan();
         var operation=PlacementOperationId.create();
         var repartitioner=new RoadMaterializationRepartitioner(limits);
         var partitions=new java.util.ArrayList<>(repartitioner.prepareExisting(mutation,Level.OVERWORLD,ledger));
-        partitions.add(repartitioner.prepare(PlacementOperation.create(operation,Level.OVERWORLD,plan.positions()),
+        partitions.add(repartitioner.prepare(PlacementOperation.create(operation,Level.OVERWORLD,retained.positions()),
                 mutation.materializedSegments(),Level.OVERWORLD,java.util.Map.of(node.id(),junction)));
         if (incremental) {
             var jobs=com.cookiecraftmods.roadbuilder.persistence.RoadBuilderConstructionJobSavedData.create(Level.OVERWORLD);
@@ -223,6 +231,8 @@ class SlopingCrossingTest {
             graph.applyNetworkMutation(mutation);
         }
         assertTrue(RoadGraphMaterializationConsistency.validate(graph,ledger).isEmpty());
+        assertEquals(grass, world.blockState(restoredGrass));
+        assertTrue(ledger.stack(restoredGrass).isEmpty(), "Restored terrain must not be owned by the new road");
         var loaded=com.cookiecraftmods.roadbuilder.persistence.RoadBuilderNetworkSavedData.load(Level.OVERWORLD,
                 saved.save(new net.minecraft.nbt.CompoundTag()));
         assertEquals(graph.snapshot(),loaded.graph().snapshot());

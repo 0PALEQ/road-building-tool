@@ -91,13 +91,22 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
         var endpoint=new StraightRoadPlacementEndpoint(new StraightRoadPlanningService(id -> java.util.Optional.of(preset),
                 new StraightRoadPlanner()),ConstructionAuthorizer.creativeOnly(),ConstructionLimits.defaults(),new BlockPlanCommitter());
         var centre=new RoadPoint(origin.getX()+0.5,72,origin.getZ()+0.5);
-        for(var points:List.of(List.of(new RoadPoint(centre.x()-80,64,centre.z()),new RoadPoint(centre.x()+80,80,centre.z())),
-                List.of(new RoadPoint(centre.x(),72,centre.z()-80),new RoadPoint(centre.x(),72,centre.z()+80)))) {
-            var a=points.get(0); var b=points.get(1);
-            var result=endpoint.handle(StraightRoadIntentC2SPacket.current(UUID.randomUUID(),level.dimension().location(),material,1,
-                    a.x(),a.y(),a.z(),b.x(),b.y(),b.z()),player,ledger,graph);
-            helper.assertTrue(result.resultCode()==PlacementResultCode.ACCEPTED,"sloping crossing must build: "+result.resultCode());
-        }
+        var host = endpoint.handle(StraightRoadIntentC2SPacket.current(
+                UUID.randomUUID(), level.dimension().location(), material, 1,
+                centre.x() - 80, 64, centre.z(), centre.x() + 80, 80, centre.z()), player, ledger, graph);
+        helper.assertTrue(host.resultCode() == PlacementResultCode.ACCEPTED, "sloping road must build: " + host.resultCode());
+        var branchEndpoint = new com.cookiecraftmods.roadbuilder.networking.RoadPathPlacementEndpoint(
+                new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanningService(
+                        id -> java.util.Optional.of(preset), new com.cookiecraftmods.roadbuilder.placement.RoadPathPlanner()),
+                ConstructionAuthorizer.creativeOnly(), ConstructionLimits.defaults(), new BlockPlanCommitter(),
+                com.cookiecraftmods.roadbuilder.preset.TrafficHandedness.RHT);
+        var branch = branchEndpoint.handle(com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket.current(
+                UUID.randomUUID(), level.dimension().location(), material, 1, graph.snapshot().revision(),
+                com.cookiecraftmods.roadbuilder.networking.RoadPathIntentC2SPacket.PathType.STRAIGHT,
+                List.of(new RoadPoint(centre.x(), 72, centre.z() - 80),
+                        new RoadPoint(centre.x(), 72, centre.z() + 80))).withSunkenRoad(true), player, ledger, graph, null);
+        helper.assertTrue(branch.resultCode() == PlacementResultCode.ACCEPTED,
+                "sunken road must connect to a sloping road: " + branch.resultCode());
         helper.assertTrue(RoadGraphMaterializationConsistency.validate(graph,ledger).isEmpty(),"rebuilt owners must match graph");
         for(var road:graph.snapshot().segments().values()) {
             var geometry=road.referenceGeometry();

@@ -214,6 +214,19 @@ public final class PlacementOwnershipLedger {
         return stack(position).map(value -> !value.top().afterState().isAir()).orElse(false);
     }
 
+    public boolean isMaterializedRoadPosition(BlockPos position, PlacementBlockWorld world) {
+        PositionChangeStack stack = positions.get(position);
+        return stack != null && !stack.top().afterState().isAir()
+                && protectsVisibleRoad(stack.top().afterState(), world.blockState(position));
+    }
+
+    static boolean protectsVisibleRoad(BlockState expected, BlockState visible) {
+        boolean soil = visible.is(net.minecraft.world.level.block.Blocks.DIRT)
+                || visible.is(net.minecraft.tags.BlockTags.DIRT);
+        return !soil
+                || BlockTransitionStateMatcher.matchesUpdateDrivenTarget(visible, expected);
+    }
+
     public void publishNetworkRepartitions(List<OperationMaterializationRepartition> repartitions) {
         Set<RoadMaterializationOwner> owners = new HashSet<>();
         boolean rebuild = false;

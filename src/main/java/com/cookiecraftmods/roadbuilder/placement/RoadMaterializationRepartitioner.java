@@ -1,6 +1,7 @@
 package com.cookiecraftmods.roadbuilder.placement;
 
 import com.cookiecraftmods.roadbuilder.network.PreparedRoadNetworkMutation;
+import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import com.cookiecraftmods.roadbuilder.network.PreparedSegmentSplit;
 import com.cookiecraftmods.roadbuilder.network.RoadNodeId;
 import com.cookiecraftmods.roadbuilder.network.RoadSegment;
@@ -41,6 +42,9 @@ public final class RoadMaterializationRepartitioner {
         List<Set<BlockPos>> childPositions = new ArrayList<>(
                 childSegments.size()
         );
+        List<List<RoadPoint>> childSamples = childSegments.stream()
+                .map(RoadMaterializationRepartitioner::sampleCenterline)
+                .toList();
         StraightRoadSegmentMaterializer materializer =
                 new StraightRoadSegmentMaterializer();
         for (RoadSegment child : childSegments) {
@@ -73,7 +77,7 @@ public final class RoadMaterializationRepartitioner {
                 }
             }
             if (!assigned) {
-                partitions.get(nearestChild(position, childSegments))
+                partitions.get(nearestChild(position, childSamples))
                         .add(position);
             }
         }
@@ -86,7 +90,7 @@ public final class RoadMaterializationRepartitioner {
                         .min(java.util.Comparator.comparingDouble(position ->
                                 distanceSquared(
                                         position,
-                                        childSegments.get(childIndex)
+                                        childSamples.get(childIndex)
                                 )))
                         .orElseThrow();
                 partitions.get(index).add(closest);
@@ -125,6 +129,7 @@ public final class RoadMaterializationRepartitioner {
                 new ArrayList<>(mutation.segmentSplits().size());
         RoadMaterializationResolver resolver =
                 new RoadMaterializationResolver(limits);
+        boolean rebuild = mutation.rebuildsExistingGeometry();
         for (PreparedSegmentSplit split : mutation.segmentSplits()) {
             PlacementOperation source = resolver.resolve(
                     split.original(),
@@ -133,14 +138,15 @@ public final class RoadMaterializationRepartitioner {
             ).orElseThrow(() -> new IllegalStateException(
                     "crossed segment has no materialization history"
             ));
-            result.add(prepare(
-                    source,
-                    split.replacements(),
-                    dimension,
-                    Map.of()
-            ));
+            if (rebuild) {
+                var owner = RoadMaterializationOwner.segment(split.replacements().get(0).id());
+                result.add(new OperationMaterializationRepartition(source.id(), List.of(
+                        new MaterializationPartition(source.id(), owner, source.positions()))));
+            } else {
+                result.add(prepare(source, split.replacements(), dimension, Map.of()));
+            }
         }
-        if (mutation.rebuildsExistingGeometry()) {
+        if (rebuild) {
             Set<PlacementOperationId> known = result.stream().map(OperationMaterializationRepartition::sourceOperationId)
                     .collect(java.util.stream.Collectors.toSet());
             for (var id : RoadMaterializationPlanner.replacedOperations(mutation,dimension,ledger,limits)) {
@@ -151,7 +157,7 @@ public final class RoadMaterializationRepartitioner {
                 }
             }
             return List.copyOf(result);
-        } //That in most cases still fails for some reason; needs further improvement
+        }
         convertedJunctionOwners(mutation).forEach((oldNode, newNode) ->
                 ledger.operation(RoadMaterializationOwner.node(oldNode)).ifPresent(source ->
                         result.add(new OperationMaterializationRepartition(source.id(), List.of(
@@ -178,7 +184,7 @@ public final class RoadMaterializationRepartitioner {
 
     private static int nearestChild(
             BlockPos position,
-            List<RoadSegment> children
+            List<List<RoadPoint>> children
     ) {
         int nearest = 0;
         double nearestDistance = Double.POSITIVE_INFINITY;
@@ -192,21 +198,22 @@ public final class RoadMaterializationRepartitioner {
         return nearest;
     }
 
-    private static double distanceSquared(
-            BlockPos position,
-            RoadSegment segment
-    ) {
-        double nearest = Double.POSITIVE_INFINITY;
+    private static List<RoadPoint> sampleCenterline(RoadSegment segment) {
         var geometry = segment.referenceGeometry();
         double length = geometry.length();
-        int samples = Math.max(
-                1,
-                (int) Math.ceil(length * 2.0)
-        );
+        int samples = Math.max(1, (int) Math.ceil(length * 2.0));
+        List<RoadPoint> points = new ArrayList<>(samples + 1);
         for (int index = 0; index <= samples; index++) {
             // Multiplying before dividing can round the endpoint past length.
             double distance = index == samples ? length : length * index / samples;
-            var point = geometry.sample(distance).position();
+            points.add(geometry.sample(distance).position());
+        }
+        return points;
+    }
+
+    private static double distanceSquared(BlockPos position, List<RoadPoint> samples) {
+        double nearest = Double.POSITIVE_INFINITY;
+        for (RoadPoint point : samples) {
             double deltaX = position.getX() + 0.5 - point.x();
             double deltaY = position.getY() + 0.5 - point.y();
             double deltaZ = position.getZ() + 0.5 - point.z();
