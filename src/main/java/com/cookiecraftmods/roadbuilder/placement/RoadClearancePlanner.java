@@ -90,9 +90,14 @@ public final class RoadClearancePlanner {
             }
             for (int offset = 1; offset <= clearanceHeight; offset++) {
                 BlockPos position = surface.position().above(offset);
-                if (targets.containsKey(position)
-                        || preservedPosition.test(position)
-                        || world.blockState(position).isAir()) {
+                if (targets.containsKey(position)) {
+                    continue;
+                }
+                var state = world.blockState(position);
+                if (state.isAir()) continue;
+                if (preservedPosition.test(position)) {
+                    // Clearance ends at an existing protected roof or deck.
+                    if (state.blocksMotion()) break;
                     continue;
                 }
                 if (targets.size() >= maximumAffectedBlocks) {

@@ -15,15 +15,25 @@ class SegmentReplaceIntentC2SPacketTest {
         SegmentReplaceIntentC2SPacket packet =
                 SegmentReplaceIntentC2SPacket.current(
                         new UUID(1, 2),
-                        new ResourceLocation("minecraft", "overworld"),
+                        new ResourceLocation("test", "d".repeat(105)),
                         new UUID(3, 4),
                         19,
-                        new ResourceLocation("roadbuilder", "two_way"),
+                        new ResourceLocation("test", "p".repeat(104)),
                         2
                 );
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
-        packet.write(buffer);
-        assertEquals(packet, new SegmentReplaceIntentC2SPacket(buffer));
-        assertEquals(0, buffer.readableBytes());
+        try {
+            packet.write(buffer);
+            assertEquals(packet, new SegmentReplaceIntentC2SPacket(buffer));
+            assertEquals(0, buffer.readableBytes());
+
+            var sunken = packet.withSunkenRoad(true);
+            sunken.write(buffer);
+            assertEquals(SegmentReplaceIntentC2SPacket.MAX_PAYLOAD_BYTES, buffer.readableBytes());
+            assertEquals(sunken, new SegmentReplaceIntentC2SPacket(buffer));
+            assertEquals(0, buffer.readableBytes());
+        } finally {
+            buffer.release();
+        }
     }
 }

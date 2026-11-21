@@ -357,7 +357,12 @@ public final class RoadStructurePlanner {
     }
 
     boolean isLandscaping(BlockState state) {
-        return state.is(materials.terrainFill().getBlock()) || state.is(materials.embankmentSurface().getBlock());
+        // Junctions can reshape fill, walls, and railings planned for their approaches.
+        return state.is(materials.terrainFill().getBlock())
+                || state.is(materials.embankmentSurface().getBlock())
+                || state.is(materials.retainingWall().getBlock())
+                || state.is(materials.barrier().getBlock())
+                || state.is(materials.barrierCap().getBlock());
     }
 
     /** Adapts median and railing surfaces to their supporting structures before layer merging. */

@@ -15,10 +15,11 @@ public record SegmentReplaceIntentC2SPacket(
         UUID segmentId,
         long expectedGraphRevision,
         ResourceLocation presetId,
-        int expectedPresetRevision
+        int expectedPresetRevision,
+        boolean sunkenRoad
 ) implements FabricPacket {
     public static final int CURRENT_PROTOCOL_VERSION = PacketValidation.PROTOCOL_VERSION;
-    public static final int MAX_PAYLOAD_BYTES = 256;
+    public static final int MAX_PAYLOAD_BYTES = 257;
     public static final PacketType<SegmentReplaceIntentC2SPacket> TYPE =
             PacketType.create(
                     new ResourceLocation("roadbuilder", "segment_replace_intent_v1"),
@@ -58,7 +59,15 @@ public record SegmentReplaceIntentC2SPacket(
                 segmentId,
                 expectedGraphRevision,
                 presetId,
-                expectedPresetRevision
+                expectedPresetRevision,
+                false
+        );
+    }
+
+    public SegmentReplaceIntentC2SPacket withSunkenRoad(boolean enabled) {
+        return new SegmentReplaceIntentC2SPacket(
+                protocolVersion, requestId, dimensionId, segmentId, expectedGraphRevision,
+                presetId, expectedPresetRevision, enabled
         );
     }
 
@@ -71,6 +80,10 @@ public record SegmentReplaceIntentC2SPacket(
         buffer.writeVarLong(expectedGraphRevision);
         PacketValidation.writeBoundedId(buffer, presetId);
         buffer.writeVarInt(expectedPresetRevision);
+        // Keep the original payload when Sunken Road is disabled.
+        if (sunkenRoad) {
+            buffer.writeBoolean(true);
+        }
     }
 
     @Override
@@ -86,7 +99,8 @@ public record SegmentReplaceIntentC2SPacket(
                 fields.segmentId,
                 fields.expectedGraphRevision,
                 fields.presetId,
-                fields.expectedPresetRevision
+                fields.expectedPresetRevision,
+                fields.sunkenRoad
         );
     }
 
@@ -99,10 +113,19 @@ public record SegmentReplaceIntentC2SPacket(
                 buffer.readUUID(),
                 buffer.readVarLong(),
                 PacketValidation.readBoundedId(buffer, "presetId"),
-                buffer.readVarInt()
+                buffer.readVarInt(),
+                readSunkenRoad(buffer)
         );
         PacketValidation.requireFullyRead(buffer, "segment replace intent");
         return result;
+    }
+
+    private static boolean readSunkenRoad(FriendlyByteBuf buffer) {
+        int flag = buffer.isReadable() ? buffer.readUnsignedByte() : 0;
+        if (flag > 1) {
+            throw new IllegalArgumentException("invalid Sunken Road flag");
+        }
+        return flag == 1;
     }
 
     private record WireFields(
@@ -112,6 +135,7 @@ public record SegmentReplaceIntentC2SPacket(
             UUID segmentId,
             long expectedGraphRevision,
             ResourceLocation presetId,
-            int expectedPresetRevision
+            int expectedPresetRevision,
+            boolean sunkenRoad
     ) { }
 }

@@ -26,7 +26,7 @@ class ClientRoadIntentC2SPacketTest {
                         RoadPathIntentC2SPacket.PathType.QUADRATIC,
                         List.of(new RoadPoint(0, 64, 0), new RoadPoint(10, 64, 5), new RoadPoint(20, 64, 0))),
                 SegmentReplaceIntentC2SPacket.current(request, DIMENSION, UUID.randomUUID(), 5L,
-                        PRESET, preset.revision()));
+                        PRESET, preset.revision()).withSunkenRoad(true));
         for (FabricPacket intent : intents) {
             var packet = new ClientRoadIntentC2SPacket(intent, preset);
             var buffer = PacketByteBufs.create();

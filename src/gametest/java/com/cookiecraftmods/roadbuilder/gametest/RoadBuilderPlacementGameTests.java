@@ -15,6 +15,8 @@ import com.cookiecraftmods.roadbuilder.networking.RemovalRequestAction;
 import com.cookiecraftmods.roadbuilder.networking.RemovalResultCode;
 import com.cookiecraftmods.roadbuilder.networking.RemovalResultS2CPacket;
 import com.cookiecraftmods.roadbuilder.networking.SegmentRemovalIntentC2SPacket;
+import com.cookiecraftmods.roadbuilder.networking.SegmentReplaceIntentC2SPacket;
+import com.cookiecraftmods.roadbuilder.networking.SegmentReplacementEndpoint;
 import com.cookiecraftmods.roadbuilder.networking.StraightRoadIntentC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.StraightRoadPlacementEndpoint;
 import com.cookiecraftmods.roadbuilder.persistence.RoadBuilderPlacementSavedData;
@@ -39,11 +41,14 @@ import com.cookiecraftmods.roadbuilder.placement.PlannedBlock;
 import com.cookiecraftmods.roadbuilder.placement.RemovalMode;
 import com.cookiecraftmods.roadbuilder.placement.RoadMaterializationOwner;
 import com.cookiecraftmods.roadbuilder.placement.RoadGraphMaterializationConsistency;
+import com.cookiecraftmods.roadbuilder.placement.RoadMaterializationPlanner;
+import com.cookiecraftmods.roadbuilder.placement.RoadTunnelPlanner;
 import com.cookiecraftmods.roadbuilder.placement.ServerLevelPlacementBlockWorld;
 import com.cookiecraftmods.roadbuilder.placement.StraightRoadIntent;
 import com.cookiecraftmods.roadbuilder.placement.StraightRoadPlanner;
 import com.cookiecraftmods.roadbuilder.placement.StraightRoadPlanningService;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetResources;
+import com.cookiecraftmods.roadbuilder.preset.RoadPresetTemplates;
 import com.cookiecraftmods.roadbuilder.preset.TrafficHandedness;
 import com.mojang.authlib.GameProfile;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
@@ -281,6 +286,62 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
         }
         helper.assertTrue(RoadGraphMaterializationConsistency.validate(graph, ledger).isEmpty(),
                 "ramp placement must preserve graph/materialization ownership");
+        helper.succeed();
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE, timeoutTicks = 400)
+    public void replacingTunnelWithSunkenRoadOpensTheCut(GameTestHelper helper) {
+        var level = helper.getLevel();
+        var centre = helper.absolutePos(new BlockPos(7200, 0, 7200)).atY(67);
+        var roof = centre.above(RoadTunnelPlanner.FREE_HEIGHT + 1);
+        var terrainTop = roof.above(3);
+        for (BlockPos position : BlockPos.betweenClosed(
+                centre.offset(-20, -1, -8), terrainTop.offset(20, 0, 8))) {
+            level.setBlock(position, Blocks.STONE.defaultBlockState(), UPDATE_FLAGS);
+        }
+        var geometry = new StraightGeometry(
+                new RoadPoint(centre.getX() - 12.5, centre.getY(), centre.getZ() + 0.5),
+                new RoadPoint(centre.getX() + 12.5, centre.getY(), centre.getZ() + 0.5));
+        var presetId = new ResourceLocation("roadbuilder", "replace_tunnel_test");
+        var preset = RoadPresetTemplates.blank();
+        var graph = new RoadGraph(level.dimension());
+        var ledger = new PlacementOwnershipLedger(level.dimension());
+        var addition = graph.prepareStraightRoad(geometry, presetId, preset, TrafficHandedness.RHT);
+        graph.applyAddition(addition);
+        var world = new ServerLevelPlacementBlockWorld(level);
+        var limits = ConstructionLimits.defaults();
+        var plan = requireType(helper, new RoadMaterializationPlanner().plan(
+                level.dimension(), List.of(addition.segment()), world, ledger, limits),
+                BlockPlanResult.Success.class, "initial tunnel must plan").plan();
+        var committer = new BlockPlanCommitter();
+        var segmentId = addition.segment().id();
+        requireType(helper, committer.commitOwned(RoadMaterializationOwner.segment(segmentId),
+                plan, world, ledger), PlacementCommitResult.Success.class, "initial tunnel must commit");
+        helper.assertTrue(world.blockState(roof).is(Blocks.POLISHED_ANDESITE),
+                "fixture must include a tunnel roof");
+
+        var player = testPlayer(level, true);
+        player.setPos(centre.getX(), terrainTop.getY() + 1, centre.getZ());
+        var endpoint = new SegmentReplacementEndpoint(
+                id -> java.util.Optional.of(preset), ConstructionAuthorizer.creativeOnly(), limits, committer);
+        for (boolean sunken : new boolean[]{true, false}) {
+            var response = endpoint.handle(SegmentReplaceIntentC2SPacket.current(
+                    UUID.randomUUID(), level.dimension().location(), segmentId.value(),
+                    graph.revision(), presetId, preset.revision()).withSunkenRoad(sunken), player, ledger, graph);
+            helper.assertTrue(response.resultCode() == PlacementResultCode.ACCEPTED,
+                    "replacement must succeed with Sunken Road set to " + sunken + ": " + response.resultCode());
+            var rebuilt = graph.segment(segmentId).orElseThrow();
+            helper.assertTrue(rebuilt.presetSnapshot().sunkenRoad() == sunken,
+                    "replacement segment must store the selected mode");
+            helper.assertTrue(rebuilt.referenceGeometry() == geometry,
+                    "replacement must retain the road alignment and elevation");
+            helper.assertTrue(world.blockState(roof).is(sunken ? Blocks.AIR : Blocks.POLISHED_ANDESITE),
+                    "replacing the segment must open or rebuild the tunnel roof");
+            helper.assertTrue(world.blockState(terrainTop).is(sunken ? Blocks.AIR : Blocks.STONE),
+                    "the cut must open to the surface and restore terrain when disabled");
+            helper.assertTrue(RoadGraphMaterializationConsistency.validate(graph, ledger).isEmpty(),
+                    "replacement must keep graph and materialization ownership consistent");
+        }
         helper.succeed();
     }
 

@@ -60,6 +60,74 @@ class SunkenRoadPlannerTest {
                 planner.excavate(surface, Set.of(position), water, p -> false, 20000));
     }
 
+    @Test void clipsTheSideSlopeAtAProtectedApproachWithoutRejectingTheRoad() {
+        var floor = new BlockPos(567, 65, 1118);
+        var protectedApproach = new BlockPos(567, 68, 1117);
+        var surface = BlockPlacementPlan.create(Level.OVERWORLD,
+                List.of(new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState())));
+
+        var result = new SunkenRoadPlanner().excavate(
+                surface, Set.of(floor), new Terrain(72), protectedApproach::equals, 20000);
+
+        var plan = assertInstanceOf(BlockPlanResult.Success.class, result).plan();
+        assertTrue(plan.blocks().contains(new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        assertTrue(plan.blocks().contains(new PlannedBlock(floor.above(), Blocks.AIR.defaultBlockState())));
+        assertTrue(plan.blocks().contains(new PlannedBlock(floor.offset(1, 2, 0), Blocks.AIR.defaultBlockState())));
+        assertFalse(plan.blocks().stream().anyMatch(block ->
+                block.position().getX() == protectedApproach.getX()
+                        && block.position().getZ() == protectedApproach.getZ()));
+    }
+
+    @Test void excavatesBelowAnExistingTunnelRoofWithoutRemovingTheCover() {
+        var floor = new BlockPos(583, 66, 1098);
+        var roof = floor.above(RoadTunnelPlanner.FREE_HEIGHT + 1);
+        var surface = BlockPlacementPlan.create(Level.OVERWORLD,
+                List.of(new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        var world = new Terrain(roof.getY() + 3) {
+            @Override public BlockState blockState(BlockPos position) {
+                return position.equals(roof) ? Blocks.POLISHED_ANDESITE.defaultBlockState()
+                        : super.blockState(position);
+            }
+        };
+
+        var plan = assertInstanceOf(BlockPlanResult.Success.class, new SunkenRoadPlanner().excavate(
+                surface, Set.of(floor), world, roof::equals, 20000)).plan();
+
+        assertEquals(RoadTunnelPlanner.FREE_HEIGHT + 1, plan.affectedBlockCount());
+        assertTrue(plan.blocks().contains(new PlannedBlock(roof.below(), Blocks.AIR.defaultBlockState())));
+        assertTrue(plan.blocks().stream().allMatch(block ->
+                block.position().getY() < roof.getY()));
+    }
+
+    @Test void opensAnExistingRoadsideWallWithinTheNewPavementWithoutCuttingTheRoof() {
+        var floor = new BlockPos(562, 66, 1110);
+        var adjoiningPavement = floor.west();
+        var roof = floor.above(RoadTunnelPlanner.FREE_HEIGHT + 1);
+        Set<BlockPos> wall = Set.of(floor, floor.above(), floor.above(2));
+        var surface = BlockPlacementPlan.create(Level.OVERWORLD,
+                List.of(new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        var world = new Terrain(65) {
+            @Override public BlockState blockState(BlockPos position) {
+                if (wall.contains(position) || position.equals(roof)) return Blocks.POLISHED_ANDESITE.defaultBlockState();
+                if (position.equals(adjoiningPavement)) return Blocks.SMOOTH_STONE_SLAB.defaultBlockState();
+                return super.blockState(position);
+            }
+        };
+        var planner = new SunkenRoadPlanner();
+
+        var plan = assertInstanceOf(BlockPlanResult.Success.class, planner.excavate(
+                surface, Set.of(floor), world,
+                position -> wall.contains(position) || position.equals(adjoiningPavement) || position.equals(roof),
+                20000)).plan();
+
+        assertTrue(plan.blocks().contains(new PlannedBlock(floor.above(), Blocks.AIR.defaultBlockState())));
+        assertTrue(plan.blocks().contains(new PlannedBlock(floor.above(2), Blocks.AIR.defaultBlockState())));
+        assertFalse(plan.positions().contains(adjoiningPavement));
+        assertFalse(plan.positions().contains(roof));
+        assertInstanceOf(BlockPlanResult.Failure.class, planner.excavate(
+                surface, Set.of(floor), world, position -> wall.contains(position) || position.equals(roof), 20000));
+    }
+
     @Test void modePersistsSynchronizesAndBuildsOpenCutWithoutTunnel() {
         var data = RoadBuilderNetworkSavedData.create(Level.OVERWORLD);
         var material = new ResourceLocation("minecraft", "gray_concrete");
@@ -165,6 +233,62 @@ class SunkenRoadPlannerTest {
         var excavation = assertInstanceOf(BlockPlanResult.Success.class, new SunkenRoadPlanner().excavate(
                 junction, Set.of(fill.below()), oldDirt, roads.protectedPositions()::contains, 1000)).plan();
         assertTrue(excavation.blocks().contains(new PlannedBlock(fill, Blocks.AIR.defaultBlockState())));
+    }
+
+    @Test void junctionExcavationCanInterruptAProposedRailingAndKeepsTheApproachPavement() {
+        var material = new ResourceLocation("minecraft", "smooth_stone_slab");
+        var preset = new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION, 1, 3, material,
+                List.of(new LaneComponent(LaneType.VEHICLE, 3, 0, LaneTravelDirection.FORWARD)));
+        var graph = RoadBuilderNetworkSavedData.create(Level.OVERWORLD).graph();
+        var mutation = graph.prepareRoadNetwork(new StraightGeometry(
+                new RoadPoint(0.5, 67, 1.5), new RoadPoint(20.5, 67, 1.5)),
+                material, preset, TrafficHandedness.RHT);
+        var roads = new RoadMaterializationPlanner().planRoadsForJunctions(
+                Level.OVERWORLD, mutation, new Terrain(64),
+                new PlacementOwnershipLedger(Level.OVERWORLD), ConstructionLimits.defaults());
+        var road = assertInstanceOf(BlockPlanResult.Success.class, roads.result()).plan();
+        var cap = road.blocks().stream()
+                .filter(block -> block.targetState().is(Blocks.IRON_TRAPDOOR))
+                .findFirst().orElseThrow().position();
+        assertTrue(road.blocks().stream().anyMatch(block ->
+                block.position().equals(cap.below()) && block.targetState().is(Blocks.IRON_BARS)));
+        assertFalse(roads.protectedPositions().contains(cap));
+        assertFalse(roads.protectedPositions().contains(cap.below()));
+        var wall = road.blocks().stream()
+                .filter(block -> block.targetState().is(Blocks.POLISHED_ANDESITE))
+                .findFirst().orElseThrow().position();
+        assertFalse(roads.protectedPositions().contains(wall));
+        assertTrue(roads.protectedPositions().contains(new BlockPos(10, 67, 1)));
+
+        var floor = cap.below(2);
+        var junction = BlockPlacementPlan.create(Level.OVERWORLD,
+                List.of(new PlannedBlock(floor, Blocks.GRAY_CONCRETE.defaultBlockState())));
+        var hillside = new Terrain(64) {
+            @Override public BlockState blockState(BlockPos position) {
+                return position.equals(cap) ? Blocks.STONE.defaultBlockState() : super.blockState(position);
+            }
+        };
+        var excavation = assertInstanceOf(BlockPlanResult.Success.class, new SunkenRoadPlanner().excavate(
+                junction, Set.of(floor), hillside, roads.protectedPositions()::contains, 2000)).plan();
+        assertTrue(excavation.blocks().contains(new PlannedBlock(cap, Blocks.AIR.defaultBlockState())));
+    }
+
+    @Test void junctionProtectionRetainsATunnelRoofPlannedInTheSameOperation() {
+        var material = new ResourceLocation("minecraft", "gray_concrete");
+        var preset = new RoadPreset(RoadPreset.CURRENT_SCHEMA_VERSION, 1, 3, material,
+                List.of(new LaneComponent(LaneType.VEHICLE, 3, 0, LaneTravelDirection.FORWARD)));
+        var graph = RoadBuilderNetworkSavedData.create(Level.OVERWORLD).graph();
+        var mutation = graph.prepareRoadNetwork(new StraightGeometry(
+                new RoadPoint(0.5, 66, 0.5), new RoadPoint(30.5, 66, 0.5)),
+                material, preset, TrafficHandedness.RHT);
+        var roads = new RoadMaterializationPlanner().planRoadsForJunctions(
+                Level.OVERWORLD, mutation, new Terrain(80),
+                new PlacementOwnershipLedger(Level.OVERWORLD), ConstructionLimits.defaults());
+        var plan = assertInstanceOf(BlockPlanResult.Success.class, roads.result()).plan();
+        var roof = new BlockPos(15, 66 + RoadTunnelPlanner.FREE_HEIGHT + 1, 0);
+
+        assertTrue(plan.blocks().contains(new PlannedBlock(roof, Blocks.POLISHED_ANDESITE.defaultBlockState())));
+        assertTrue(roads.protectedPositions().contains(roof));
     }
 
     @Test void plannedRoadSurfaceIsKeptAndExplicitClearingStillProtectsFluidsAndBlockEntities() {

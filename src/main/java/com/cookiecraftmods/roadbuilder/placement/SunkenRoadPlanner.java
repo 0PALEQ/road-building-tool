@@ -2,8 +2,10 @@ package com.cookiecraftmods.roadbuilder.placement;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.SlabBlock;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -21,7 +23,7 @@ public final class SunkenRoadPlanner {
         Map<Column, List<BlockPos>> columns = new HashMap<>();
         for (PlannedBlock block : surface.blocks()) {
             if (!block.targetState().isAir()) {
-                columns.computeIfAbsent(Column.of(block.position()), key -> new java.util.ArrayList<>())
+                columns.computeIfAbsent(Column.of(block.position()), key -> new ArrayList<>())
                         .add(block.position());
             }
         }
@@ -53,12 +55,43 @@ public final class SunkenRoadPlanner {
         Map<Column, Integer> floors = new HashMap<>();
         ArrayDeque<BlockPos> pending = new ArrayDeque<>();
         surfaces.forEach(position -> offer(position, floors, pending));
+        Set<Column> roadColumns = Set.copyOf(floors.keySet());
+        List<BlockPos> excavation = new ArrayList<>();
+        var wallMaterial = RoadStructureMaterialSet.standard().retainingWall().getBlock();
 
         while (!pending.isEmpty()) {
             BlockPos floor = pending.removeFirst();
-            if (floor.getY() != floors.get(Column.of(floor))) continue;
+            Column column = Column.of(floor);
+            if (floor.getY() != floors.get(column)) continue;
+            excavation.clear();
             boolean cutTerrain = false;
-            for (int y = world.highestBlockY(floor.getX(), floor.getZ()); y > floor.getY(); y--) {
+            boolean blockedSlope = false;
+            boolean coveredRoad = false;
+            boolean roadColumn = roadColumns.contains(column);
+            int floorY = floor.getY();
+            int highest = world.highestBlockY(floor.getX(), floor.getZ());
+            int wallTop = floorY;
+            if (roadColumn && world.blockState(floor).is(wallMaterial) && existingRoad.test(floor)) {
+                for (int[] direction : DIRECTIONS) {
+                    BlockPos neighbor = floor.offset(direction[0], 0, direction[1]);
+                    var neighborState = world.blockState(neighbor);
+                    if ((neighborState.blocksMotion() || neighborState.getBlock() instanceof SlabBlock)
+                            && !neighborState.is(wallMaterial)
+                            && existingRoad.test(neighbor) && world.blockState(neighbor.above()).isAir()) {
+                        // Open a short roadside wall where the new pavement meets the old lane.
+                        // A taller solid stack could carry another road and remains protected.
+                        int limit = floorY + RoadTunnelPlanner.FREE_HEIGHT;
+                        int y = floorY + 1;
+                        for (; y <= highest && y <= limit; y++) {
+                            BlockPos wall = floor.above(y - floorY);
+                            if (!world.blockState(wall).is(wallMaterial) || !existingRoad.test(wall)) break;
+                        }
+                        if (y <= limit || y > highest) wallTop = y - 1;
+                        break;
+                    }
+                }
+            }
+            for (int y = floorY + 1; y <= highest; y++) {
                 BlockPos position = new BlockPos(floor.getX(), y, floor.getZ());
                 var state = world.blockState(position);
                 if (state.isAir()) continue;
@@ -66,25 +99,42 @@ public final class SunkenRoadPlanner {
                 // Junction rebuilding already plans which old surface blocks to
                 // keep or clear, including slab companions above the new floor.
                 // Protect other roads without rejecting those explicit changes.
-                if ((existingRoad.test(position) && planned == null) || world.hasBlockEntity(position)
-                        || !state.getFluidState().isEmpty()) {
+                boolean protectedRoad = planned == null && y > wallTop && existingRoad.test(position);
+                boolean blockEntity = world.hasBlockEntity(position);
+                boolean fluid = !state.getFluidState().isEmpty();
+                if (protectedRoad || blockEntity || fluid) {
+                    if (!roadColumn) {
+                        // The side slope can end here. Keep the entire blocked column intact.
+                        blockedSlope = true;
+                        break;
+                    }
+                    if (protectedRoad && state.blocksMotion()
+                            && y - floorY > RoadOverpassPlanner.MINIMUM_FREE_HEIGHT) {
+                        // A protected roof or deck can stay over a road with enough headroom.
+                        coveredRoad = true;
+                        break;
+                    }
                     com.cookiecraftmods.roadbuilder.RoadBuilder.LOGGER.warn(
-                            "Rejected sunken-road excavation: position={}, state={}, protectedRoad={}, blockEntity={}, fluid={}",
-                            position.toShortString(), state, existingRoad.test(position) && planned == null,
-                            world.hasBlockEntity(position), !state.getFluidState().isEmpty());
+                            "Rejected sunken-road excavation: floor={}, position={}, state={}, protectedRoad={}, blockEntity={}, fluid={}",
+                            floor.toShortString(), position.toShortString(), state, protectedRoad, blockEntity, fluid);
                     return new BlockPlanResult.Failure(BlockPlanFailureCode.INVALID_GEOMETRY);
                 }
                 if (planned != null && !planned.targetState().isAir()) continue;
                 cutTerrain |= RoadTunnelPlanner.isTerrain(state);
-                targets.put(position, new PlannedBlock(position, Blocks.AIR.defaultBlockState()));
-                if (targets.size() > maximumBlocks) {
-                    return new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED);
-                }
+                excavation.add(position);
             }
-            if (!cutTerrain) continue;
+            if (blockedSlope) continue;
+            for (BlockPos position : excavation) {
+                targets.put(position, new PlannedBlock(position, Blocks.AIR.defaultBlockState()));
+            }
+            if (targets.size() > maximumBlocks) {
+                return new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED);
+            }
+            if (!cutTerrain || coveredRoad) continue;
             for (int[] direction : DIRECTIONS) {
                 BlockPos next = floor.offset(direction[0], 1, direction[1]);
-                if (existingRoad.test(next) || world.hasBlockEntity(next)) continue;
+                if (roadColumns.contains(Column.of(next)) || existingRoad.test(next)
+                        || world.hasBlockEntity(next)) continue;
                 offer(next, floors, pending);
             }
             if (floors.size() > maximumBlocks) {

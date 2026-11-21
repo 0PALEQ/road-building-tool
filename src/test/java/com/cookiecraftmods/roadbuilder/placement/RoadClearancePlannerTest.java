@@ -65,6 +65,7 @@ class RoadClearancePlannerTest {
         BlockPos surface = new BlockPos(0, 58, 0);
         BlockPos obstruction = new BlockPos(0, 60, 0);
         BlockPos crossedRoad = new BlockPos(0, 64, 0);
+        BlockPos aboveCrossedRoad = crossedRoad.above();
         BlockPlacementPlan surfacePlan = BlockPlacementPlan.create(
                 Level.OVERWORLD,
                 List.of(new PlannedBlock(
@@ -76,6 +77,7 @@ class RoadClearancePlannerTest {
         world.states.put(obstruction, Blocks.OAK_LOG.defaultBlockState());
         world.states.put(crossedRoad,
                 Blocks.GRAY_CONCRETE.defaultBlockState());
+        world.states.put(aboveCrossedRoad, Blocks.STONE.defaultBlockState());
 
         BlockPlacementPlan result = assertInstanceOf(
                 BlockPlanResult.Success.class,
@@ -91,7 +93,7 @@ class RoadClearancePlannerTest {
                 block.position().equals(obstruction)
                         && block.targetState().isAir()));
         assertTrue(result.blocks().stream().noneMatch(block ->
-                block.position().equals(crossedRoad)));
+                block.position().equals(crossedRoad) || block.position().equals(aboveCrossedRoad)));
     }
 
     @Test

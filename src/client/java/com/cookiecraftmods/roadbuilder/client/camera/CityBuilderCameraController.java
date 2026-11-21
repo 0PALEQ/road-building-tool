@@ -5,20 +5,24 @@ import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.SectionPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.border.WorldBorder;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BiPredicate;
 
 public final class CityBuilderCameraController {
     private static final float DEFAULT_PITCH = 55.0F;
     private static final double DEFAULT_DISTANCE = 24.0;
     private static final double FOCUS_HEIGHT = 0.5;
     private static final double BORDER_MARGIN = 0.5;
+    private static final double COLLISION_MARGIN = 1.0 + 1.0E-7;
 
     private final RoadBuilderClientPreferences preferences;
     private boolean active;
@@ -118,7 +122,39 @@ public final class CityBuilderCameraController {
         double nextX = clamp(player.getX() + horizontal.x(), minimumX, maximumX);
         double nextY = clamp(player.getY() + verticalAxis * speed, minimumY, maximumY);
         double nextZ = clamp(player.getZ() + horizontal.z(), minimumZ, maximumZ);
+        if (!hasLoadedMovementChunks(
+                player.getBoundingBox(),
+                nextX - player.getX(),
+                nextZ - player.getZ(),
+                client.level.getChunkSource()::hasChunk
+        )) {
+            return;
+        }
         player.setPos(nextX, nextY, nextZ);
+    }
+
+    static boolean hasLoadedMovementChunks(
+            AABB playerBounds,
+            double movementX,
+            double movementZ,
+            BiPredicate<Integer, Integer> hasChunk
+    ) {
+        // Collision checks can inspect neighboring blocks outside the swept player bounds.
+        AABB collisionBounds = playerBounds.expandTowards(movementX, 0.0, movementZ)
+                .inflate(COLLISION_MARGIN, 0.0, COLLISION_MARGIN);
+        int minChunkX = SectionPos.blockToSectionCoord(collisionBounds.minX);
+        int maxChunkX = SectionPos.blockToSectionCoord(collisionBounds.maxX);
+        int minChunkZ = SectionPos.blockToSectionCoord(collisionBounds.minZ);
+        int maxChunkZ = SectionPos.blockToSectionCoord(collisionBounds.maxZ);
+
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if (!hasChunk.test(chunkX, chunkZ)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     public boolean handleMouseButton(

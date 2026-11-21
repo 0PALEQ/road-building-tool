@@ -109,7 +109,7 @@ public final class SegmentReplacementEndpoint {
         }
 
         PreparedSegmentReplacement replacement = graph.prepareSegmentReplacement(
-                selected.id(), packet.presetId(), preset
+                selected.id(), packet.presetId(), preset, packet.sunkenRoad()
         );
         ServerLevelPlacementBlockWorld world =
                 new ServerLevelPlacementBlockWorld(player.serverLevel());
@@ -336,6 +336,7 @@ public final class SegmentReplacementEndpoint {
             MaterializationRebuildWorld world
     ) {
         LinkedHashMap<RoadNodeId, BlockPlacementPlan> result = new LinkedHashMap<>();
+        RoadTransitionPlanPreparer transitionPreparer = new RoadTransitionPlanPreparer();
         for (RoadNodeId nodeId : List.of(
                 replacement.startNodeId(),
                 replacement.endNodeId())) {
@@ -365,7 +366,7 @@ public final class SegmentReplacementEndpoint {
                 continue;
             }
             if (SmoothRoadTransitionMaterializer.supports(node, incident)) {
-                BlockPlanResult transition = new RoadTransitionPlanPreparer().plan(
+                BlockPlanResult transition = transitionPreparer.plan(
                         graph.dimension(),
                         node,
                         incident,
@@ -438,6 +439,15 @@ public final class SegmentReplacementEndpoint {
                                         "node-marking", nodeId.toString())
                         )
                 );
+            }
+            if (incident.stream().anyMatch(segment -> segment.presetSnapshot().sunkenRoad())) {
+                BlockPlanResult completed = transitionPreparer.complete(
+                        combined, node, incident, world, world::isMaterializedRoadPosition, limits
+                );
+                if (!(completed instanceof BlockPlanResult.Success successPlan)) {
+                    throw new IllegalStateException("replacement sunken junction could not be materialized");
+                }
+                combined = successPlan.plan();
             }
             result.put(nodeId, combined);
         }

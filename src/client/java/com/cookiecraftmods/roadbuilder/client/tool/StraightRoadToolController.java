@@ -2516,7 +2516,7 @@ public final class StraightRoadToolController {
                         graph.revision(),
                         preset.id(),
                         preset.revision()
-                ))) {
+                ).withSunkenRoad(sunkenRoad))) {
             showTransient(
                     client,
                     Component.translatable("message.roadbuilder.server_unsupported")

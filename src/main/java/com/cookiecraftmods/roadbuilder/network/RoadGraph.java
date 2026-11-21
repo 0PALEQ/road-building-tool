@@ -331,10 +331,19 @@ public final class RoadGraph {
         revision++;
     }
 
-        public PreparedSegmentReplacement prepareSegmentReplacement(
+    public PreparedSegmentReplacement prepareSegmentReplacement(
             RoadSegmentId segmentId,
             ResourceLocation presetId,
             RoadPreset preset
+    ) {
+        return prepareSegmentReplacement(segmentId, presetId, preset, false);
+    }
+
+    public PreparedSegmentReplacement prepareSegmentReplacement(
+            RoadSegmentId segmentId,
+            ResourceLocation presetId,
+            RoadPreset preset,
+            boolean sunkenRoad
     ) {
         Objects.requireNonNull(segmentId, "segmentId");
         Objects.requireNonNull(presetId, "presetId");
@@ -352,6 +361,9 @@ public final class RoadGraph {
                     ? original.lanes().get(index).id()
                     : new RoadLaneId(nextGeneratedId(generated)));
         }
+        RoadPresetSnapshot presetSnapshot = original.lanes().stream().anyMatch(lane ->
+                lane.component().type() == com.cookiecraftmods.roadbuilder.preset.LaneType.ROUNDABOUT)
+                ? roundaboutSnapshot(preset) : RoadPresetSnapshot.from(preset);
         RoadSegment replacement = RoadSegment.path(
                 original.id(),
                 original.roadId(),
@@ -360,9 +372,7 @@ public final class RoadGraph {
                 original.referenceGeometry(),
                 presetId,
                 preset.revision(),
-                original.lanes().stream().anyMatch(lane -> lane.component().type()
-                        == com.cookiecraftmods.roadbuilder.preset.LaneType.ROUNDABOUT)
-                        ? roundaboutSnapshot(preset) : RoadPresetSnapshot.from(preset),
+                presetSnapshot.withSunkenRoad(sunkenRoad),
                 original.trafficHandedness(),
                 replacementLaneIds
         );

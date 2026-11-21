@@ -7,6 +7,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -264,7 +265,8 @@ public final class RoadMaterializationPlanner {
         }
         Set<BlockPos> protectedPositions = Set.of();
         if (protectJunctionApproaches) {
-            Set<BlockPos> surfacePositions = BlockPositionSets.nonAirTargets(mergedSurface);
+            Set<BlockPos> surfacePositions = new HashSet<>(BlockPositionSets.nonAirTargets(mergedSurface));
+            surfacePositions.addAll(tunnels.protectedRoofPositions());
             protectedPositions = BlockPositionSets.nonAirTargets(plan, block ->
                     surfacePositions.contains(block.position()) || !structurePlanner.isLandscaping(block.targetState()));
         }
