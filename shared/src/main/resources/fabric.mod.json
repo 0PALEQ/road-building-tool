@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "roadbuilder",
+  "version": "${version}",
+  "name": "Road Builder",
+  "description": "A tool for building complex road networks by adding city builder-like road tools. Copyright © 2026 opaleq. All rights reserved.",
+  "icon": "assets/roadbuilder/icon.png",
+  "authors": [
+    "opaleq - CookieCraftMods"
+  ],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "com.cookiecraftmods.roadbuilder.client.RoadBuilderDataGenerator"
+    ],
+    "client": [
+      "com.cookiecraftmods.roadbuilder.client.RoadBuilderClient"
+    ],
+    "main": [
+      "com.cookiecraftmods.roadbuilder.RoadBuilder"
+    ]
+  },
+  "mixins": [
+    "roadbuilder.mixins.json",
+    {
+      "config": "roadbuilder.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "java": ">=${java_version}",
+    "minecraft": "${minecraft_version}"
+  }
+}

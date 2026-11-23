@@ -37,7 +37,7 @@ does not have focus. Escape cancels a drag before closing the editor.
 
 ## Verification
 
-Run `gradlew.bat test` (or `./gradlew test`) with a supported Gradle JVM. Editor
+Run `gradlew.bat test` (or `./gradlew test`) with JDK 21 as the Gradle JVM. Editor
 tests cover responsive geometry, small-screen scrolling, material inheritance,
 classification/junction round trips, drag geometry, selection and request state.
 

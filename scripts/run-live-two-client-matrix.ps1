@@ -3,6 +3,10 @@ param(
     [string]$Workspace,
     [Parameter(Mandatory = $true)]
     [string]$LaunchSpecDirectory,
+    [Parameter(Mandatory = $true)]
+    [string]$PresetDirectory,
+    [Parameter(Mandatory = $true)]
+    [int]$DataPackFormat,
     [int]$BasePort = 25576,
     [ValidateSet("BOTH", "RHT", "LHT")]
     [string]$Handedness = "BOTH"
@@ -56,10 +60,13 @@ function Wait-ForFile {
 function Wait-ForProcesses {
     param(
         [System.Diagnostics.Process[]]$Processes,
-        [int]$TimeoutSeconds
+        [int]$TimeoutSeconds,
+        [string]$EvidenceDirectory,
+        [string]$Phase
     )
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
+        Assert-Evidence -EvidenceDirectory $EvidenceDirectory -Phase $Phase -Names @()
         if (($Processes | Where-Object { -not $_.HasExited }).Count -eq 0) {
             foreach ($process in $Processes) {
                 $process.WaitForExit()
@@ -118,7 +125,7 @@ function Start-MatrixProcess {
     $stderr = "$LogPrefix.err.log"
     return Start-Process `
         -FilePath $metadata.executable `
-        -ArgumentList @("@$argumentFile") `
+        -ArgumentList ('"@{0}"' -f $argumentFile) `
         -WorkingDirectory $RunDirectory `
         -RedirectStandardOutput $stdout `
         -RedirectStandardError $stderr `
@@ -154,6 +161,7 @@ function Write-ServerConfiguration {
         "max-tick-time=-1"
         "motd=Road Builder live matrix"
         "online-mode=false"
+        "server-ip=127.0.0.1"
         "server-port=$Port"
         "simulation-distance=8"
         "spawn-protection=0"
@@ -165,6 +173,20 @@ function Write-ServerConfiguration {
         $serverProperties + "`n",
         $utf8NoBom
     )
+    $packDirectory = Join-Path $ServerRunDirectory "matrix-world-$RunId\datapacks\roadbuilder-matrix"
+    $presets = Join-Path $packDirectory "data\roadbuilder\road_presets"
+    New-Item -ItemType Directory -Force -Path $presets | Out-Null
+    $packMetadata = @{
+        pack = @{
+            pack_format = $DataPackFormat
+            description = "Road Builder live matrix fixtures"
+        }
+    } | ConvertTo-Json
+    [System.IO.File]::WriteAllText((Join-Path $packDirectory "pack.mcmeta"), $packMetadata, $utf8NoBom)
+    foreach ($preset in Get-ChildItem -LiteralPath $PresetDirectory -Filter "*.json" -File) {
+        Copy-Item -LiteralPath $preset.FullName -Destination $presets
+    }
+
     $policyJson = @{
         schema_version = 1
         maximum_distance = 128.0
@@ -194,7 +216,7 @@ function Assert-Evidence {
         [string[]]$Names
     )
     $failures = Get-ChildItem -LiteralPath $EvidenceDirectory `
-        -Filter "$Phase-failure-*.txt" `
+        -Filter "$Phase-failure*.txt" `
         -ErrorAction SilentlyContinue
     if ($failures) {
         $details = $failures | ForEach-Object {
@@ -266,8 +288,10 @@ function Invoke-Phase {
                 Join-Path $matrixRunRoot "$Handedness\$Phase-actor"
             ) `
             -LogPrefix (Join-Path $logDir "$Phase-actor")
-        Wait-ForProcesses -Processes @($actor, $observer) -TimeoutSeconds 360
-        Wait-ForProcesses -Processes @($server) -TimeoutSeconds 120
+        Wait-ForProcesses -Processes @($actor, $observer) -TimeoutSeconds 360 `
+            -EvidenceDirectory $EvidenceDirectory -Phase $Phase
+        Wait-ForProcesses -Processes @($server) -TimeoutSeconds 120 `
+            -EvidenceDirectory $EvidenceDirectory -Phase $Phase
     } catch {
         foreach ($process in @($actor, $observer, $server)) {
             if ($process -and -not $process.HasExited) {

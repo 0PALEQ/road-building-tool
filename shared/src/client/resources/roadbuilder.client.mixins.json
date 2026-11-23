@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.cookiecraftmods.roadbuilder.mixin.client",
+  "compatibilityLevel": "JAVA_${java_version}",
+  "client": [
+    "AxiomHotbarMixin",
+    "CameraMixin",
+    "GameRendererAccessor",
+    "GameRendererMixin",
+    "GuiMixin",
+    "KeyboardHandlerMixin",
+    "KeyboardInputMixin",
+    "MinecraftMixin",
+    "MouseHandlerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}

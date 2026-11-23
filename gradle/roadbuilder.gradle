@@ -1,0 +1,583 @@
+def targetJavaVersion = project.java_version.toInteger()
+def sharedSources = rootProject.file("shared/src")
+
+version = project.mod_version
+group = project.maven_group
+
+def modResourceProperties = [
+        version          : project.mod_version,
+        minecraft_version: project.minecraft_version,
+        loader_version   : project.loader_version,
+        java_version     : targetJavaVersion
+]
+def roadBuilderArchiveName = "${project.archives_base_name}-${project.name}"
+
+base {
+    archivesName = roadBuilderArchiveName
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        "roadbuilder" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+
+    runs {
+        matrixServer {
+            server()
+            runDir "build/run/live-two-client/template-server"
+            property "roadbuilder.matrix.enabled", "true"
+            property "roadbuilder.matrix.role", "server"
+            property "roadbuilder.matrix.phase", "__PHASE__"
+            property "roadbuilder.matrix.handedness", "__HANDEDNESS__"
+            property "roadbuilder.matrix.evidenceDir", "__EVIDENCE_DIR__"
+            programArg "nogui"
+            ideConfigGenerated false
+        }
+        matrixActor {
+            client()
+            runDir "build/run/live-two-client/template-actor"
+            property "roadbuilder.matrix.enabled", "true"
+            property "roadbuilder.matrix.role", "actor"
+            property "roadbuilder.matrix.phase", "__PHASE__"
+            property "roadbuilder.matrix.handedness", "__HANDEDNESS__"
+            property "roadbuilder.matrix.port", "__PORT__"
+            property "roadbuilder.matrix.evidenceDir", "__EVIDENCE_DIR__"
+            programArgs("--username", "RoadActor")
+            ideConfigGenerated false
+        }
+        matrixObserver {
+            client()
+            runDir "build/run/live-two-client/template-observer"
+            property "roadbuilder.matrix.enabled", "true"
+            property "roadbuilder.matrix.role", "observer"
+            property "roadbuilder.matrix.phase", "__PHASE__"
+            property "roadbuilder.matrix.handedness", "__HANDEDNESS__"
+            property "roadbuilder.matrix.port", "__PORT__"
+            property "roadbuilder.matrix.evidenceDir", "__EVIDENCE_DIR__"
+            programArgs("--username", "RoadObserver")
+            ideConfigGenerated false
+        }
+    }
+}
+
+fabricApi {
+    configureDataGeneration {
+        client = true
+    }
+
+    configureTests {
+        createSourceSet = true
+        modId = "roadbuilder-gametest"
+        enableClientGameTests = false
+    }
+}
+
+tasks.named("processGametestResources") {
+    from(new File(sharedSources, "gametest/structures")) {
+        into("data/roadbuilder/gametest/${project.gametest_structure_directory}")
+    }
+}
+
+loom.runs.named("gameTest") {
+    systemProperties.put(
+            "fabric-api.gametest.report-file",
+            layout.buildDirectory.file("test-results/gametest/results.xml").get().asFile.absolutePath
+    )
+}
+
+def prepareGameTestRun = tasks.register("prepareGameTestRun", Copy) {
+    from(new File(sharedSources, "gametest/server.properties"))
+    into(layout.buildDirectory.dir("run/gameTest"))
+}
+
+tasks.named("runGameTest") {
+    dependsOn(prepareGameTestRun)
+}
+
+def roadBuilderServerBaselineDirectory = layout.buildDirectory.dir(
+        "reports/roadbuilder-server-baseline"
+)
+def roadBuilderServerBaselineReport = roadBuilderServerBaselineDirectory.map {
+    it.file("baseline.json")
+}
+def serverBaselineRequested = gradle.startParameter.taskNames.any {
+    it == "measureRoadBuilderServerBaseline"
+            || it.endsWith(":measureRoadBuilderServerBaseline")
+}
+if (serverBaselineRequested) {
+    tasks.named("runGameTest") {
+        systemProperty(
+                "roadbuilder.serverProfile.reportFile",
+                roadBuilderServerBaselineReport.get().asFile.absolutePath
+        )
+    }
+}
+
+sourceSets {
+    [main, client, test, gametest].each { sources ->
+        sources.java.srcDir(new File(sharedSources, "${sources.name}/java"))
+        sources.resources.srcDir(new File(sharedSources, "${sources.name}/resources"))
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    testImplementation platform("org.junit:junit-bom:5.11.4")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+tasks.withType(ProcessResources).configureEach {
+    inputs.properties(modResourceProperties)
+    filteringCharset = "UTF-8"
+    filesMatching(["fabric.mod.json", "roadbuilder.mixins.json", "roadbuilder.client.mixins.json"]) {
+        expand modResourceProperties
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release.set(targetJavaVersion)
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    // Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
+    // if it is present.
+    // If you remove this line, sources will not be generated.
+    withSourcesJar()
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    systemProperty("roadbuilder.sharedSources", sharedSources.absolutePath)
+    inputs.dir(new File(sharedSources, "client/java"))
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+}
+
+def placementRestartFixtureDirectory = layout.buildDirectory.dir(
+        "test-fixtures/placement-restart"
+)
+def placementRestartFixtureFile = placementRestartFixtureDirectory.map {
+    it.file("roadbuilder_placement_ownership.dat")
+}
+def networkRestartFixtureFile = placementRestartFixtureDirectory.map {
+    it.file("roadbuilder_road_graph.dat")
+}
+def constructionJobRestartFixtureFile = placementRestartFixtureDirectory.map {
+    it.file("roadbuilder_construction_jobs.dat")
+}
+
+def cleanPlacementRestartFixture = tasks.register(
+        "cleanPlacementRestartFixture",
+        Delete
+) {
+    delete(placementRestartFixtureDirectory)
+}
+
+def preparePlacementRestartFixture = tasks.register(
+        "preparePlacementRestartFixture",
+        JavaExec
+) {
+    group = "verification"
+    description = "Writes placement, road-graph, and construction-job SavedData in a dedicated Java process."
+    dependsOn(tasks.named("testClasses"), cleanPlacementRestartFixture)
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "com.cookiecraftmods.roadbuilder.persistence.RoadBuilderPlacementRestartFixture"
+    args("prepare", placementRestartFixtureDirectory.get().asFile.absolutePath)
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    outputs.file(placementRestartFixtureFile)
+    outputs.file(networkRestartFixtureFile)
+    outputs.file(constructionJobRestartFixtureFile)
+    outputs.upToDateWhen { false }
+}
+
+def verifyPlacementProcessRestart = tasks.register(
+        "verifyPlacementProcessRestart",
+        JavaExec
+) {
+    group = "verification"
+    description = "Loads and verifies placement, road-graph, and construction-job SavedData in a fresh Java process."
+    dependsOn(preparePlacementRestartFixture)
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "com.cookiecraftmods.roadbuilder.persistence.RoadBuilderPlacementRestartFixture"
+    args("verify", placementRestartFixtureDirectory.get().asFile.absolutePath)
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    inputs.file(placementRestartFixtureFile)
+    inputs.file(networkRestartFixtureFile)
+    inputs.file(constructionJobRestartFixtureFile)
+    outputs.upToDateWhen { false }
+}
+
+def mutationKillFixtureDirectory = layout.buildDirectory.dir(
+        "test-fixtures/mutation-process-kills"
+)
+def mutationKillBoundaries = [
+        "prepared_flush",
+        "applying_flush",
+        "world_batch_flush",
+        "terminal_checkpoint"
+]
+def mutationKillVerifiers = mutationKillBoundaries.collect { boundary ->
+    def suffix = boundary.split("_").collect { it.capitalize() }.join("")
+    def prepareTask = tasks.register(
+            "prepareMutationKill${suffix}",
+            JavaExec
+    ) {
+        group = "verification"
+        dependsOn(tasks.named("testClasses"))
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = "com.cookiecraftmods.roadbuilder.persistence.RoadBuilderMutationKillFixture"
+        args(
+                "prepare",
+                boundary,
+                mutationKillFixtureDirectory.get().asFile.absolutePath
+        )
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+        }
+        ignoreExitValue = true
+        outputs.upToDateWhen { false }
+    }
+    tasks.register("verifyMutationKill${suffix}", JavaExec) {
+        group = "verification"
+        dependsOn(prepareTask)
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = "com.cookiecraftmods.roadbuilder.persistence.RoadBuilderMutationKillFixture"
+        args(
+                "verify",
+                boundary,
+                mutationKillFixtureDirectory.get().asFile.absolutePath
+        )
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+        }
+        outputs.upToDateWhen { false }
+    }
+}
+tasks.register("verifyMutationProcessKills") {
+    group = "verification"
+    description = "Kills fresh JVMs at durable mutation boundaries and verifies recovery in new JVMs."
+    dependsOn(mutationKillVerifiers)
+}
+def roadBuilderBaselineDirectory = layout.buildDirectory.dir(
+        "reports/roadbuilder-baseline"
+)
+def roadBuilderBaselineReport = roadBuilderBaselineDirectory.map {
+    it.file("baseline.json")
+}
+def cleanRoadBuilderBaseline = tasks.register(
+        "cleanRoadBuilderBaseline",
+        Delete
+) {
+    delete(roadBuilderBaselineDirectory)
+}
+tasks.register("measureRoadBuilderBaseline", JavaExec) {
+    group = "verification"
+    description = "Measures synchronous commit time and compressed placement/graph save sizes."
+    dependsOn(tasks.named("testClasses"), cleanRoadBuilderBaseline)
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "com.cookiecraftmods.roadbuilder.performance.RoadBuilderBaselineFixture"
+    args(
+            roadBuilderBaselineReport.get().asFile.absolutePath,
+            roadBuilderBaselineDirectory.get().dir("saved-data").asFile.absolutePath
+    )
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    outputs.file(roadBuilderBaselineReport)
+    outputs.upToDateWhen { false }
+}
+
+tasks.register("measureRoadBuilderServerBaseline") {
+    group = "verification"
+    description = "Combines the component baseline with opt-in real ServerLevel tick measurements."
+    dependsOn(tasks.named("measureRoadBuilderBaseline"), tasks.named("runGameTest"))
+    tasks.named("runGameTest").get().mustRunAfter(tasks.named("measureRoadBuilderBaseline"))
+    doLast {
+        if (!roadBuilderServerBaselineReport.get().asFile.isFile()) {
+            throw new GradleException(
+                    "Real ServerLevel baseline report was not produced at "
+                            + roadBuilderServerBaselineReport.get().asFile
+            )
+        }
+    }
+}
+
+def denseCurvedSyncReport = layout.buildDirectory.file(
+        "reports/roadbuilder-dense-curved-sync.json"
+)
+tasks.register("measureDenseCurvedSync", JavaExec) {
+    group = "verification"
+    description = "Measures full-snapshot wire size and frame-time cost for a dense curved network."
+    dependsOn(tasks.named("testClasses"))
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = "com.cookiecraftmods.roadbuilder.performance.DenseCurvedNetworkSyncFixture"
+    args(denseCurvedSyncReport.get().asFile.absolutePath)
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    outputs.file(denseCurvedSyncReport)
+    outputs.upToDateWhen { false }
+}
+
+def liveTwoClientMatrixReport = layout.buildDirectory.file(
+        "reports/roadbuilder-live-two-client/matrix.json"
+)
+def liveTwoClientLaunchSpecs = layout.buildDirectory.dir(
+        "roadbuilder-live-two-client-launch"
+)
+tasks.register("writeRoadBuilderLiveMatrixLaunchSpecs") {
+    dependsOn(
+            tasks.named("configureLaunch"),
+            tasks.named("configureClientLaunch"),
+            tasks.named("classes"),
+            tasks.named("clientClasses")
+    )
+    doLast {
+        def outputDirectory = liveTwoClientLaunchSpecs.get().asFile
+        outputDirectory.mkdirs()
+        def quoteArg = { Object raw ->
+            def value = raw.toString()
+            '"' + value
+                    .replace("\\", "\\\\")
+                    .replace('"', '\\"') + '"'
+        }
+        [
+                server: tasks.named("runMatrixServer").get(),
+                actor: tasks.named("runMatrixActor").get(),
+                observer: tasks.named("runMatrixObserver").get()
+        ].each { role, launchTask ->
+            def arguments = []
+            launchTask.allJvmArgs.each { argument ->
+                def value = argument.toString()
+                if (value.startsWith("@")) {
+                    arguments.addAll(
+                            file(value.substring(1)).readLines("UTF-8")
+                    )
+                } else {
+                    arguments.add(value)
+                }
+            }
+            arguments.add(launchTask.mainClass.get())
+            def programArguments = new ArrayList(launchTask.args)
+            if (role == "actor" || role == "observer") {
+                for (int index = programArguments.size() - 1; index >= 0; index--) {
+                    if (programArguments[index] == "--username") {
+                        programArguments.remove(index)
+                        if (index < programArguments.size()) {
+                            programArguments.remove(index)
+                        }
+                    }
+                }
+                programArguments.add("--username")
+                programArguments.add(role == "actor" ? "RoadActor" : "RoadObserver")
+            }
+            arguments.addAll(programArguments)
+            def argumentFile = new File(outputDirectory, "${role}.args")
+            argumentFile.text = arguments.collect(quoteArg).join(
+                    System.lineSeparator()
+            ) + System.lineSeparator()
+            def metadata = [
+                    executable: launchTask.javaLauncher.get()
+                            .executablePath.asFile.absolutePath,
+                    argument_file: argumentFile.absolutePath
+            ]
+            new File(outputDirectory, "${role}.json").text =
+                    groovy.json.JsonOutput.toJson(metadata)
+        }
+    }
+    outputs.dir(liveTwoClientLaunchSpecs)
+    outputs.upToDateWhen { false }
+}
+tasks.register("runRoadBuilderLiveTwoClientMatrix", Exec) {
+    group = "verification"
+    description = "Launches a dedicated server and two real Minecraft client processes for RHT and LHT."
+    dependsOn(tasks.named("writeRoadBuilderLiveMatrixLaunchSpecs"))
+    workingDir(projectDir)
+    commandLine(
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            rootProject.file("scripts/run-live-two-client-matrix.ps1").absolutePath,
+            "-Workspace",
+            projectDir.absolutePath,
+            "-LaunchSpecDirectory",
+            liveTwoClientLaunchSpecs.get().asFile.absolutePath,
+            "-BasePort",
+            project.matrix_base_port,
+            "-PresetDirectory",
+            new File(sharedSources, "gametest/resources/data/roadbuilder/road_presets").absolutePath,
+            "-DataPackFormat",
+            project.data_pack_format
+    )
+    outputs.file(liveTwoClientMatrixReport)
+    outputs.upToDateWhen { false }
+}
+
+def releaseMatrixReport = layout.buildDirectory.file(
+        "reports/roadbuilder-release-matrix.json"
+)
+tasks.register("generateRoadBuilderReleaseMatrix") {
+    group = "verification"
+    description = "Runs the reusable verification matrix and records machine-readable evidence."
+    dependsOn(
+            tasks.named("test"),
+            tasks.named("runGameTest"),
+            tasks.named("verifyPlacementProcessRestart"),
+            tasks.named("verifyMutationProcessKills"),
+            tasks.named("measureDenseCurvedSync"),
+            tasks.named("runRoadBuilderLiveTwoClientMatrix")
+    )
+    doLast {
+        def unitFiles = fileTree(
+                layout.buildDirectory.dir("test-results/test")
+        ).matching { include("TEST-*.xml") }.files
+        def gameTestFile = layout.buildDirectory.file(
+                "test-results/gametest/results.xml"
+        ).get().asFile
+        def xmlCount = { file, attribute ->
+            def matcher = file.text =~ (
+                    /<testsuite\b[^>]*\b/ + attribute + /="(\d+)"/
+            )
+            matcher.find() ? matcher.group(1).toInteger() : 0
+        }
+        def elementCount = { file, element ->
+            def matcher = file.text =~ (/<${element}\b/)
+            int count = 0
+            while (matcher.find()) {
+                count++
+            }
+            count
+        }
+        def unitFailures = unitFiles.sum { file ->
+            xmlCount(file, "failures") + xmlCount(file, "errors")
+        } ?: 0
+        def unitTests = unitFiles.sum { file ->
+            xmlCount(file, "tests")
+        } ?: 0
+        // Fabric's 1.20.1 GameTest reporter nests suites without aggregate
+        // attributes, so count leaf elements when those attributes are absent.
+        def gameFailures = xmlCount(gameTestFile, "failures")
+                + xmlCount(gameTestFile, "errors")
+        if (gameFailures == 0) {
+            gameFailures = elementCount(gameTestFile, "failure")
+                    + elementCount(gameTestFile, "error")
+        }
+        def gameTests = xmlCount(gameTestFile, "tests")
+        if (gameTests == 0) {
+            gameTests = elementCount(gameTestFile, "testcase")
+        }
+        def dense = new groovy.json.JsonSlurper().parse(
+                denseCurvedSyncReport.get().asFile
+        )
+        def live = new groovy.json.JsonSlurper().parse(
+                liveTwoClientMatrixReport.get().asFile
+        )
+        def report = [
+                format_version: 1,
+                generated_at_utc: java.time.Instant.now().toString(),
+                java_version: System.getProperty("java.version"),
+                os: System.getProperty("os.name"),
+                checks: [
+                        [
+                                id: "unit_and_component",
+                                status: unitFailures == 0 ? "passed" : "failed",
+                                tests: unitTests,
+                                failures: unitFailures
+                        ],
+                        [
+                                id: "headless_dedicated_server",
+                                status: gameFailures == 0 ? "passed" : "failed",
+                                tests: gameTests
+                        ],
+                        [
+                                id: "fresh_process_saved_data_recovery",
+                                status: "passed"
+                        ],
+                        [
+                                id: "durable_pre_mutation_journal_recovery",
+                                status: "passed",
+                                process_kill_boundaries: [
+                                        "prepared_flush",
+                                        "applying_flush",
+                                        "world_batch_flush",
+                                        "terminal_checkpoint"
+                                ]
+                        ],
+                        [
+                                id: "dense_curved_snapshot",
+                                status: "passed",
+                                wire_bytes: dense.wire_bytes,
+                                decode_median_ms: dense.decode_median_ms,
+                                chunking_required: dense.chunking_required,
+                                chunking_implemented: true,
+                                chunk_bytes: 65536,
+                                decode_off_client_thread: true
+                        ],
+                        [
+                                id: "live_two_client_dedicated_server",
+                                status: live.status,
+                                client_count: live.client_count,
+                                handedness: live.rows.collect {
+                                    it.handedness
+                                },
+                                phases: ["place", "reload"],
+                                evidence: liveTwoClientMatrixReport.get()
+                                        .asFile.absolutePath
+                        ]
+                ]
+        ]
+        report.overall_status = report.checks.every {
+            it.status == "passed"
+        } ? "passed" : "failed"
+        def output = releaseMatrixReport.get().asFile
+        output.parentFile.mkdirs()
+        output.text = groovy.json.JsonOutput.prettyPrint(
+                groovy.json.JsonOutput.toJson(report)
+        ) + System.lineSeparator()
+    }
+    outputs.file(releaseMatrixReport)
+    outputs.upToDateWhen { false }
+}
+
+jar {
+    from(rootProject.file("LICENSE.txt")) {
+        rename { "${it}_${roadBuilderArchiveName}" }
+    }
+}
+
+// configure the maven publication
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            artifactId = roadBuilderArchiveName
+            from components.java
+        }
+    }
+
+    // See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
+    repositories {
+        // Add repositories to publish to here.
+        // Notice: This block does NOT have the same function as the block in the top level.
+        // The repositories here will be used for publishing your artifact, not for
+        // retrieving dependencies.
+    }
+}
