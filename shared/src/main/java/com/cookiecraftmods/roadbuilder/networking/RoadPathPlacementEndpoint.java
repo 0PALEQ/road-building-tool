@@ -39,12 +39,9 @@ import com.cookiecraftmods.roadbuilder.placement.StraightRoadIntersectionMateria
 import com.cookiecraftmods.roadbuilder.placement.SmoothRoadTransitionMaterializer;
 import com.cookiecraftmods.roadbuilder.placement.RoadTransitionPlanPreparer;
 import com.cookiecraftmods.roadbuilder.placement.OperationMaterializationRepartition;
-import com.cookiecraftmods.roadbuilder.placement.JunctionMarkingMaterializer;
 import com.cookiecraftmods.roadbuilder.persistence.RoadBuilderConstructionJobSavedData;
-import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import com.cookiecraftmods.roadbuilder.preset.TrafficHandedness;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
@@ -445,19 +442,11 @@ public final class RoadPathPlacementEndpoint {
                     .map(approach -> approach.segment())
                     .findFirst()
                     .orElse(incident.get(0));
-            var pavementBlock = primary.presetSnapshot()
-                    .intersectionStyle().pavementBlock();
-            var sidewalkBlock = primary.presetSnapshot().surfaceBands().stream()
-                    .filter(band -> band.role() == RoadSurfaceRole.SIDEWALK)
-                    .findFirst()
-                    .map(band -> band.block())
-                    .orElse(pavementBlock);
-            BlockPlanResult surface = materializer.plan(
+            BlockPlanResult surface = materializer.planWithMarkings(
                     dimension,
                     node,
                     incident,
-                    pavementBlock,
-                    sidewalkBlock,
+                    primary,
                     limits.maximumAffectedBlocks(),
                     limits.maximumPlanningCandidates(), definition
             );
@@ -467,47 +456,6 @@ public final class RoadPathPlacementEndpoint {
                 );
             }
             BlockPlacementPlan decoratedSurface = surfaceSuccess.plan();
-            BlockPlanResult markings = new JunctionMarkingMaterializer().plan(
-                    dimension,
-                    node,
-                    incident,
-                    definition,
-                    limits.maximumAffectedBlocks()
-            );
-            if (markings instanceof
-                    BlockPlanResult.Success markingSuccess) {
-                        var roundedEdgePositions = surfaceSuccess.plan()
-                                .blocks().stream()
-                                .filter(block -> !BuiltInRegistries.BLOCK
-                                        .getKey(block.targetState().getBlock())
-                                        .equals(pavementBlock))
-                                .map(com.cookiecraftmods.roadbuilder.placement.PlannedBlock::position)
-                                .toList();
-                        var clippedMarkings = BlockPlacementPlans
-                                .excludingPositions(
-                                        markingSuccess.plan(),
-                                        roundedEdgePositions
-                                );
-                        if (clippedMarkings.isPresent()) {
-                            decoratedSurface = BlockPlacementPlans.mergeLayered(
-                                    dimension,
-                                    List.of(
-                                            new com.cookiecraftmods.roadbuilder.placement.LayeredBlockPlan(
-                                                    decoratedSurface,
-                                                    com.cookiecraftmods.roadbuilder.placement.MaterialLayer.JUNCTION_SURFACE,
-                                                    "node",
-                                                    node.id().toString()
-                                            ),
-                                            new com.cookiecraftmods.roadbuilder.placement.LayeredBlockPlan(
-                                                    clippedMarkings.orElseThrow(),
-                                                    com.cookiecraftmods.roadbuilder.placement.MaterialLayer.JUNCTION_MARKING,
-                                                    "node-marking",
-                                                    node.id().toString()
-                                            )
-                                    )
-                            );
-                        }
-            }
             List<RoadStructurePlanner.StructureSpan> structureSpans = incident
                     .stream()
                     .map(segment -> new RoadStructurePlanner.StructureSpan(

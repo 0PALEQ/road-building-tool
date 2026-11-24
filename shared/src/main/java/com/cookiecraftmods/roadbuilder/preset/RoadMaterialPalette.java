@@ -129,12 +129,23 @@ public record RoadMaterialPalette(
         );
     }
 
+    public static List<ResourceLocation> pavementUnderlay(
+            ResourceLocation pavementBlock, List<RoadSurfaceBand> bands
+    ) {
+        return bands.stream()
+                .filter(band -> band.role() == RoadSurfaceRole.PAVEMENT
+                        && band.block().equals(pavementBlock))
+                .map(RoadSurfaceBand::blockSet)
+                .max(java.util.Comparator.comparingInt(List::size))
+                .orElseGet(() -> List.of(pavementBlock));
+    }
+
     public static RoadMaterialPalette migrate(
             ResourceLocation pavementBlock,
             List<RoadSurfaceBand> bands
     ) {
         RoadMaterialPalette defaults = defaults(pavementBlock);
-        List<ResourceLocation> pavement = List.of(pavementBlock);
+        List<ResourceLocation> pavement = pavementUnderlay(pavementBlock, bands);
         List<ResourceLocation> marking = firstBlockSet(
                 bands, RoadSurfaceRole.MARKING, defaults.markingBlocks
         );

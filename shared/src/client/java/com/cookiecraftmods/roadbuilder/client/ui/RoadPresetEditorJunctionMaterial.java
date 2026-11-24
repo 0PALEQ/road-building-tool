@@ -22,7 +22,7 @@ enum RoadPresetEditorJunctionMaterial {
         return switch (this) {
             case PAVEMENT -> Optional.of(style.pavementBlock());
             case MARKING -> style.markingBlock();
-            case CROSSWALK -> style.crosswalkBlock();
+            case CROSSWALK -> style.crosswalkMaterialOverride();
             case STOP_LINE -> style.stopLineBlock();
         };
     }
@@ -34,7 +34,9 @@ enum RoadPresetEditorJunctionMaterial {
                 this == MARKING ? block : style.markingBlock(),
                 this == CROSSWALK ? block : style.crosswalkBlock(),
                 this == STOP_LINE ? block : style.stopLineBlock(),
-                style.defaultCrosswalks(), style.defaultControl()
+                style.defaultCrosswalks(), style.defaultControl(),
+                this == PAVEMENT ? Optional.of(true) : style.pavementOverride(),
+                this == CROSSWALK ? Optional.of(block.isPresent()) : style.crosswalkOverride()
         );
     }
 }

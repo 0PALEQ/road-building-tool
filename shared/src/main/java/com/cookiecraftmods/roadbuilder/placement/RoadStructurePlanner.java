@@ -26,19 +26,15 @@ import java.util.Set;
 import java.util.function.Predicate;
 
 public final class RoadStructurePlanner {
-    public static final int MAXIMUM_TERRAIN_FILL_HEIGHT = 2;
-    public static final int MAXIMUM_SOLID_BASE_HEIGHT = 7;
+    public static final int MAXIMUM_TERRAIN_FILL_HEIGHT = 5;
+    public static final int MAXIMUM_SOLID_BASE_HEIGHT = 8;
     public static final int DECK_THICKNESS = 2;
     public static final int MAXIMUM_GROUND_SCAN_DEPTH = 128;
 
     private static final int PAIRED_PIER_MINIMUM_ROAD_WIDTH = 24;
     private static final double PIER_SPACING = 20.0;
     private static final double PIER_END_INSET = 2.0;
-    private static final double ENDPOINT_DECK_PROBE_DISTANCE = 3.0;
-    private static final double ENDPOINT_DECK_ZONE_MARGIN = 12.0;
 
-    private static final int EMBANKMENT_RADIUS =
-            MAXIMUM_TERRAIN_FILL_HEIGHT - 1;
     private static final int CUT_WALL_HEIGHT =
             RoadTunnelPlanner.FREE_HEIGHT + 2;
     private static final int MINIMUM_EXPOSED_HEIGHT = 2;
@@ -130,12 +126,6 @@ public final class RoadStructurePlanner {
 
         Set<BlockPos> sunkenSurfaces = SunkenRoadPlanner.surfacePositions(surfacePlan, spans);
         Map<GroundKey, Ground> groundCache = new HashMap<>();
-        List<EndpointDeckZone> endpointDeckZones = endpointDeckZones(
-                spans,
-                world,
-                existingRoadPosition,
-                groundCache
-        );
         Map<HorizontalColumn, EmbankmentCandidate> embankments =
                 new HashMap<>();
         Set<BlockPos> railingSurfacePositions = new HashSet<>();
@@ -165,11 +155,7 @@ public final class RoadStructurePlanner {
                     besideLowerRoad = true;
                 }
             }
-            boolean forcedDeck = endpointDeckZones.stream()
-                    .anyMatch(zone -> zone.contains(position));
-            boolean deck = roadBelow || ground.fluidEncountered()
-                    || verticalGap > MAXIMUM_SOLID_BASE_HEIGHT
-                    || (forcedDeck && verticalGap > MAXIMUM_TERRAIN_FILL_HEIGHT && !besideLowerRoad);
+            boolean deck = requiresDeck(ground, verticalGap, roadBelow);
             // Clear vegetation below the deck without treating trunks as foundations.
             for (int y = position.getY() - 1; y > ground.position().getY(); y--) {
                 BlockPos obstacle = new BlockPos(position.getX(), y, position.getZ());
@@ -237,11 +223,13 @@ public final class RoadStructurePlanner {
             if (edge
                     && !deck
                     && !besideLowerRoad
+                    && verticalGap > 1
                     && verticalGap <= MAXIMUM_TERRAIN_FILL_HEIGHT) {
                 addEmbankmentCandidates(
                         embankments,
                         position,
-                        footprint
+                        footprint,
+                        verticalGap - 1
                 );
             }
 
@@ -438,7 +426,6 @@ public final class RoadStructurePlanner {
         Map<BlockPos, PlannedBlock> blocks = new LinkedHashMap<>();
         surface.blocks().forEach(block -> blocks.put(block.position(), block));
         Map<GroundKey, Ground> groundCache = new HashMap<>();
-        List<EndpointDeckZone> zones = endpointDeckZones(spans, world, existingRoadPosition, groundCache);
         for (StructureSpan span : spans) {
             BlockState replacement = span.surfaceBands().stream()
                     .filter(band -> band.role() == RoadSurfaceRole.CONCRETE_MEDIAN)
@@ -460,10 +447,9 @@ public final class RoadStructurePlanner {
                         }
                         Ground ground = groundBelow(position, world, existingRoadPosition, groundCache);
                         int gap = position.getY() - ground.position().getY();
-                        boolean deck = zones.stream().anyMatch(zone -> zone.contains(position))
-                                || ground.fluidEncountered() || gap > MAXIMUM_SOLID_BASE_HEIGHT
-                                || ground.solid() && gap > AT_GRADE_ROAD_GAP
-                                        && existingRoadPosition.test(ground.position());
+                        boolean roadBelow = ground.solid() && gap > AT_GRADE_ROAD_GAP
+                                && existingRoadPosition.test(ground.position());
+                        boolean deck = requiresDeck(ground, gap, roadBelow);
                         if (deck) {
                             BlockState state = replacement;
                             if (block.targetState().getBlock() instanceof SlabBlock
@@ -845,9 +831,9 @@ public final class RoadStructurePlanner {
     private static void addEmbankmentCandidates(
             Map<HorizontalColumn, EmbankmentCandidate> candidates,
             BlockPos surface,
-            Set<HorizontalColumn> footprint
+            Set<HorizontalColumn> footprint,
+            int radius
     ) {
-        int radius = EMBANKMENT_RADIUS;
         for (int xOffset = -radius; xOffset <= radius; xOffset++) {
             for (int zOffset = -radius; zOffset <= radius; zOffset++) {
                 int distance = Math.max(
@@ -1068,73 +1054,8 @@ public final class RoadStructurePlanner {
         return true;
     }
 
-    private static List<EndpointDeckZone> endpointDeckZones(
-            List<StructureSpan> spans,
-            PlacementBlockWorld world,
-            Predicate<BlockPos> existingRoadPosition,
-            Map<GroundKey, Ground> groundCache
-    ) {
-        List<EndpointDeckZone> zones = new java.util.ArrayList<>();
-        for (StructureSpan span : spans) {
-            ReferenceGeometry geometry = span.geometry();
-            double probeDistance = Math.min(
-                    ENDPOINT_DECK_PROBE_DISTANCE,
-                    geometry.length() / 2.0
-            );
-            addEndpointDeckZone(
-                    zones,
-                    geometry.sample(0.0).position(),
-                    geometry.sample(probeDistance).position(),
-                    span.roadWidth(),
-                    world,
-                    existingRoadPosition,
-                    groundCache
-            );
-            addEndpointDeckZone(
-                    zones,
-                    geometry.sample(geometry.length()).position(),
-                    geometry.sample(
-                            geometry.length() - probeDistance
-                    ).position(),
-                    span.roadWidth(),
-                    world,
-                    existingRoadPosition,
-                    groundCache
-            );
-        }
-        return List.copyOf(zones);
-    }
-
-    private static void addEndpointDeckZone(
-            List<EndpointDeckZone> zones,
-            RoadPoint endpoint,
-            RoadPoint probe,
-            int roadWidth,
-            PlacementBlockWorld world,
-            Predicate<BlockPos> existingRoadPosition,
-            Map<GroundKey, Ground> groundCache
-    ) {
-        BlockPos probePosition = new BlockPos(
-                floorToInt(probe.x()),
-                floorToInt(probe.y() + 0.5),
-                floorToInt(probe.z())
-        );
-        Ground ground = groundBelow(
-                probePosition,
-                world,
-                existingRoadPosition,
-                groundCache
-        );
-        int verticalGap = probePosition.getY() - ground.position().getY();
-        if (!ground.fluidEncountered()
-                && verticalGap <= MAXIMUM_SOLID_BASE_HEIGHT) {
-            return;
-        }
-        zones.add(new EndpointDeckZone(
-                endpoint.x(),
-                endpoint.z(),
-                roadWidth / 2.0 + ENDPOINT_DECK_ZONE_MARGIN
-        ));
+    private static boolean requiresDeck(Ground ground, int verticalGap, boolean roadBelow) {
+        return roadBelow || ground.fluidEncountered() || verticalGap > MAXIMUM_SOLID_BASE_HEIGHT;
     }
 
     private boolean addPillars(
@@ -1697,14 +1618,6 @@ public final class RoadStructurePlanner {
             int outwardDirection,
             boolean active
     ) {
-    }
-
-    private record EndpointDeckZone(double x, double z, double radius) {
-        boolean contains(BlockPos position) {
-            double deltaX = position.getX() + 0.5 - x;
-            double deltaZ = position.getZ() + 0.5 - z;
-            return deltaX * deltaX + deltaZ * deltaZ <= radius * radius;
-        }
     }
 
     private record EmbankmentCandidate(int topY, int clearanceY) {

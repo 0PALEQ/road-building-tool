@@ -65,7 +65,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
     private RoadPresetEditorTab tab = RoadPresetEditorTab.LAYOUT;
     private boolean inspectSelection;
     private RoadSurfaceRole editingMaterialRole;
-    private boolean editingComponentMaterials;
+    private RoadSurfaceRole editingComponentMaterialRole;
     private final RoadPresetEditorScroll panelScroll = new RoadPresetEditorScroll();
     private final List<PanelWidget> panelWidgets = new ArrayList<>();
     private UiRectangle activeViewport;
@@ -108,20 +108,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                 presetId,
                 gateway
         );
-        screen.source = RoadPresetTemplates.blank();
-        screen.draft = new RoadPresetEditorDraft(screen.source);
-        screen.draft.setIntersectionStyle(new RoadIntersectionStyle(
-                screen.draft.materialPalette().pavementBlock(),
-                Optional.of(screen.draft.materialPalette().markingBlock()),
-                Optional.of(screen.draft.materialPalette().markingBlock()),
-                Optional.empty(), true, IntersectionControl.FREE));
-        screen.source = screen.draft.build(1);
-        screen.expectedRevision = 0;
-        screen.editable = true;
-        screen.dirty = true;
-        screen.nameValue = screen.source.display().fallbackName();
-        screen.category = screen.source.display().category();
-        screen.status = Component.translatable(KEY + "status.new_road");
+        screen.startNewDraft(presetId);
         return screen;
     }
 
@@ -243,7 +230,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
         captureInputs();
         tab = target;
         editingMaterialRole = null;
-        editingComponentMaterials = false;
+        editingComponentMaterialRole = null;
         panelScroll.reset();
         searchQuery = "";
         if (searchBox != null) {
@@ -267,7 +254,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                             : RoadPresetEditorButton.Style.NORMAL,
                     true, () -> {
                         inspectSelection = false;
-                        editingComponentMaterials = false;
+                        editingComponentMaterialRole = null;
                         panelScroll.reset();
                         requestRebuild();
                     });
@@ -426,17 +413,22 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
         }
         int componentIndex = selection.primary();
         RoadPresetEditorComponent selected = draft.components().get(componentIndex);
-        if (editingComponentMaterials) {
+        if (editingComponentMaterialRole != null) {
+            boolean underlay = editingComponentMaterialRole == RoadSurfaceRole.PAVEMENT
+                    && selected.hasUnderlay();
             addButton(new UiRectangle(content.x(), y, content.width(), 20),
                     Component.translatable(KEY + "back_component"),
                     RoadPresetEditorButton.Style.GHOST, true, () -> {
-                        editingComponentMaterials = false;
+                        editingComponentMaterialRole = null;
                         panelScroll.reset();
                         requestRebuild();
                     });
-            addMaterialSetControls(content, y + 28, componentLabel(selected),
-                    selected.blockSet(), blocks -> draft.replaceComponent(
-                            componentIndex, selected.withBlockSet(blocks)));
+            addMaterialSetControls(content, y + 28,
+                    Component.translatable(materialKey(editingComponentMaterialRole)),
+                    underlay ? draft.underlayBlockSet(selected) : selected.blockSet(),
+                    blocks -> draft.replaceComponent(componentIndex, underlay
+                            ? draft.components().get(componentIndex).withUnderlayBlockSet(blocks)
+                            : draft.components().get(componentIndex).withBlockSet(blocks)));
             return;
         }
         y = addText(content, y, componentLabel(selected), true) + 8;
@@ -458,25 +450,14 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                     () -> replaceSelectedComponent(selected.withDirection(opposite(selected.direction()))));
             y += 28;
         }
-        y = addText(content, y, Component.translatable(KEY + "material"), false) + 3;
-        RoadPresetEditorButton materials = new RoadPresetEditorButton(
-                new UiRectangle(content.x(), y, content.width(), 34),
-                Component.translatable(KEY + (selected.inheritsRoadMaterial()
-                        ? "material.inherited" : "material.override")),
-                paletteSummary(selected.blockSet().size()),
-                RoadPresetEditorButton.Style.NORMAL, () -> {
-                    editingComponentMaterials = true;
-                    panelScroll.reset();
-                    requestRebuild();
-                });
-        addPanelWidget(materials);
-        y += 39;
-        addButton(new UiRectangle(content.x(), y, content.width(), 20),
-                Component.translatable(KEY + "reset_material"),
-                RoadPresetEditorButton.Style.GHOST,
-                canMutate() && !selected.inheritsRoadMaterial(),
-                () -> mutate(() -> draft.clearComponentMaterialOverride(componentIndex)));
-        y += 28;
+        y = addComponentMaterialControl(content, y, selected.kind().surfaceRole(),
+                selected.inheritsRoadMaterial(), selected.blockSet(),
+                () -> draft.clearComponentMaterialOverride(componentIndex));
+        if (selected.hasUnderlay()) {
+            y = addComponentMaterialControl(content, y, RoadSurfaceRole.PAVEMENT,
+                    selected.underlayBlockSet().isEmpty(), draft.underlayBlockSet(selected),
+                    () -> draft.replaceComponent(componentIndex, selected.withUnderlayBlockSet(List.of())));
+        }
         List<UiRectangle> moves = columns(content.x(), y, content.width(), 20, 2, 3);
         addButton(moves.get(0), Component.translatable(KEY + "move_left"),
                 RoadPresetEditorButton.Style.NORMAL, canMutate() && componentIndex > 0,
@@ -586,7 +567,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                         : RoadPresetEditorButton.Style.NORMAL, canMutate(),
                 () -> updateJunction(old -> new RoadIntersectionStyle(old.pavementBlock(),
                         old.markingBlock(), old.crosswalkBlock(), old.stopLineBlock(),
-                        !old.defaultCrosswalks(), old.defaultControl())));
+                        !old.defaultCrosswalks(), old.defaultControl(), old.pavementOverride(), old.crosswalkOverride())));
         y += 27;
         y = addText(content, y, Component.translatable(KEY + "junction_control"), false) + 3;
         addButton(new UiRectangle(content.x(), y, content.width(), 20),
@@ -595,12 +576,15 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                     IntersectionControl[] controls = IntersectionControl.values();
                     return new RoadIntersectionStyle(old.pavementBlock(), old.markingBlock(),
                             old.crosswalkBlock(), old.stopLineBlock(), old.defaultCrosswalks(),
-                            controls[(old.defaultControl().ordinal() + 1) % controls.length]);
+                            controls[(old.defaultControl().ordinal() + 1) % controls.length],
+                            old.pavementOverride(), old.crosswalkOverride());
                 }));
         y += 28;
         for (RoadPresetEditorJunctionMaterial material : RoadPresetEditorJunctionMaterial.values()) {
             y = addText(content, y, Component.translatable(material.key()), false) + 3;
-            Optional<ResourceLocation> block = material.block(style);
+            boolean automaticPavement = material == RoadPresetEditorJunctionMaterial.PAVEMENT
+                    && !style.usesPavementOverride(draft.materialPalette().pavementBlock());
+            Optional<ResourceLocation> block = automaticPavement ? Optional.empty() : material.block(style);
             int toggleWidth = material.optional() ? 24 : 0;
             if (block.isPresent()) {
                 RoadPresetBlockField field = new RoadPresetBlockField(
@@ -611,9 +595,12 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                 addPanelWidget(field);
             } else {
                 addButton(new UiRectangle(content.x(), y, content.width() - toggleWidth, 24),
-                        Component.translatable(KEY + "no_material"),
+                        Component.translatable(KEY + (automaticPavement ? "blend_road_pavement"
+                                : material == RoadPresetEditorJunctionMaterial.CROSSWALK
+                                        ? "inherit_crosswalk_material" : "no_material")),
                         RoadPresetEditorButton.Style.NORMAL, canMutate(),
-                        () -> RoadPresetBlockSelectorScreen.open(this, draft.materialPalette().markingBlock(),
+                        () -> RoadPresetBlockSelectorScreen.open(this, automaticPavement
+                                ? draft.materialPalette().pavementBlock() : draft.materialPalette().markingBlock(),
                                 replacement -> updateJunction(old -> material.replace(old, Optional.of(replacement)))));
             }
             if (material.optional()) {
@@ -633,8 +620,8 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                 RoadPresetEditorButton.Style.NORMAL, canMutate(), () -> updateJunction(old ->
                         new RoadIntersectionStyle(draft.materialPalette().pavementBlock(),
                                 Optional.of(draft.materialPalette().markingBlock()),
-                                Optional.of(draft.materialPalette().markingBlock()), old.stopLineBlock(),
-                                old.defaultCrosswalks(), old.defaultControl())));
+                                Optional.empty(), old.stopLineBlock(),
+                                old.defaultCrosswalks(), old.defaultControl(), Optional.of(false), Optional.of(false))));
     }
 
     private void updateJunction(UnaryOperator<RoadIntersectionStyle> update) {
@@ -721,12 +708,33 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
         mirror.setTooltip(Tooltip.create(Component.translatable(KEY + "mirror")));
     }
 
+    private int addComponentMaterialControl(UiRectangle content, int y, RoadSurfaceRole role,
+            boolean inherited, List<ResourceLocation> blocks, Runnable reset) {
+        y = addText(content, y, Component.translatable(materialKey(role)), false) + 3;
+        addPanelWidget(new RoadPresetEditorButton(
+                new UiRectangle(content.x(), y, content.width(), 34),
+                Component.translatable(KEY + (inherited ? "material.inherited" : "material.override")),
+                paletteSummary(blocks.size()), RoadPresetEditorButton.Style.NORMAL, () -> {
+                    editingComponentMaterialRole = role;
+                    panelScroll.reset();
+                    requestRebuild();
+                }));
+        y += 39;
+        addButton(new UiRectangle(content.x(), y, content.width(), 20),
+                Component.translatable(KEY + "reset_material"), RoadPresetEditorButton.Style.GHOST,
+                canMutate() && !inherited, () -> mutate(reset));
+        return y + 28;
+    }
+
     private void addFooterControls() {
         UiRectangle content = inset(layout.statusBar(), 3);
         int buttonY = content.bottom() - 20;
         int saveWidth = Math.min(100, content.width() / 3);
-        int copyWidth = Math.min(118, content.width() / 3);
+        int copyWidth = Math.min(118, (content.width() - 8) / 3);
         addButton(new UiRectangle(content.x(), buttonY, copyWidth, 20),
+                Component.translatable(KEY + "new_road"), RoadPresetEditorButton.Style.NORMAL,
+                !requests.savePending(), this::newDraft);
+        addButton(new UiRectangle(content.x() + copyWidth + 4, buttonY, copyWidth, 20),
                 Component.translatable(KEY + (editable ? "duplicate" : "use_as_template")),
                 RoadPresetEditorButton.Style.NORMAL, !requests.savePending(), this::duplicateDraft);
         saveButton = addButton(new UiRectangle(content.right() - saveWidth, buttonY, saveWidth, 20),
@@ -880,6 +888,46 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
         mutate(() -> {
             category = RoadCategory.nextEditable(category).serializedName();
         });
+    }
+
+    void newDraft() {
+        captureInputs();
+        if (requests.savePending()) {
+            return;
+        }
+        ResourceLocation id = RoadPresetEditorCopyFactory.uniqueId("new_road", this::catalogContains);
+        if (dirty && !confirmations.confirmSwitch(id)) {
+            setStatus(Component.translatable(KEY + "unsaved_switch"), true);
+        } else {
+            startNewDraft(id);
+        }
+        requestRebuild();
+    }
+
+    private void startNewDraft(ResourceLocation id) {
+        editingId = id;
+        draft = new RoadPresetEditorDraft(RoadPresetTemplates.blank());
+        draft.setIntersectionStyle(new RoadIntersectionStyle(
+                draft.materialPalette().pavementBlock(),
+                Optional.of(draft.materialPalette().markingBlock()),
+                Optional.empty(),
+                Optional.empty(), true, IntersectionControl.FREE, Optional.of(false), Optional.of(false)));
+        source = draft.build(1);
+        expectedRevision = 0;
+        editable = true;
+        dirty = true;
+        speedValue = null;
+        invalidSpeed = false;
+        replaceNameValue(source.display().fallbackName());
+        category = source.display().category();
+        clearComponentSelection();
+        if (requests.contentPending()) {
+            gateway.cancelContentRequest(requests.contentRequestId());
+        }
+        requests.clear();
+        clearConfirmations();
+        selectTab(RoadPresetEditorTab.LAYOUT);
+        setStatus(Component.translatable(KEY + "status.new_road"), false);
     }
 
     private void duplicateDraft() {
@@ -1341,14 +1389,14 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
     private void clearComponentSelection() {
         selection.clear();
         inspectSelection = false;
-        editingComponentMaterials = false;
+        editingComponentMaterialRole = null;
         panelScroll.reset();
     }
 
     private void showSelection() {
         tab = RoadPresetEditorTab.LAYOUT;
         inspectSelection = !selection.isEmpty();
-        editingComponentMaterials = false;
+        editingComponentMaterialRole = null;
         panelScroll.reset();
     }
 

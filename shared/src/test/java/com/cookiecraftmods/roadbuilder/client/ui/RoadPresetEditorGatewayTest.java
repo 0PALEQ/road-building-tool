@@ -7,6 +7,7 @@ import com.cookiecraftmods.roadbuilder.networking.PresetDeleteIntentC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetSaveIntentC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetSaveResultS2CPacket;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetCatalog;
+import com.cookiecraftmods.roadbuilder.preset.RoadPresetCatalogEntry;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetTemplates;
 import net.minecraft.resources.ResourceLocation;
 import org.junit.jupiter.api.Test;
@@ -64,11 +65,28 @@ class RoadPresetEditorGatewayTest {
         assertEquals(1, gateway.saveTakeCount);
     }
 
+    @Test
+    void createsABlankPresetWithAnUnusedIdInAPopulatedCatalog() {
+        var existing = MinecraftIds.id("roadbuilder_world", "new_road");
+        var gateway = new FakeGateway();
+        gateway.catalog = new RoadPresetCatalog(1, List.of(
+                new RoadPresetCatalogEntry(existing, 3, 19, 2, "0".repeat(64), true)));
+        var screen = new RoadPresetEditorScreen(existing, gateway);
+        screen.requestContent();
+
+        screen.newDraft();
+        screen.saveDraft();
+
+        assertNull(gateway.contentRequestId);
+        assertNotNull(gateway.savePacket);
+        assertEquals(MinecraftIds.id("roadbuilder_world", "new_road_1"), gateway.savePacket.presetId());
+        assertEquals(0, gateway.savePacket.expectedRevision());
+        assertEquals(RoadPresetTemplates.blank().surfaceColumns(), gateway.savePacket.candidate().surfaceColumns());
+        assertEquals(RoadPresetTemplates.blank().lanes(), gateway.savePacket.candidate().lanes());
+    }
+
     private static final class FakeGateway implements RoadPresetEditorGateway {
-        private final RoadPresetCatalog catalog = new RoadPresetCatalog(
-                0,
-                List.of()
-        );
+        private RoadPresetCatalog catalog = new RoadPresetCatalog(0, List.of());
         private UUID contentRequestId;
         private PresetContentS2CPacket contentResult;
         private int contentTakeCount;

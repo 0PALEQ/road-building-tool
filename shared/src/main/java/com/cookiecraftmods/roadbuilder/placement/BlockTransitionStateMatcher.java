@@ -1,8 +1,10 @@
 package com.cookiecraftmods.roadbuilder.placement;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ConcretePowderBlock;
 import net.minecraft.world.level.block.DoublePlantBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -18,16 +20,7 @@ public final class BlockTransitionStateMatcher {
     ) {
         Objects.requireNonNull(current, "current");
         Objects.requireNonNull(recordedSource, "recordedSource");
-        if (current.equals(recordedSource)) {
-            return true;
-        }
-        if (current.getBlock() == recordedSource.getBlock()) {
-            return true;
-        }
-        if (isNaturalSoilTransition(
-                recordedSource.getBlock(),
-                current.getBlock()
-        )) {
+        if (matchesUpdateDrivenTarget(current, recordedSource)) {
             return true;
         }
         if ((recordedSource.isAir()
@@ -60,7 +53,18 @@ public final class BlockTransitionStateMatcher {
                 || isNaturalSoilTransition(
                         plannedTarget.getBlock(),
                         current.getBlock()
-                );
+                ) || isHardenedConcrete(plannedTarget.getBlock(), current.getBlock());
+    }
+
+    private static boolean isHardenedConcrete(Block planned, Block current) {
+        if (!(planned instanceof ConcretePowderBlock)) {
+            return false;
+        }
+        var powder = BuiltInRegistries.BLOCK.getKey(planned);
+        var solid = BuiltInRegistries.BLOCK.getKey(current);
+        return powder.getNamespace().equals("minecraft")
+                && solid.getNamespace().equals("minecraft")
+                && powder.getPath().equals(solid.getPath() + "_powder");
     }
 
     public static boolean canDisappearDuringPlannedUpdates(

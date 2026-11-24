@@ -46,7 +46,7 @@ final class RoadPresetThumbnailRenderer {
                     top,
                     bottom,
                     components.get(index),
-                    draft.fallbackSurfaceBlock()
+                    draft.underlayBlockSet(components.get(index)).get(0)
             );
         }
         int topEdgeColor = components.isEmpty()

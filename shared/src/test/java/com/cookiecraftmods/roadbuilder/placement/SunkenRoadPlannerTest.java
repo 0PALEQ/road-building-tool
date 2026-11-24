@@ -245,7 +245,7 @@ class SunkenRoadPlannerTest {
                 List.of(new LaneComponent(LaneType.VEHICLE, 3, 0, LaneTravelDirection.FORWARD)));
         var graph = RoadBuilderNetworkSavedData.create(Level.OVERWORLD).graph();
         var mutation = graph.prepareRoadNetwork(new StraightGeometry(
-                new RoadPoint(0.5, 67, 1.5), new RoadPoint(20.5, 67, 1.5)),
+                new RoadPoint(0.5, 70, 1.5), new RoadPoint(20.5, 70, 1.5)),
                 material, preset, TrafficHandedness.RHT);
         var roads = new RoadMaterializationPlanner().planRoadsForJunctions(
                 Level.OVERWORLD, mutation, new Terrain(64),
@@ -262,7 +262,7 @@ class SunkenRoadPlannerTest {
                 .filter(block -> block.targetState().is(Blocks.POLISHED_ANDESITE))
                 .findFirst().orElseThrow().position();
         assertFalse(roads.protectedPositions().contains(wall));
-        assertTrue(roads.protectedPositions().contains(new BlockPos(10, 67, 1)));
+        assertTrue(roads.protectedPositions().contains(new BlockPos(10, 70, 1)));
 
         var floor = cap.below(2);
         var junction = BlockPlacementPlan.create(Level.OVERWORLD,

@@ -31,6 +31,8 @@ import com.cookiecraftmods.roadbuilder.preset.TrafficHandedness;
 import com.cookiecraftmods.roadbuilder.test.MinecraftBootstrap;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Assumptions;
@@ -97,7 +99,8 @@ class RoadBuilderNetworkSavedDataTest {
                                     "yellow_concrete"
                             ),
                             RoadMarkingPattern.DOUBLE_CONTINUOUS
-                    )
+                    ).withUnderlayBlockSet(List.of(MinecraftIds.id("minecraft", "stone"),
+                            MinecraftIds.id("minecraft", "andesite")))
             )
     );
     private static final ResourceLocation NARROW_PRESET_ID =
@@ -164,6 +167,22 @@ class RoadBuilderNetworkSavedDataTest {
         assertFalse(reloaded.isDirty());
         assertEquals(expected, reloaded.graph().snapshot());
         assertEquals(saved, reloaded.save(new CompoundTag()));
+    }
+
+    @Test
+    void legacyDoubleMarkingUsesAllVariationsFromTheSavedPavementBand() {
+        CompoundTag legacy = oneRoadTag();
+        legacy.putInt("schema_version", 4);
+        var bands = legacy.getList("segments", Tag.TAG_COMPOUND).getCompound(0)
+                .getCompound("preset").getList("surface_bands", Tag.TAG_COMPOUND);
+        bands.getCompound(2).remove("underlay_block_set");
+        bands.getCompound(0).getList("block_set", Tag.TAG_STRING).add(StringTag.valueOf("minecraft:stone"));
+
+        var data = RoadBuilderNetworkSavedData.load(Level.OVERWORLD, legacy);
+        assertTrue(data.isCompatible());
+        var segment = data.graph().snapshot().segments().values().iterator().next();
+        assertEquals(List.of(MinecraftIds.id("minecraft", "gray_concrete"), MinecraftIds.id("minecraft", "stone")),
+                segment.presetSnapshot().surfaceColumns().get(3).blocks());
     }
 
     @Test

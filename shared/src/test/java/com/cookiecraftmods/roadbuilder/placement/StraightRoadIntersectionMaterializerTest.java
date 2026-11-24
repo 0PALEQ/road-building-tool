@@ -30,6 +30,9 @@ import com.cookiecraftmods.roadbuilder.preset.LaneComponent;
 import com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection;
 import com.cookiecraftmods.roadbuilder.preset.LaneType;
 import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
+import com.cookiecraftmods.roadbuilder.preset.RoadClassification;
+import com.cookiecraftmods.roadbuilder.preset.RoadIntersectionStyle;
+import com.cookiecraftmods.roadbuilder.preset.RoadMarkingPattern;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import com.cookiecraftmods.roadbuilder.preset.TrafficHandedness;
@@ -44,6 +47,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -71,6 +75,72 @@ class StraightRoadIntersectionMaterializerTest {
     @BeforeAll
     static void bootstrapMinecraft() {
         MinecraftBootstrap.bootstrap();
+    }
+
+    @Test
+    void cobbledCrossingContinuesItsPavementAndConnectsTheRoundedSidewalk() {
+        var cobble = MinecraftIds.id("minecraft", "cobblestone");
+        var stone = MinecraftIds.id("minecraft", "stone");
+        var andesite = MinecraftIds.id("minecraft", "andesite");
+        var sidewalk = MinecraftIds.id("minecraft", "smooth_stone");
+        var curb = MinecraftIds.id("minecraft", "light_gray_concrete");
+        var gray = MinecraftIds.id("minecraft", "gray_concrete");
+        var edge = new RoadSurfaceBand(RoadSurfaceRole.SIDEWALK, 4, sidewalk);
+        var median = new RoadSurfaceBand(RoadSurfaceRole.CONCRETE_MEDIAN, 1, curb);
+        var markings = new RoadSurfaceBand(RoadSurfaceRole.MARKING, 3,
+                MinecraftIds.id("minecraft", "white_concrete"),
+                RoadMarkingPattern.DOUBLE_CONTINUOUS);
+        var lanes = List.of(new LaneComponent(LaneType.VEHICLE, 3, -3, LaneTravelDirection.BACKWARD),
+                new LaneComponent(LaneType.VEHICLE, 3, 3, LaneTravelDirection.FORWARD));
+        var pavement = new RoadSurfaceBand(RoadSurfaceRole.PAVEMENT, 3, cobble,
+                RoadMarkingPattern.CONTINUOUS,
+                List.of(cobble, andesite, stone));
+        var preset = new RoadPresetSnapshot(19, cobble, lanes,
+                List.of(edge, median, pavement, markings, pavement, median, edge),
+                RoadClassification.DEFAULT,
+                RoadIntersectionStyle.defaults(gray));
+        var center = new RoadNode(new RoadNodeId(UUID.randomUUID()), new RoadPoint(-28, -61, -36.5));
+        var ends = List.of(new RoadPoint(-80.5, -61, -36.5), new RoadPoint(8.5, -61, -36.5),
+                new RoadPoint(-28, -61, -64.5), new RoadPoint(-28, -61, -12.5));
+        var arms = ends.stream().map(end -> RoadSegment.straight(new RoadSegmentId(UUID.randomUUID()),
+                new RoadId(UUID.randomUUID()), center.id(), new RoadNodeId(UUID.randomUUID()),
+                new StraightGeometry(center.position(), end), PRESET_ID, 4, preset, TrafficHandedness.RHT,
+                List.of(new RoadLaneId(UUID.randomUUID()), new RoadLaneId(UUID.randomUUID())))).toList();
+
+        var materializer = new StraightRoadIntersectionMaterializer();
+        var plan = assertInstanceOf(BlockPlanResult.Success.class, materializer.planWithMarkings(
+                Level.OVERWORLD, center, arms, arms.get(0), 5_000, 100_000,
+                JunctionDefinition.automatic(center.id()))).plan();
+        var blocks = plan.blocks().stream().collect(Collectors.toMap(PlannedBlock::position,
+                block -> block.targetState().getBlock()));
+        var centerMaterials = blocks.entrySet().stream()
+                .filter(entry -> Math.abs(entry.getKey().getX() + 28) <= 2
+                        && Math.abs(entry.getKey().getZ() + 37) <= 2)
+                .map(Map.Entry::getValue).collect(Collectors.toSet());
+
+        assertEquals(Set.of(Blocks.COBBLESTONE, Blocks.ANDESITE, Blocks.STONE), centerMaterials);
+        for (int z = -50; z <= -47; z++) {
+            assertEquals(Blocks.SMOOTH_STONE, blocks.get(new BlockPos(-38, -61, z)),
+                    "The rounded sidewalk must connect across the western edge of the northern approach");
+        }
+
+        var brick = MinecraftIds.id("minecraft", "bricks");
+        var brickPavement = new RoadSurfaceBand(RoadSurfaceRole.PAVEMENT, 3, brick);
+        var brickPreset = new RoadPresetSnapshot(19, brick, lanes,
+                List.of(edge, median, brickPavement, markings, brickPavement, median, edge),
+                RoadClassification.DEFAULT, RoadIntersectionStyle.defaults(gray));
+        RoadSegment east = arms.get(1);
+        var brickArm = RoadSegment.path(east.id(), east.roadId(), east.startNodeId(), east.endNodeId(),
+                east.referenceGeometry(), MinecraftIds.id("roadbuilder", "brick_road"), 1,
+                brickPreset, TrafficHandedness.RHT, east.lanes().stream().map(RoadLane::id).toList());
+        var mixedPlan = assertInstanceOf(BlockPlanResult.Success.class, materializer.planWithMarkings(
+                Level.OVERWORLD, center, List.of(arms.get(0), brickArm, arms.get(2), arms.get(3)),
+                arms.get(0), 5_000, 100_000, JunctionDefinition.automatic(center.id()))).plan();
+        var mixedCenter = mixedPlan.blocks().stream()
+                .filter(block -> Math.abs(block.position().getX() + 28) <= 2
+                        && Math.abs(block.position().getZ() + 37) <= 2)
+                .map(block -> block.targetState().getBlock()).collect(Collectors.toSet());
+        assertEquals(Set.of(Blocks.COBBLESTONE, Blocks.ANDESITE, Blocks.STONE, Blocks.BRICKS), mixedCenter);
     }
 
     @Test

@@ -31,24 +31,29 @@ public record RoadSurfaceColumn(
     }
 
     public static List<RoadSurfaceColumn> expand(
-            ResourceLocation defaultUnderlay,
+            List<ResourceLocation> defaultUnderlay,
             List<RoadSurfaceBand> bands
     ) {
-        Objects.requireNonNull(defaultUnderlay, "defaultUnderlay");
+        defaultUnderlay = requireBlocks(defaultUnderlay, "defaultUnderlay");
         bands = List.copyOf(Objects.requireNonNull(bands, "bands"));
         List<RoadSurfaceColumn> columns = new ArrayList<>();
+        List<ResourceLocation> primaryUnderlay = List.of(defaultUnderlay.get(0));
         for (RoadSurfaceBand band : bands) {
             Objects.requireNonNull(band, "bands contains null");
+            List<ResourceLocation> underlay = band.underlayBlockSet();
+            if (underlay.isEmpty()) {
+                underlay = RoadSurfaceBand.hasUnderlay(band.pattern()) ? defaultUnderlay : primaryUnderlay;
+            }
             if (band.pattern() == RoadMarkingPattern.DOUBLE_CONTINUOUS) {
                 columns.add(markingColumn(
                         band.blockSet(),
-                        List.of(defaultUnderlay),
+                        underlay,
                         RoadMarkingPattern.CONTINUOUS
                 ));
-                columns.add(baseColumn(List.of(defaultUnderlay)));
+                columns.add(baseColumn(underlay));
                 columns.add(markingColumn(
                         band.blockSet(),
-                        List.of(defaultUnderlay),
+                        underlay,
                         RoadMarkingPattern.CONTINUOUS
                 ));
                 continue;
@@ -57,7 +62,7 @@ public record RoadSurfaceColumn(
                 columns.add(band.role() == RoadSurfaceRole.MARKING
                         ? markingColumn(
                                 band.blockSet(),
-                                List.of(defaultUnderlay),
+                                underlay,
                                 band.pattern()
                         )
                         : baseColumn(band.blockSet()));

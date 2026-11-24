@@ -121,14 +121,16 @@ public final class ConstructionJobBatchProcessor {
     private static TransitionResult applyTransition(
             ConstructionJobBlockTransition transition,
             PlacementBlockWorld world,
-            boolean allowUpdateDrivenTargetDisappearance
+            boolean removal
     ) {
         BlockPos position = transition.position();
         BlockState current = world.blockState(position);
-        if (BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
-                current,
-                transition.afterState()
-        )) {
+        boolean updatedTarget = BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
+                current, transition.afterState());
+        // During removal, a refreshed state may match both the road and the original terrain.
+        boolean stillOwned = removal && BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
+                current, transition.beforeState());
+        if (current.equals(transition.afterState()) || (updatedTarget && !stillOwned)) {
             return TransitionResult.unchangedResult();
         }
         if (BlockTransitionStateMatcher.matchesRecordedSource(
@@ -149,10 +151,10 @@ public final class ConstructionJobBatchProcessor {
                     transition.beforeState(),
                     transition.afterState(),
                     world,
-                    allowUpdateDrivenTargetDisappearance
+                    removal
             );
         }
-        if (allowUpdateDrivenTargetDisappearance
+        if (removal
                 && BlockTransitionStateMatcher.matchesRecordedSource(
                         current,
                         transition.afterState()
@@ -276,7 +278,7 @@ public final class ConstructionJobBatchProcessor {
         }
         if (removal && (
                 BlockTransitionStateMatcher.matchesRecordedSource(observed, target)
-                        || !BlockTransitionStateMatcher.matchesPlannedTarget(
+                        || !BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                                 observed,
                                 source
                         )

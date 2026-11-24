@@ -1,6 +1,7 @@
 package com.cookiecraftmods.roadbuilder.placement;
 
 import com.cookiecraftmods.roadbuilder.preset.RoadMarkingPattern;
+import com.cookiecraftmods.roadbuilder.preset.RoadMaterialNoise;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.properties.SlabType;
@@ -129,8 +130,17 @@ public record ResolvedRoadSurface(
             int blockZ,
             double verticalLevel
     ) {
-        boolean paints = columnPatterns.get(lateralIndex)
-                .paintsAt(pathDistance);
+        return targetPlacement(lateralIndex, columnPatterns.get(lateralIndex).paintsAt(pathDistance),
+                true, blockX, blockZ, verticalLevel);
+    }
+
+    SurfacePlacement targetCrosswalkPlacement(int lateralIndex, boolean paints, int blockX, int blockZ,
+            double verticalLevel) {
+        return targetPlacement(lateralIndex, paints, false, blockX, blockZ, verticalLevel);
+    }
+
+    private SurfacePlacement targetPlacement(int lateralIndex, boolean paints, boolean useUnderlaySlabs,
+            int blockX, int blockZ, double verticalLevel) {
         List<BlockState> choices = paints
                 ? columnStateSets.get(lateralIndex)
                 : underlayStateSets.get(lateralIndex);
@@ -142,7 +152,7 @@ public record ResolvedRoadSurface(
         java.util.Optional<BlockState> slab = halfStep
                 ? chooseSlab(choices, seed)
                 : java.util.Optional.empty();
-        if (halfStep && slab.isEmpty() && paints) {
+        if (halfStep && slab.isEmpty() && paints && useUnderlaySlabs) {
             slab = chooseSlab(underlayStateSets.get(lateralIndex), seed);
         }
         BlockState state = slab.orElseGet(() -> choose(choices, seed));
@@ -166,7 +176,9 @@ public record ResolvedRoadSurface(
             List<BlockState> choices,
             BlockPos position
     ) {
-        int start = Math.floorMod(mix(position.asLong()), choices.size());
+        int start = RoadMaterialNoise.sampleIndex(
+                position.getX(), position.getY(), position.getZ(), choices.size()
+        );
         return choices.get(start);
     }
 
@@ -174,7 +186,9 @@ public record ResolvedRoadSurface(
             List<BlockState> choices,
             BlockPos position
     ) {
-        int start = Math.floorMod(mix(position.asLong()), choices.size());
+        int start = RoadMaterialNoise.sampleIndex(
+                position.getX(), position.getY(), position.getZ(), choices.size()
+        );
         for (int offset = 0; offset < choices.size(); offset++) {
             BlockState candidate = choices.get((start + offset) % choices.size());
             if (candidate.getBlock() instanceof SlabBlock) {
@@ -190,13 +204,6 @@ public record ResolvedRoadSurface(
             }
         }
         return java.util.Optional.empty();
-    }
-
-    private static int mix(long value) {
-        value ^= value >>> 33;
-        value *= 0xff51afd7ed558ccdl;
-        value ^= value >>> 33;
-        return (int) (value ^ (value >>> 32));
     }
 
     private static List<BlockState> repeatedStates(int blockWidth, BlockState state) {

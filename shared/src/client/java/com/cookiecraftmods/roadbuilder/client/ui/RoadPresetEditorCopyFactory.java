@@ -56,7 +56,7 @@ final class RoadPresetEditorCopyFactory {
         return new Copy(copyId, copyName, copy);
     }
 
-    private static ResourceLocation uniqueId(
+    static ResourceLocation uniqueId(
             String basePath,
             Predicate<ResourceLocation> idExists
     ) {

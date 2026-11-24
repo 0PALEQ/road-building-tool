@@ -510,6 +510,28 @@ class PlacementTransactionTest {
     }
 
     @Test
+    void safeRemovalRestoresTerrainAfterGrassSpreadAndNeighborDrivenHardening() {
+        BlockPos powderPosition = ORIGIN.east();
+        var world = worldWith(ORIGIN, Blocks.STONE.defaultBlockState());
+        world.externalSet(powderPosition, Blocks.DIRT.defaultBlockState());
+        var ledger = new PlacementOwnershipLedger(Level.OVERWORLD);
+        var operation = operationId(53);
+        var plan = BlockPlacementPlan.create(Level.OVERWORLD, List.of(
+                new PlannedBlock(ORIGIN, Blocks.DIRT.defaultBlockState()),
+                new PlannedBlock(powderPosition, Blocks.GREEN_CONCRETE_POWDER.defaultBlockState())));
+        assertInstanceOf(PlacementCommitResult.Success.class, new BlockPlanCommitter().commit(operation, plan, world, ledger));
+        world.externalSet(ORIGIN, Blocks.GRASS_BLOCK.defaultBlockState());
+        world.changeAfterNextSuccessfulWrite(ORIGIN, powderPosition, Blocks.GREEN_CONCRETE.defaultBlockState());
+
+        var result = assertInstanceOf(PlacementRemovalResult.Success.class,
+                new PlacementRemovalService().remove(operation, RemovalMode.SAFE, world, ledger));
+        assertEquals(2, result.summary().restoredCount());
+        assertEquals(0, result.summary().conflictCount());
+        assertEquals(Blocks.STONE.defaultBlockState(), world.blockState(ORIGIN));
+        assertEquals(Blocks.DIRT.defaultBlockState(), world.blockState(powderPosition));
+    }
+
+    @Test
     void removalAdoptsRestorationProducedByItsOwnNeighborUpdate() {
         BlockPos second = ORIGIN.east();
         MapBackedPlacementBlockWorld world = new MapBackedPlacementBlockWorld(

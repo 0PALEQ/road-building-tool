@@ -101,6 +101,16 @@ class BlockTransitionStateMatcherTest {
     }
 
     @Test
+    void recognizesOnlyTheMatchingHardenedConcrete() {
+        assertTrue(BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
+                Blocks.GREEN_CONCRETE.defaultBlockState(), Blocks.GREEN_CONCRETE_POWDER.defaultBlockState()));
+        assertFalse(BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
+                Blocks.RED_CONCRETE.defaultBlockState(), Blocks.GREEN_CONCRETE_POWDER.defaultBlockState()));
+        assertFalse(BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
+                Blocks.GREEN_CONCRETE_POWDER.defaultBlockState(), Blocks.GREEN_CONCRETE.defaultBlockState()));
+    }
+
+    @Test
     void acceptsFluidFlowIntoOrOutOfRecordedAir() {
         assertTrue(BlockTransitionStateMatcher.matchesRecordedSource(
                 Blocks.WATER.defaultBlockState(),

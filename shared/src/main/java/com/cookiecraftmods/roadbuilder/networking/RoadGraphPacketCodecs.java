@@ -66,6 +66,8 @@ public final class RoadGraphPacketCodecs {
     static final int MAXIMUM_LANES_PER_SEGMENT = 64;
     private static final int FORMAT_V2_MARKER = 0x52424702;
     private static final int FORMAT_V3_MARKER = 0x52424703;
+    private static final int FORMAT_V4_MARKER = 0x52424704;
+    private static final int FORMAT_V5_MARKER = 0x52424705;
 
     private static final double MAX_ABSOLUTE_COORDINATE = 30_000_000.0;
     private static final RoadGraphLimits WIRE_LIMITS = new RoadGraphLimits(
@@ -202,7 +204,7 @@ public final class RoadGraphPacketCodecs {
 
     static void writeSnapshot(FriendlyByteBuf buffer, RoadGraphSnapshot snapshot) {
         validateSnapshot(snapshot);
-        buffer.writeVarInt(FORMAT_V3_MARKER);
+        buffer.writeVarInt(FORMAT_V5_MARKER);
         PacketValidation.writeBoundedId(buffer, snapshot.dimension().location());
         buffer.writeVarLong(snapshot.revision());
 
@@ -330,7 +332,7 @@ public final class RoadGraphPacketCodecs {
 
     static void writeDelta(FriendlyByteBuf buffer, RoadGraphDelta delta) {
         validateDelta(delta);
-        buffer.writeVarInt(FORMAT_V3_MARKER);
+        buffer.writeVarInt(FORMAT_V5_MARKER);
         PacketValidation.writeBoundedId(buffer, delta.dimension().location());
         buffer.writeVarLong(delta.baseRevision());
         buffer.writeVarLong(delta.targetRevision());
@@ -538,6 +540,10 @@ public final class RoadGraphPacketCodecs {
             for (ResourceLocation block : band.blockSet()) {
                 PacketValidation.writeBoundedId(buffer, block);
             }
+            buffer.writeVarInt(band.underlayBlockSet().size());
+            for (ResourceLocation block : band.underlayBlockSet()) {
+                PacketValidation.writeBoundedId(buffer, block);
+            }
         }
         writeClassification(buffer, preset.classification());
         writeIntersectionStyle(buffer, preset.intersectionStyle());
@@ -619,19 +625,27 @@ public final class RoadGraphPacketCodecs {
             } else {
                 blockSet = List.of(block);
             }
+            List<ResourceLocation> underlay = new ArrayList<>();
+            if (formatVersion >= 4) {
+                int underlayCount = readCount(buffer, 16, "blocks in marking underlay");
+                for (int blockIndex = 0; blockIndex < underlayCount; blockIndex++) {
+                    underlay.add(PacketValidation.readBoundedId(buffer, "surfaceBandUnderlay"));
+                }
+            }
             surfaceBands.add(new RoadSurfaceBand(
                     role,
                     width,
                     block,
                     pattern,
-                    blockSet
+                    blockSet,
+                    underlay
             ));
         }
         RoadClassification classification = formatVersion >= 2
                 ? readClassification(buffer)
                 : RoadClassification.DEFAULT;
         RoadIntersectionStyle intersectionStyle = formatVersion >= 2
-                ? readIntersectionStyle(buffer)
+                ? readIntersectionStyle(buffer, formatVersion)
                 : RoadIntersectionStyle.defaults(surfaceBlock);
         int laneCount = readCount(
                 buffer,
@@ -867,6 +881,12 @@ public final class RoadGraphPacketCodecs {
     private static int readFormatVersion(FriendlyByteBuf buffer) {
         int start = buffer.readerIndex();
         int marker = buffer.readVarInt();
+        if (marker == FORMAT_V5_MARKER) {
+            return 5;
+        }
+        if (marker == FORMAT_V4_MARKER) {
+            return 4;
+        }
         if (marker == FORMAT_V3_MARKER) {
             return 3;
         }
@@ -957,10 +977,12 @@ public final class RoadGraphPacketCodecs {
         writeOptionalId(buffer, style.stopLineBlock());
         buffer.writeBoolean(style.defaultCrosswalks());
         buffer.writeByte(style.defaultControl().ordinal());
+        writeOptionalBoolean(buffer, style.pavementOverride());
+        writeOptionalBoolean(buffer, style.crosswalkOverride());
     }
 
     private static RoadIntersectionStyle readIntersectionStyle(
-            FriendlyByteBuf buffer
+            FriendlyByteBuf buffer, int formatVersion
     ) {
         ResourceLocation pavement = PacketValidation.readBoundedId(
                 buffer,
@@ -992,8 +1014,23 @@ public final class RoadGraphPacketCodecs {
                 crosswalk,
                 stopLine,
                 defaultCrosswalks,
-                controls[controlId]
+                controls[controlId],
+                formatVersion >= 4 ? readOptionalBoolean(buffer) : java.util.Optional.empty(),
+                formatVersion >= 5 ? readOptionalBoolean(buffer) : java.util.Optional.empty()
         );
+    }
+
+    private static void writeOptionalBoolean(FriendlyByteBuf buffer, java.util.Optional<Boolean> value) {
+        buffer.writeByte(value.map(enabled -> enabled ? 2 : 1).orElse(0));
+    }
+
+    private static java.util.Optional<Boolean> readOptionalBoolean(FriendlyByteBuf buffer) {
+        return switch (buffer.readUnsignedByte()) {
+            case 0 -> java.util.Optional.empty();
+            case 1 -> java.util.Optional.of(false);
+            case 2 -> java.util.Optional.of(true);
+            default -> throw new IllegalArgumentException("unknown junction material mode");
+        };
     }
 
     private static void writeOptionalId(

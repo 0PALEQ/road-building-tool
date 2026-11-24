@@ -19,6 +19,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
+import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceColumn;
+import com.cookiecraftmods.roadbuilder.preset.RoadMarkingPattern;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -99,11 +101,69 @@ public final class StraightRoadIntersectionMaterializer {
             JunctionDefinition definition,
             Collection<LaneConnector> existingConnectors
     ) {
+        return planSurface(dimension, node, incidentSegments, List.of(pavementBlockId),
+                List.of(sidewalkBlockId), maximumAffectedBlocks, maximumPlanningCandidates,
+                definition, existingConnectors, new HashSet<>());
+    }
+
+    public BlockPlanResult planWithMarkings(ResourceKey<Level> dimension, RoadNode node,
+            List<RoadSegment> incidentSegments, RoadSegment primary, int maximumAffectedBlocks,
+            int maximumPlanningCandidates, JunctionDefinition definition) {
+        return planWithMarkings(dimension, node, incidentSegments, primary, maximumAffectedBlocks,
+                maximumPlanningCandidates, definition, List.of());
+    }
+
+    public BlockPlanResult planWithMarkings(ResourceKey<Level> dimension, RoadNode node,
+            List<RoadSegment> incidentSegments, RoadSegment primary, int maximumAffectedBlocks,
+            int maximumPlanningCandidates, JunctionDefinition definition,
+            Collection<LaneConnector> existingConnectors) {
+        var preset = primary.presetSnapshot();
+        var style = preset.intersectionStyle();
+        List<ResourceLocation> pavement = style.usesPavementOverride(preset.surfaceBlock())
+                ? List.of(style.pavementBlock()) : surfaceBlocks(incidentSegments, RoadSurfaceRole.PAVEMENT);
+        if (pavement.isEmpty()) {
+            pavement = List.of(preset.surfaceBlock());
+        }
+        List<ResourceLocation> sidewalk = surfaceBlocks(incidentSegments, RoadSurfaceRole.SIDEWALK);
+        Set<BlockPos> unmarkable = new HashSet<>();
+        BlockPlanResult surface = planSurface(dimension, node, incidentSegments, pavement,
+                sidewalk.isEmpty() ? pavement : sidewalk, maximumAffectedBlocks, maximumPlanningCandidates,
+                definition, existingConnectors, unmarkable);
+        if (!(surface instanceof BlockPlanResult.Success base)) {
+            return surface;
+        }
+        BlockPlanResult markings = new JunctionMarkingMaterializer().plan(
+                dimension, node, incidentSegments, definition, maximumAffectedBlocks);
+        if (!(markings instanceof BlockPlanResult.Success paint)) {
+            return surface;
+        }
+        var clipped = BlockPlacementPlans.excludingPositions(paint.plan(), unmarkable);
+        if (clipped.isEmpty()) {
+            return surface;
+        }
+        return new BlockPlanResult.Success(BlockPlacementPlans.mergeLayered(dimension, List.of(
+                new LayeredBlockPlan(base.plan(), MaterialLayer.JUNCTION_SURFACE, "node", node.id().toString()),
+                new LayeredBlockPlan(clipped.orElseThrow(), MaterialLayer.JUNCTION_MARKING,
+                        "node-marking", node.id().toString())
+        )));
+    }
+
+    private static List<ResourceLocation> surfaceBlocks(Collection<RoadSegment> segments, RoadSurfaceRole role) {
+        return segments.stream().sorted(Comparator.comparing(RoadSegment::presetId)
+                        .thenComparingInt(RoadSegment::presetRevision))
+                .flatMap(segment -> segment.presetSnapshot().surfaceBands().stream())
+                .filter(band -> band.role() == role)
+                .flatMap(band -> band.blockSet().stream()).distinct().toList();
+    }
+
+    private BlockPlanResult planSurface(ResourceKey<Level> dimension, RoadNode node,
+            Collection<RoadSegment> incidentSegments, List<ResourceLocation> pavementBlocks,
+            List<ResourceLocation> sidewalkBlocks, int maximumAffectedBlocks, int maximumPlanningCandidates,
+            JunctionDefinition definition, Collection<LaneConnector> existingConnectors,
+            Set<BlockPos> unmarkable) {
         Objects.requireNonNull(dimension, "dimension");
         Objects.requireNonNull(node, "node");
         Objects.requireNonNull(incidentSegments, "incidentSegments");
-        Objects.requireNonNull(pavementBlockId, "pavementBlockId");
-        Objects.requireNonNull(sidewalkBlockId, "sidewalkBlockId");
         Objects.requireNonNull(existingConnectors, "existingConnectors");
         if (maximumAffectedBlocks < 1) {
             throw new IllegalArgumentException(
@@ -116,20 +176,14 @@ public final class StraightRoadIntersectionMaterializer {
             );
         }
 
-        Optional<BlockState> resolvedPavement = resolveSurface(pavementBlockId);
-        Optional<BlockState> resolvedSidewalk = resolveSurface(sidewalkBlockId);
-        if (resolvedPavement.isEmpty() || resolvedSidewalk.isEmpty()) {
-            return new BlockPlanResult.Failure(
-                    BlockPlanFailureCode.UNKNOWN_SURFACE_BLOCK
-            );
+        var resolved = RoadSurfaceResolver.resolve(List.of(
+                new RoadSurfaceColumn(pavementBlocks, pavementBlocks, RoadMarkingPattern.CONTINUOUS),
+                new RoadSurfaceColumn(sidewalkBlocks, sidewalkBlocks, RoadMarkingPattern.CONTINUOUS)
+        ));
+        if (resolved instanceof RoadSurfaceResolver.Result.Failure failure) {
+            return new BlockPlanResult.Failure(failure.code());
         }
-        BlockState pavement = resolvedPavement.orElseThrow();
-        BlockState sidewalk = resolvedSidewalk.orElseThrow();
-        if (pavement.isAir() || sidewalk.isAir()) {
-            return new BlockPlanResult.Failure(
-                    BlockPlanFailureCode.AIR_SURFACE_BLOCK
-            );
-        }
+        ResolvedRoadSurface surface = ((RoadSurfaceResolver.Result.Success) resolved).surface();
 
         List<Approach> approaches = distinctApproaches(
                 node,
@@ -216,19 +270,22 @@ public final class StraightRoadIntersectionMaterializer {
 
         List<PlannedBlock> blocks = new ArrayList<>();
         Optional<BlockState> marking = resolveMarking(incidentSegments);
-        Map<BlockState, ResolvedRoadSurface> elevationSurfaces = new HashMap<>();
+        Optional<ResolvedRoadSurface> markingSurface = marking.map(state -> new ResolvedRoadSurface(1, state));
+        Set<BlockPos> sidewalkPositions = new HashSet<>();
         var elevations=new JunctionSurfaceElevation(node,incidentSegments);
         for (int x = minimumX; x <= maximumX; x++) {
             for (int z = minimumZ; z <= maximumZ; z++) {
                 double offsetX = x + 0.5 - node.position().x();
                 double offsetZ = z + 0.5 - node.position().z();
                 BlockPos position = new BlockPos(x, blockY, z);
-                BlockState targetState;
+                FilletCell cell;
+                boolean disabledLane = false;
                 if (lanePavement.drivable().contains(position)) {
-                    targetState = pavement;
+                    cell = FilletCell.PAVEMENT;
                 } else if (lanePavement.disabled().contains(position)
                         && marking.isPresent()) {
-                    targetState = marking.orElseThrow();
+                    cell = FilletCell.PAVEMENT;
+                    disabledLane = true;
                 } else if (auxiliary) {
                     if (branchApproaches.stream().noneMatch(approach ->
                             approach.contains(offsetX, offsetZ, maximumFootprintRadius))) {
@@ -245,20 +302,18 @@ public final class StraightRoadIntersectionMaterializer {
                                     approach.isSidewalk(offsetX, offsetZ))) {
                         continue;
                     }
-                    targetState = pavement;
+                    cell = FilletCell.PAVEMENT;
                 } else {
-                    targetState = intersectionState(
+                    cell = intersectionCell(
                             offsetX,
                             offsetZ,
                             approaches,
                             approachReach,
                             maximumFootprintRadius,
-                            fillets,
-                            pavement,
-                            sidewalk
+                            fillets
                     );
                 }
-                if (targetState == null) {
+                if (cell == FilletCell.OUTSIDE) {
                     continue;
                 }
                 if (blocks.size() >= maximumAffectedBlocks) {
@@ -266,10 +321,16 @@ public final class StraightRoadIntersectionMaterializer {
                             BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED
                     );
                 }
-                // Use the same half-block quantization and slab companions as road segments.
-                var placement = elevationSurfaces.computeIfAbsent(targetState,
-                        state -> new ResolvedRoadSurface(1, state))
-                        .targetPlacement(0, 0.0, x, z, elevations.height(x+0.5,z+0.5));
+                boolean sidewalk = cell == FilletCell.SIDEWALK;
+                double height = elevations.height(x + 0.5, z + 0.5);
+                var placement = disabledLane
+                        ? markingSurface.orElseThrow().targetPlacement(0, 0, x, z, height)
+                        : surface.targetPlacement(sidewalk ? 1 : 0, 0, x, z, height);
+                if (sidewalk) {
+                    sidewalkPositions.add(placement.position());
+                } else if (disabledLane) {
+                    unmarkable.add(placement.position());
+                }
                 blocks.add(new PlannedBlock(placement.position(), placement.state()));
             }
         }
@@ -282,13 +343,10 @@ public final class StraightRoadIntersectionMaterializer {
         // component can connect directly to the segment layer underneath.
         // Treating only this layer as a complete connectivity graph would
         // incorrectly pave those bridge cells and cut the visible sidewalk.
-        if (approaches.size() != 3) {
-            BlockState sidewalkAtLevel = new ResolvedRoadSurface(1, sidewalk)
-                    .targetPlacement(0, 0, 0, 0, node.position().y()).state();
-            BlockState pavementAtLevel = new ResolvedRoadSurface(1, pavement)
-                    .targetPlacement(0, 0, 0, 0, node.position().y()).state();
-            blocks = removeSidewalkIslands(blocks, sidewalkAtLevel, pavementAtLevel);
+        if (approaches.size() != 3 && !pavementBlocks.equals(sidewalkBlocks)) {
+            blocks = removeSidewalkIslands(blocks, sidewalkPositions, surface, elevations);
         }
+        unmarkable.addAll(sidewalkPositions);
         try {
             if(auxiliary) blocks=LaneMergeMarkingPlanner.restore(dimension,node,incidentSegments,blocks,
                     maximumAffectedBlocks,maximumPlanningCandidates);
@@ -297,6 +355,8 @@ public final class StraightRoadIntersectionMaterializer {
         } catch(IllegalArgumentException budgetExceeded) {
             return new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED);
         }
+        blocks.stream().filter(block -> block.targetState().isAir())
+                .map(PlannedBlock::position).forEach(unmarkable::add);
         return new BlockPlanResult.Success(
                 BlockPlacementPlan.create(dimension, blocks)
         );
@@ -378,18 +438,10 @@ public final class StraightRoadIntersectionMaterializer {
 
     private static List<PlannedBlock> removeSidewalkIslands(
             List<PlannedBlock> blocks,
-            BlockState sidewalk,
-            BlockState pavement
+            Set<BlockPos> sidewalkPositions,
+            ResolvedRoadSurface surface,
+            JunctionSurfaceElevation elevations
     ) {
-        if (sidewalk.equals(pavement)) {
-            return blocks;
-        }
-        Set<BlockPos> sidewalkPositions = new HashSet<>();
-        for (PlannedBlock block : blocks) {
-            if (block.targetState().equals(sidewalk)) {
-                sidewalkPositions.add(block.position());
-            }
-        }
         Set<BlockPos> unvisited = new HashSet<>(sidewalkPositions);
         Set<BlockPos> islands = new HashSet<>();
         while (!unvisited.isEmpty()) {
@@ -420,16 +472,16 @@ public final class StraightRoadIntersectionMaterializer {
         if (islands.isEmpty()) {
             return blocks;
         }
-        return blocks.stream()
-                .map(block -> islands.contains(block.position())
-                        ? new PlannedBlock(block.position(), pavement)
-                        : block)
-                .toList();
-    }
-
-    private static Optional<BlockState> resolveSurface(ResourceLocation blockId) {
-        return BuiltInRegistries.BLOCK.getOptional(blockId)
-                .map(RoadBlockStateFactory::solid);
+        sidewalkPositions.removeAll(islands);
+        return blocks.stream().map(block -> {
+            BlockPos pos = block.position();
+            if (!islands.contains(pos)) {
+                return block;
+            }
+            var pavement = surface.targetPlacement(0, 0, pos.getX(), pos.getZ(),
+                    elevations.height(pos.getX() + 0.5, pos.getZ() + 0.5));
+            return new PlannedBlock(pavement.position(), pavement.state());
+        }).toList();
     }
 
     private static Optional<BlockState> resolveMarking(
@@ -487,12 +539,21 @@ public final class StraightRoadIntersectionMaterializer {
                                     ? 0.0
                                     : segment.referenceGeometry().length()
                     ).position();
+                    int width = segment.presetSnapshot().surfaceBlockWidth();
+                    double centerX = endpoint.x();
+                    double centerZ = endpoint.z();
+                    if (segment.referenceGeometry() instanceof com.cookiecraftmods.roadbuilder.geometry.StraightGeometry) {
+                        // The straight planner floors individual columns to block cells.
+                        // Use the resulting lateral center for the fillet and its seam with the road.
+                        if (Math.abs(deltaX / length) <= FOOTPRINT_TOLERANCE) {
+                            centerX = rasterCenter(centerX, width);
+                        } else if (Math.abs(deltaZ / length) <= FOOTPRINT_TOLERANCE) {
+                            centerZ = rasterCenter(centerZ, width);
+                        }
+                    }
                     Approach candidate = new Approach(
-                            endpoint.x() - node.position().x(),
-                            endpoint.z() - node.position().z(),
-                            deltaX / length,
-                            deltaZ / length,
-                            segment.presetSnapshot().surfaceBlockWidth(),
+                            centerX - node.position().x(), centerZ - node.position().z(),
+                            deltaX / length, deltaZ / length, width,
                             roles,
                             segment.referenceGeometry().length(),
                             approachSamples(segment, node, startsAtNode)
@@ -515,6 +576,10 @@ public final class StraightRoadIntersectionMaterializer {
                 });
         approaches.sort(Comparator.comparingDouble(Approach::angle));
         return List.copyOf(approaches);
+    }
+
+    private static double rasterCenter(double coordinate, int width) {
+        return Math.floor(coordinate - (width - 1) / 2.0) + width / 2.0;
     }
 
     private static List<ApproachSample> approachSamples(
@@ -615,15 +680,13 @@ public final class StraightRoadIntersectionMaterializer {
         return List.copyOf(fillets);
     }
 
-    private static BlockState intersectionState(
+    private static FilletCell intersectionCell(
             double offsetX,
             double offsetZ,
             List<Approach> approaches,
             double approachReach,
             double maximumFootprintRadius,
-            List<CornerFillet> fillets,
-            BlockState pavement,
-            BlockState sidewalk
+            List<CornerFillet> fillets
     ) {
         List<Approach> fullContainingApproaches = approaches.stream()
                 .filter(approach -> approach.contains(
@@ -641,18 +704,18 @@ public final class StraightRoadIntersectionMaterializer {
             // Offset ports in a three-way fork can make two legitimate outer
             // sidewalk bands overlap before the rounded fillet begins.
             if (approaches.size() == 3 && insideEveryOuterSidewalk) {
-                return sidewalk;
+                return FilletCell.SIDEWALK;
             }
             if (!insideEveryOuterSidewalk) {
-                return pavement;
+                return FilletCell.PAVEMENT;
             }
             boolean roundedCorner = fillets.stream().anyMatch(fillet ->
                     fillet.conflictCell(offsetX, offsetZ)
                             == FilletCell.SIDEWALK);
             if (roundedCorner) {
-                return sidewalk;
+                return FilletCell.SIDEWALK;
             }
-            return pavement;
+            return FilletCell.PAVEMENT;
         }
         List<Approach> containingApproaches = fullContainingApproaches.stream()
                 .filter(approach -> approach.contains(
@@ -664,26 +727,26 @@ public final class StraightRoadIntersectionMaterializer {
         if (!containingApproaches.isEmpty()) {
             Approach approach = containingApproaches.get(0);
             if (approach.isMedian(offsetX, offsetZ)) {
-                return null;
+                return FilletCell.OUTSIDE;
             }
             return approach.isSidewalk(offsetX, offsetZ)
                     && approach.isInOuterSidewalkBand(offsetX, offsetZ)
-                    ? sidewalk
-                    : pavement;
+                    ? FilletCell.SIDEWALK
+                    : FilletCell.PAVEMENT;
         }
         if (fullContainingApproaches.size() == 1) {
-            return null;
+            return FilletCell.OUTSIDE;
         }
 
         boolean insideFilletSidewalk = false;
         for (CornerFillet fillet : fillets) {
             FilletCell cell = fillet.cell(offsetX, offsetZ);
             if (cell == FilletCell.PAVEMENT) {
-                return pavement;
+                return FilletCell.PAVEMENT;
             }
             insideFilletSidewalk |= cell == FilletCell.SIDEWALK;
         }
-        return insideFilletSidewalk ? sidewalk : null;
+        return insideFilletSidewalk ? FilletCell.SIDEWALK : FilletCell.OUTSIDE;
     }
 
     private static int floorToInt(double value) {
@@ -1086,8 +1149,8 @@ public final class StraightRoadIntersectionMaterializer {
             }
 
             double sidewalkWidth = Math.max(
-                    first.rightSidewalkWidth(),
-                    second.leftSidewalkWidth()
+                    first.leftSidewalkWidth(),
+                    second.rightSidewalkWidth()
             );
             double desiredRadius = Math.max(
                     MINIMUM_FILLET_RADIUS,
@@ -1161,8 +1224,8 @@ public final class StraightRoadIntersectionMaterializer {
             double conflictTangentLength = Math.min(
                     MAXIMUM_FILLET_TANGENT,
                     Math.min(
-                            first.rightSidewalkWidth(),
-                            second.leftSidewalkWidth()
+                            first.leftSidewalkWidth(),
+                            second.rightSidewalkWidth()
                     )
             );
             conflictTangentLength = Math.min(

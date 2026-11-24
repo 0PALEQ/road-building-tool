@@ -17,7 +17,8 @@ public record RoadPresetEditorComponent(
         ResourceLocation block,
         LaneTravelDirection direction,
         boolean inheritsRoadMaterial,
-        List<ResourceLocation> blockSet
+        List<ResourceLocation> blockSet,
+        List<ResourceLocation> underlayBlockSet
 ) {
     public static final int DEFAULT_LANE_WIDTH = 3;
 
@@ -25,6 +26,13 @@ public record RoadPresetEditorComponent(
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(block, "block");
         blockSet = normalizeBlockSet(block, blockSet);
+        underlayBlockSet = List.copyOf(underlayBlockSet);
+        if (!underlayBlockSet.isEmpty()) {
+            if (!RoadSurfaceBand.hasUnderlay(kind.markingPattern())) {
+                throw new IllegalArgumentException("only dashed and double markings have pavement gaps");
+            }
+            underlayBlockSet = normalizeBlockSet(underlayBlockSet.get(0), underlayBlockSet);
+        }
         if (width < 1 || width > RoadPreset.MAXIMUM_SURFACE_BLOCK_WIDTH) {
             throw new IllegalArgumentException(
                     "component width must be between 1 and "
@@ -43,6 +51,12 @@ public record RoadPresetEditorComponent(
                     "a double continuous marking is exactly 3 blocks wide"
             );
         }
+    }
+
+    public RoadPresetEditorComponent(Kind kind, int width, ResourceLocation block,
+            LaneTravelDirection direction, boolean inheritsRoadMaterial,
+            List<ResourceLocation> blockSet) {
+        this(kind, width, block, direction, inheritsRoadMaterial, blockSet, List.of());
     }
 
     public RoadPresetEditorComponent(
@@ -127,6 +141,15 @@ public record RoadPresetEditorComponent(
         return kind.isLane();
     }
 
+    public boolean hasUnderlay() {
+        return RoadSurfaceBand.hasUnderlay(kind.markingPattern());
+    }
+
+    public RoadPresetEditorComponent withUnderlayBlockSet(List<ResourceLocation> blocks) {
+        return new RoadPresetEditorComponent(kind, width, block, direction,
+                inheritsRoadMaterial, blockSet, blocks);
+    }
+
     public boolean hasAdjustableWidth() {
         return kind != Kind.DOUBLE_CONTINUOUS_MARKING;
     }
@@ -138,7 +161,7 @@ public record RoadPresetEditorComponent(
                 block,
                 direction,
                 inheritsRoadMaterial,
-                blockSet
+                blockSet, underlayBlockSet
         );
     }
 
@@ -151,7 +174,7 @@ public record RoadPresetEditorComponent(
                 replacementBlock,
                 direction,
                 false,
-                List.of(replacementBlock)
+                List.of(replacementBlock), underlayBlockSet
         );
     }
 
@@ -168,7 +191,7 @@ public record RoadPresetEditorComponent(
                 replacementBlocks.get(0),
                 direction,
                 false,
-                replacementBlocks
+                replacementBlocks, underlayBlockSet
         );
     }
 
@@ -181,7 +204,7 @@ public record RoadPresetEditorComponent(
                 roadBlock,
                 direction,
                 true,
-                List.of(roadBlock)
+                List.of(roadBlock), underlayBlockSet
         );
     }
 
@@ -198,7 +221,7 @@ public record RoadPresetEditorComponent(
                 roadBlocks.get(0),
                 direction,
                 true,
-                roadBlocks
+                roadBlocks, underlayBlockSet
         );
     }
 
@@ -216,7 +239,7 @@ public record RoadPresetEditorComponent(
                 block,
                 replacementDirection,
                 inheritsRoadMaterial,
-                blockSet
+                blockSet, underlayBlockSet
         );
     }
 
@@ -226,7 +249,7 @@ public record RoadPresetEditorComponent(
                 width,
                 block,
                 kind.markingPattern(),
-                blockSet
+                blockSet, underlayBlockSet
         );
     }
 

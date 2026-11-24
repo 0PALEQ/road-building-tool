@@ -201,7 +201,7 @@ public final class IncrementalRemovalJobService {
                 job.cursor()
         );
         boolean removedStateStillPresent =
-                BlockTransitionStateMatcher.matchesPlannedTarget(
+                BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                         world.blockState(transition.position()),
                         transition.beforeState()
                 );

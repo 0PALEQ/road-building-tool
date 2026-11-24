@@ -277,7 +277,8 @@ class RoadGraphSnapshotS2CPacketTest {
                                         "yellow_concrete"
                                 ),
                                 RoadMarkingPattern.DOUBLE_CONTINUOUS
-                        ),
+                        ).withUnderlayBlockSet(List.of(MinecraftIds.id("minecraft", "stone"),
+                                MinecraftIds.id("minecraft", "andesite"))),
                         new RoadSurfaceBand(
                                 RoadSurfaceRole.PAVEMENT,
                                 1,

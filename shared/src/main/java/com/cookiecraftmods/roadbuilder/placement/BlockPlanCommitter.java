@@ -154,7 +154,7 @@ public final class BlockPlanCommitter {
                  * already produced this later target. Adopt that result while
                  * retaining the preflight state for exact restoration.
                  */
-                if (BlockTransitionStateMatcher.matchesPlannedTarget(
+                if (BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                         currentState,
                         block.targetState()
                 ) || restorationOverlay) {
@@ -173,10 +173,9 @@ public final class BlockPlanCommitter {
                         restorationOverlay
                 );
             }
-            if (BlockTransitionStateMatcher.matchesPlannedTarget(
-                    currentState,
-                    block.targetState()
-            )) {
+            boolean alreadyPlaced = restorationOverlay ? currentState.equals(block.targetState())
+                    : BlockTransitionStateMatcher.matchesPlannedTarget(currentState, block.targetState());
+            if (alreadyPlaced) {
                 if (!beforeState.equals(block.targetState())) {
                     appliedWrites.add(new AppliedWrite(
                             position,
@@ -199,7 +198,7 @@ public final class BlockPlanCommitter {
                 accepted = false;
             }
             BlockState observed = world.blockState(position);
-            if (BlockTransitionStateMatcher.matchesPlannedTarget(
+            if (BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                     observed,
                     block.targetState()
             ) || restorationOverlay && (
@@ -236,7 +235,7 @@ public final class BlockPlanCommitter {
         for (PlannedBlock block : plan.blocks()) {
             BlockState committedState = world.blockState(block.position());
             boolean targetPresent =
-                    BlockTransitionStateMatcher.matchesPlannedTarget(
+                    BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                             committedState,
                             block.targetState()
                     );
@@ -361,7 +360,7 @@ public final class BlockPlanCommitter {
                 continue;
             }
             if (!restorationOverlay
-                    && !BlockTransitionStateMatcher.matchesPlannedTarget(
+                    && !BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                             current,
                             write.afterState()
                     )) {

@@ -39,7 +39,6 @@ import com.cookiecraftmods.roadbuilder.placement.SmoothRoadTransitionMaterialize
 import com.cookiecraftmods.roadbuilder.placement.RoadTransitionPlanPreparer;
 import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetLookup;
-import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
@@ -408,14 +407,9 @@ public final class SegmentReplacementEndpoint {
                     .filter(approach -> approach.primary())
                     .map(approach -> approach.segment())
                     .findFirst().orElse(incident.get(0));
-            var style = primary.presetSnapshot().intersectionStyle();
-            var sidewalk = primary.presetSnapshot().surfaceBands().stream()
-                    .filter(band -> band.role() == RoadSurfaceRole.SIDEWALK)
-                    .findFirst().map(band -> band.block())
-                    .orElse(style.pavementBlock());
-            BlockPlanResult surface = new StraightRoadIntersectionMaterializer().plan(
+            BlockPlanResult surface = new StraightRoadIntersectionMaterializer().planWithMarkings(
                     graph.dimension(), node, incident,
-                    style.pavementBlock(), sidewalk,
+                    primary,
                     limits.maximumAffectedBlocks(),
                     limits.maximumPlanningCandidates(), definition
             );
@@ -423,23 +417,6 @@ public final class SegmentReplacementEndpoint {
                 throw new IllegalStateException("replacement junction surface failed");
             }
             BlockPlacementPlan combined = surfacePlan.plan();
-            BlockPlanResult markings = new JunctionMarkingMaterializer().plan(
-                    graph.dimension(), node, incident, definition,
-                    limits.maximumAffectedBlocks()
-            );
-            if (markings instanceof BlockPlanResult.Success markingPlan) {
-                combined = BlockPlacementPlans.mergeLayered(
-                        graph.dimension(),
-                        List.of(
-                                new LayeredBlockPlan(combined,
-                                        MaterialLayer.JUNCTION_SURFACE,
-                                        "node", nodeId.toString()),
-                                new LayeredBlockPlan(markingPlan.plan(),
-                                        MaterialLayer.JUNCTION_MARKING,
-                                        "node-marking", nodeId.toString())
-                        )
-                );
-            }
             if (incident.stream().anyMatch(segment -> segment.presetSnapshot().sunkenRoad())) {
                 BlockPlanResult completed = transitionPreparer.complete(
                         combined, node, incident, world, world::isMaterializedRoadPosition, limits
@@ -490,7 +467,7 @@ public final class SegmentReplacementEndpoint {
         for (BlockPos position : positions) {
             BlockState current = world.blockState(position);
             BlockState expected = ledger.expectedVisibleState(position).orElse(current);
-            targets.put(position, BlockTransitionStateMatcher.matchesPlannedTarget(
+            targets.put(position, BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                     current, expected)
                     ? stateAfterRemoving(ledger, position, removedIds, current)
                     : current);

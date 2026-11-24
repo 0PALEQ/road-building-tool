@@ -2,6 +2,7 @@ package com.cookiecraftmods.roadbuilder.network;
 
 import com.cookiecraftmods.roadbuilder.preset.LaneComponent;
 import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
+import com.cookiecraftmods.roadbuilder.preset.RoadMaterialPalette;
 import com.cookiecraftmods.roadbuilder.preset.RoadClassification;
 import com.cookiecraftmods.roadbuilder.preset.RoadIntersectionStyle;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand;
@@ -110,11 +111,20 @@ public record RoadPresetSnapshot(
 
     public static RoadPresetSnapshot from(RoadPreset preset) {
         Objects.requireNonNull(preset, "preset");
+        var pavement = preset.materialPalette().pavementBlocks();
+        var bands = preset.surfaceBands();
+        if (!pavement.equals(RoadMaterialPalette.pavementUnderlay(preset.surfaceBlock(), bands))) {
+            // Snapshots carry bands independently of the source preset palette.
+            bands = bands.stream().map(band -> RoadSurfaceBand.hasUnderlay(band.pattern())
+                            && band.underlayBlockSet().isEmpty()
+                            ? band.withUnderlayBlockSet(pavement) : band)
+                    .toList();
+        }
         return new RoadPresetSnapshot(
                 preset.surfaceBlockWidth(),
                 preset.surfaceBlock(),
                 preset.lanes(),
-                preset.surfaceBands(),
+                bands,
                 preset.classification(),
                 preset.intersectionStyle()
         );
@@ -127,7 +137,10 @@ public record RoadPresetSnapshot(
     }
 
     public List<RoadSurfaceColumn> surfaceColumns() {
-        return RoadSurfaceColumn.expand(surfaceBlock, surfaceBands);
+        return RoadSurfaceColumn.expand(
+                RoadMaterialPalette.pavementUnderlay(surfaceBlock, surfaceBands),
+                surfaceBands
+        );
     }
 
     public List<RoadSurfaceRole> surfaceColumnRoles() {

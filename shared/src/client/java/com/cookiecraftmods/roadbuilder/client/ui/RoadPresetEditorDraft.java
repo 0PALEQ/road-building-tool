@@ -52,8 +52,9 @@ public final class RoadPresetEditorDraft {
         return componentView;
     }
 
-    ResourceLocation fallbackSurfaceBlock() {
-        return materialPalette.pavementBlock();
+    List<ResourceLocation> underlayBlockSet(RoadPresetEditorComponent component) {
+        return component.underlayBlockSet().isEmpty()
+                ? materialPalette.pavementBlocks() : component.underlayBlockSet();
     }
 
     public RoadMaterialPalette materialPalette() {
@@ -357,7 +358,7 @@ public final class RoadPresetEditorDraft {
                     band.blockSet(),
                     null,
                     source.materialPalette()
-            ));
+            ).withUnderlayBlockSet(band.underlayBlockSet()));
             cursor = end;
         }
 

@@ -39,7 +39,6 @@ import com.cookiecraftmods.roadbuilder.placement.ServerLevelPlacementBlockWorld;
 import com.cookiecraftmods.roadbuilder.placement.SmoothRoadTransitionMaterializer;
 import com.cookiecraftmods.roadbuilder.placement.StackRemoval;
 import com.cookiecraftmods.roadbuilder.placement.StraightRoadIntersectionMaterializer;
-import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
@@ -335,26 +334,19 @@ public final class CrosswalkToggleEndpoint {
                     .map(SolvedJunctionApproach::segment)
                     .findFirst()
                     .orElse(incident.get(0));
-            var style = primary.presetSnapshot().intersectionStyle();
-            var sidewalk = primary.presetSnapshot().surfaceBands().stream()
-                    .filter(band -> band.role() == RoadSurfaceRole.SIDEWALK)
-                    .findFirst()
-                    .map(band -> band.block())
-                    .orElse(style.pavementBlock());
             BlockPlanResult surface = new StraightRoadIntersectionMaterializer()
-                    .plan(
+                    .planWithMarkings(
                             graph.dimension(),
                             node,
                             incident,
-                            style.pavementBlock(),
-                            sidewalk,
+                            primary,
                             limits.maximumAffectedBlocks(),
                             limits.maximumPlanningCandidates(), definition
                     );
             if (!(surface instanceof BlockPlanResult.Success successSurface)) {
                 throw new IllegalStateException("crosswalk surface failed");
             }
-            base = successSurface.plan();
+            return completeNodePlan(successSurface.plan(), node, incident, planningWorld);
         }
 
         BlockPlanResult markings = new JunctionMarkingMaterializer().plan(
@@ -419,7 +411,7 @@ public final class CrosswalkToggleEndpoint {
                     .orElse(current);
             targets.put(
                     position,
-                    BlockTransitionStateMatcher.matchesPlannedTarget(
+                    BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                             current,
                             expected
                     ) ? stateAfterRemoving(

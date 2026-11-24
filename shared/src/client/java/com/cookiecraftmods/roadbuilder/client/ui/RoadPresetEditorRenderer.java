@@ -1,6 +1,7 @@
 package com.cookiecraftmods.roadbuilder.client.ui;
 
 import com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection;
+import com.cookiecraftmods.roadbuilder.preset.RoadMaterialNoise;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
@@ -432,16 +433,10 @@ final class RoadPresetEditorRenderer {
             RoadPresetEditorComponent component
     ) {
         fillMaterial(bounds, component);
-        int pavement = materialColor(draft.fallbackSurfaceBlock());
         int dash = Math.max(3, bounds.width() * 3 / component.width());
         for (int y = bounds.y() + dash; y < bounds.bottom(); y += dash * 2) {
-            graphics.fill(
-                    bounds.x(),
-                    y,
-                    bounds.right(),
-                    Math.min(bounds.bottom(), y + dash),
-                    pavement
-            );
+            fillMaterial(new UiRectangle(bounds.x(), y, bounds.width(),
+                    Math.min(dash, bounds.bottom() - y)), draft.underlayBlockSet(component), dash);
         }
     }
 
@@ -452,22 +447,25 @@ final class RoadPresetEditorRenderer {
         fillMaterial(bounds, component);
         int third = Math.max(1, bounds.width() / 3);
         if (bounds.width() > third * 2) {
-            graphics.fill(bounds.x() + third, bounds.y(), bounds.right() - third, bounds.bottom(),
-                    materialColor(draft.fallbackSurfaceBlock()));
+            fillMaterial(new UiRectangle(bounds.x() + third, bounds.y(),
+                    bounds.width() - third * 2, bounds.height()),
+                    draft.underlayBlockSet(component), Math.max(4, third));
         }
     }
 
     private void fillMaterial(UiRectangle bounds, RoadPresetEditorComponent component) {
-        if (component.blockSet().size() == 1) {
-            fill(bounds, materialColor(component.block()));
+        fillMaterial(bounds, component.blockSet(), Math.max(4, bounds.width() / component.width()));
+    }
+
+    private void fillMaterial(UiRectangle bounds, java.util.List<ResourceLocation> blocks, int tile) {
+        if (blocks.size() == 1) {
+            fill(bounds, materialColor(blocks.get(0)));
             return;
         }
-        // A stable sample of the palette; placement chooses blocks using world coordinates.
-        int tile = Math.max(4, bounds.width() / component.width());
-        int[] colors = component.blockSet().stream().mapToInt(RoadPresetEditorRenderer::materialColor).toArray();
-        for (int y = bounds.y(), row = 0; y < bounds.bottom(); y += tile, row++) {
-            for (int x = bounds.x(), column = 0; x < bounds.right(); x += tile, column++) {
-                int choice = Math.floorMod((row * 73428767) ^ (column * 912271), colors.length);
+        int[] colors = blocks.stream().mapToInt(RoadPresetEditorRenderer::materialColor).toArray();
+        for (int y = bounds.y(); y < bounds.bottom(); y += tile) {
+            for (int x = bounds.x(); x < bounds.right(); x += tile) {
+                int choice = RoadMaterialNoise.sampleIndex(x / tile, 0, y / tile, colors.length);
                 graphics.fill(x, y, Math.min(bounds.right(), x + tile), Math.min(bounds.bottom(), y + tile),
                         colors[choice]);
             }

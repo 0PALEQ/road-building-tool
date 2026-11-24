@@ -69,7 +69,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public final class RoadBuilderNetworkSavedData extends RoadSavedData {
-    public static final int CURRENT_SCHEMA_VERSION = 4;
+    public static final int CURRENT_SCHEMA_VERSION = 6;
     public static final String DATA_NAME = "roadbuilder_road_graph";
 
     private static final int MAXIMUM_RESOURCE_ID_CHARACTERS = 128;
@@ -221,6 +221,9 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
     );
     private static final Set<String> LEGACY_SURFACE_BAND_KEYS =
             Set.of(ROLE_KEY, WIDTH_KEY, BLOCK_KEY);
+    private static final String UNDERLAY_BLOCK_SET_KEY = "underlay_block_set";
+    private static final String PAVEMENT_OVERRIDE_KEY = "pavement_override";
+    private static final String CROSSWALK_OVERRIDE_KEY = "crosswalk_override";
     private static final Set<String> SURFACE_BAND_KEYS =
             Set.of(ROLE_KEY, WIDTH_KEY, BLOCK_KEY, BLOCK_SET_KEY);
     private static final Set<String> LANE_COMPONENT_KEYS = Set.of(
@@ -591,6 +594,11 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
                     StringTag.valueOf(block.toString())
             ));
             bandTag.put(BLOCK_SET_KEY, blockSet);
+            if (!band.underlayBlockSet().isEmpty()) {
+                ListTag underlay = new ListTag();
+                band.underlayBlockSet().forEach(block -> underlay.add(StringTag.valueOf(block.toString())));
+                bandTag.put(UNDERLAY_BLOCK_SET_KEY, underlay);
+            }
             surfaceBands.add(bandTag);
         }
         tag.put(SURFACE_BANDS_KEY, surfaceBands);
@@ -612,6 +620,8 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
 
         RoadIntersectionStyle style = snapshot.intersectionStyle();
         CompoundTag intersectionStyle = new CompoundTag();
+        style.pavementOverride().ifPresent(override -> intersectionStyle.putBoolean(PAVEMENT_OVERRIDE_KEY, override));
+        style.crosswalkOverride().ifPresent(override -> intersectionStyle.putBoolean(CROSSWALK_OVERRIDE_KEY, override));
         intersectionStyle.putString(
                 PAVEMENT_BLOCK_KEY,
                 style.pavementBlock().toString()
@@ -1016,13 +1026,10 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
             for (int index = 0; index < bandTags.size(); index++) {
                 CompoundTag bandTag = bandTags.getCompound(index);
                 String bandPath = path + ".surface_bands[" + index + "]";
-                requireExactKeys(
-                        bandTag,
-                        graphSchemaVersion >= 3
-                                ? SURFACE_BAND_KEYS
-                                : LEGACY_SURFACE_BAND_KEYS,
-                        bandPath
-                );
+                boolean hasUnderlay = graphSchemaVersion >= 5 && bandTag.contains(UNDERLAY_BLOCK_SET_KEY);
+                Set<String> bandKeys = graphSchemaVersion >= 3 ? SURFACE_BAND_KEYS : LEGACY_SURFACE_BAND_KEYS;
+                requireExactKeys(bandTag, hasUnderlay ? withKey(bandKeys, UNDERLAY_BLOCK_SET_KEY) : bandKeys,
+                        bandPath);
                 String serializedRole = readString(
                         bandTag.get(ROLE_KEY),
                         bandPath + ".role"
@@ -1059,7 +1066,9 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
                         readInt(bandTag.get(WIDTH_KEY), bandPath + ".width"),
                         primaryBlock,
                         pattern,
-                        blockSet
+                        blockSet,
+                        hasUnderlay ? readBlockSet(bandTag.get(UNDERLAY_BLOCK_SET_KEY),
+                                bandPath + ".underlay_block_set") : List.of()
                 ));
             }
         }
@@ -1100,7 +1109,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         RoadIntersectionStyle intersectionStyle = graphSchemaVersion >= 2
                 ? readIntersectionStyle(
                         tag.getCompound(INTERSECTION_STYLE_KEY),
-                        path + ".intersection_style"
+                        path + ".intersection_style", graphSchemaVersion
                 )
                 : RoadIntersectionStyle.defaults(surfaceBlock);
         return new DecodedPreset(
@@ -1187,9 +1196,17 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
 
     private static RoadIntersectionStyle readIntersectionStyle(
             CompoundTag tag,
-            String path
+            String path,
+            int graphSchemaVersion
     ) {
-        requireExactKeys(tag, INTERSECTION_STYLE_KEYS, path);
+        Optional<Boolean> pavementOverride = graphSchemaVersion >= 5
+                ? readOptionalBoolean(tag, PAVEMENT_OVERRIDE_KEY, path) : Optional.empty();
+        Optional<Boolean> crosswalkOverride = graphSchemaVersion >= 6
+                ? readOptionalBoolean(tag, CROSSWALK_OVERRIDE_KEY, path) : Optional.empty();
+        Set<String> keys = new HashSet<>(INTERSECTION_STYLE_KEYS);
+        pavementOverride.ifPresent(value -> keys.add(PAVEMENT_OVERRIDE_KEY));
+        crosswalkOverride.ifPresent(value -> keys.add(CROSSWALK_OVERRIDE_KEY));
+        requireExactKeys(tag, keys, path);
         IntersectionControl control;
         String serializedControl = readString(
                 tag.get(DEFAULT_CONTROL_KEY),
@@ -1222,8 +1239,20 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
                         path + ".stop_line_block"
                 ),
                 tag.getBoolean(DEFAULT_CROSSWALKS_KEY),
-                control
+                control,
+                pavementOverride,
+                crosswalkOverride
         );
+    }
+
+    private static Optional<Boolean> readOptionalBoolean(CompoundTag tag, String key, String path) {
+        if (!tag.contains(key)) {
+            return Optional.empty();
+        }
+        if (!tag.contains(key, Tag.TAG_BYTE) || (tag.getByte(key) != 0 && tag.getByte(key) != 1)) {
+            throw malformed(path + "." + key + " must be a boolean");
+        }
+        return Optional.of(tag.getBoolean(key));
     }
 
     private static Optional<ResourceLocation> readOptionalResourceId(
@@ -1462,6 +1491,12 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         if (actual > maximum) {
             throw malformed(type + " count exceeds " + maximum);
         }
+    }
+
+    private static Set<String> withKey(Set<String> keys, String key) {
+        Set<String> expanded = new java.util.HashSet<>(keys);
+        expanded.add(key);
+        return expanded;
     }
 
     private static void requireExactKeys(CompoundTag tag, Set<String> keys, String path) {

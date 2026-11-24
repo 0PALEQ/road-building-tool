@@ -204,6 +204,29 @@ class RoadPresetEditorDraftTest {
     }
 
     @Test
+    void markingUnderlaysInheritTheWholePaletteAndKeepIndependentOverrides() {
+        var cobble = MinecraftIds.id("minecraft", "cobblestone");
+        var andesite = MinecraftIds.id("minecraft", "andesite");
+        var draft = oneLaneDraft(3);
+        draft.setRoadMaterialSet(RoadSurfaceRole.PAVEMENT, List.of(STONE, andesite));
+        draft.addComponent(RoadPresetEditorComponent.surface(
+                RoadPresetEditorComponent.Kind.DASHED_MARKING, 1, WHITE));
+        draft.addComponent(RoadPresetEditorComponent.surface(
+                RoadPresetEditorComponent.Kind.DOUBLE_CONTINUOUS_MARKING, 3, WHITE)
+                .withUnderlayBlockSet(List.of(cobble, andesite)));
+
+        var built = draft.build(2);
+        var reopened = new RoadPresetEditorDraft(built);
+        var snapshot = com.cookiecraftmods.roadbuilder.network.RoadPresetSnapshot.from(built);
+        assertEquals(List.of(STONE, andesite), snapshot.surfaceColumns().get(3).underlayBlocks());
+        assertEquals(List.of(cobble, andesite), snapshot.surfaceColumns().get(5).blocks());
+        assertEquals(List.of(WHITE), snapshot.surfaceColumns().get(4).blocks());
+        assertEquals(List.of(WHITE), snapshot.surfaceColumns().get(6).blocks());
+        assertEquals(List.of(cobble, andesite), reopened.components().get(2).underlayBlockSet());
+        assertEquals(built, reopened.build(2));
+    }
+
+    @Test
     void maximumWidthAndFinalLaneGuardsAreTransactional() {
         RoadPresetEditorDraft draft = oneLaneDraft(
                 RoadPreset.MAXIMUM_SURFACE_BLOCK_WIDTH

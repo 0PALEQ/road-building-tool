@@ -13,7 +13,8 @@ public record RoadSurfaceBand(
         int width,
         ResourceLocation block,
         RoadMarkingPattern pattern,
-        List<ResourceLocation> blockSet
+        List<ResourceLocation> blockSet,
+        List<ResourceLocation> underlayBlockSet
 ) {
     private static final Codec<Serialized> SERIALIZED_CODEC =
             RecordCodecBuilder.create(instance -> instance.group(
@@ -28,7 +29,10 @@ public record RoadSurfaceBand(
                             .forGetter(Serialized::pattern),
                     ResourceLocation.CODEC.listOf()
                             .optionalFieldOf("block_set", List.of())
-                            .forGetter(Serialized::blockSet)
+                            .forGetter(Serialized::blockSet),
+                    ResourceLocation.CODEC.listOf()
+                            .optionalFieldOf("underlay_block_set", List.of())
+                            .forGetter(Serialized::underlayBlockSet)
             ).apply(instance, Serialized::new));
 
     public static final Codec<RoadSurfaceBand> CODEC = SERIALIZED_CODEC.comapFlatMap(
@@ -38,9 +42,17 @@ public record RoadSurfaceBand(
                     band.width,
                     band.block,
                     band.pattern,
-                    band.blockSet
+                    band.blockSet,
+                    band.underlayBlockSet
             )
     );
+
+    public RoadSurfaceBand(
+            RoadSurfaceRole role, int width, ResourceLocation block,
+            RoadMarkingPattern pattern, List<ResourceLocation> blockSet
+    ) {
+        this(role, width, block, pattern, blockSet, List.of());
+    }
 
     public RoadSurfaceBand(
             RoadSurfaceRole role,
@@ -64,6 +76,13 @@ public record RoadSurfaceBand(
         Objects.requireNonNull(block, "block");
         Objects.requireNonNull(pattern, "pattern");
         blockSet = normalizeBlockSet(block, blockSet);
+        underlayBlockSet = List.copyOf(underlayBlockSet);
+        if (!underlayBlockSet.isEmpty()) {
+            if (!hasUnderlay(pattern)) {
+                throw new IllegalArgumentException("only dashed and double markings have pavement gaps");
+            }
+            underlayBlockSet = normalizeBlockSet(underlayBlockSet.get(0), underlayBlockSet);
+        }
         if (width < 1 || width > RoadPreset.MAXIMUM_SURFACE_BLOCK_WIDTH) {
             throw new IllegalArgumentException(
                     "road surface band width must be between 1 and "
@@ -83,6 +102,15 @@ public record RoadSurfaceBand(
         }
     }
 
+    public static boolean hasUnderlay(RoadMarkingPattern pattern) {
+        return pattern == RoadMarkingPattern.DASHED
+                || pattern == RoadMarkingPattern.DOUBLE_CONTINUOUS;
+    }
+
+    public RoadSurfaceBand withUnderlayBlockSet(List<ResourceLocation> blocks) {
+        return new RoadSurfaceBand(role, width, block, pattern, blockSet, blocks);
+    }
+
     private static DataResult<RoadSurfaceBand> decode(Serialized serialized) {
         try {
             return DataResult.success(new RoadSurfaceBand(
@@ -90,7 +118,8 @@ public record RoadSurfaceBand(
                     serialized.width,
                     serialized.block,
                     serialized.pattern,
-                    serialized.blockSet
+                    serialized.blockSet,
+                    serialized.underlayBlockSet
             ));
         } catch (IllegalArgumentException | NullPointerException exception) {
             return DataResult.error(exception::getMessage);
@@ -102,7 +131,8 @@ public record RoadSurfaceBand(
             int width,
             ResourceLocation block,
             RoadMarkingPattern pattern,
-            List<ResourceLocation> blockSet
+            List<ResourceLocation> blockSet,
+            List<ResourceLocation> underlayBlockSet
     ) {
     }
 

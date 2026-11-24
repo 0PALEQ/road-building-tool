@@ -1682,8 +1682,7 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
                     BlockPos position = intersectionSurface.offset(
                             xDirection * offset.getX(), 0, zDirection * offset.getZ());
                     BlockState state = level.getBlockState(position);
-                    // Retaining walls now begin above a two-block fill gap.
-                    // Their one-block outer guardrail ledge is not junction pavement.
+                    // The outer ledge can extend past the junction pavement to support railing.
                     boolean supportedGuardrail = state.is(Blocks.SMOOTH_STONE)
                             && level.getBlockState(position.above()).is(Blocks.IRON_BARS)
                             && level.getBlockState(position.below()).is(Blocks.SMOOTH_STONE);

@@ -8,10 +8,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -207,36 +209,53 @@ class StraightRoadPlannerTest {
     }
 
     @Test
-    void distributesBlockSetVariantsDeterministically() {
-        List<net.minecraft.world.level.block.state.BlockState> choices = List.of(
+    void distributesBlockSetVariantsWithoutShortRepeatingPatterns() {
+        List<BlockState> palette = List.of(
                 Blocks.STONE.defaultBlockState(),
                 Blocks.ANDESITE.defaultBlockState(),
-                Blocks.TUFF.defaultBlockState()
+                Blocks.TUFF.defaultBlockState(),
+                Blocks.COBBLESTONE.defaultBlockState()
         );
-        ResolvedRoadSurface textured = new ResolvedRoadSurface(
-                List.of(choices.get(0)),
-                List.of(choices.get(0)),
-                List.of(RoadMarkingPattern.CONTINUOUS),
-                List.of(choices),
-                List.of(choices)
-        );
-        StraightGeometry geometry = new StraightGeometry(
-                new RoadPoint(0.5, 64.0, 0.5),
-                new RoadPoint(30.5, 64.0, 0.5)
+        RoadPoint start = new RoadPoint(-80.5, 64.0, -96.5);
+        List<RoadPoint> ends = List.of(
+                new RoadPoint(175.5, 64.0, -96.5),
+                new RoadPoint(-80.5, 64.0, 159.5)
         );
 
-        BlockPlacementPlan first = successfulPlan(
-                geometry, textured, 100, DEFAULT_CANDIDATE_LIMIT
-        );
-        BlockPlacementPlan second = successfulPlan(
-                geometry, textured, 100, DEFAULT_CANDIDATE_LIMIT
-        );
+        for (int variantCount = 2; variantCount <= palette.size(); variantCount++) {
+            List<BlockState> choices = palette.subList(0, variantCount);
+            ResolvedRoadSurface surface = new ResolvedRoadSurface(
+                    List.of(choices.get(0)),
+                    List.of(choices.get(0)),
+                    List.of(RoadMarkingPattern.CONTINUOUS),
+                    List.of(choices),
+                    List.of(choices)
+            );
+            double expectedFrequency = 1.0 / variantCount;
+            for (RoadPoint end : ends) {
+                BlockPlacementPlan forward = successfulPlan(new StraightGeometry(start, end),
+                        surface, 300, DEFAULT_CANDIDATE_LIMIT);
+                BlockPlacementPlan reverse = successfulPlan(new StraightGeometry(end, start),
+                        surface, 300, DEFAULT_CANDIDATE_LIMIT);
+                assertEquals(forward.blocks(), reverse.blocks());
 
-        assertEquals(first.blocks(), second.blocks());
-        assertTrue(first.blocks().stream()
-                .map(block -> block.targetState().getBlock())
-                .distinct()
-                .count() > 1);
+                List<BlockState> placed = forward.blocks().stream().map(PlannedBlock::targetState).toList();
+                for (BlockState state : choices) {
+                    assertEquals(expectedFrequency, (double) Collections.frequency(placed, state) / placed.size(),
+                            0.12, "block frequency for " + state);
+                }
+                for (int distance = 1; distance <= 16; distance++) {
+                    int matches = 0;
+                    for (int index = distance; index < placed.size(); index++) {
+                        if (placed.get(index).equals(placed.get(index - distance))) {
+                            matches++;
+                        }
+                    }
+                    assertEquals(expectedFrequency, (double) matches / (placed.size() - distance), 0.12,
+                            "same block at offset " + distance + " toward " + end + " with " + variantCount + " variants");
+                }
+            }
+        }
     }
 
     @Test

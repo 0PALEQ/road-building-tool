@@ -202,30 +202,31 @@ class RoadStructurePlannerTest {
         RoadStructurePlanner planner = new RoadStructurePlanner();
 
         BlockPlacementPlan fill = success(planner.addStructures(
-                surface(61, 3, 3), world, 10_000));
-        assertState(fill, new BlockPos(1, 60, 1), Blocks.DIRT.defaultBlockState());
-        assertState(fill, new BlockPos(0, 60, 0), Blocks.DIRT.defaultBlockState());
-        assertState(fill, new BlockPos(-1, 60, 1), Blocks.GRASS_BLOCK.defaultBlockState());
-        assertFalse(fill.positions().contains(new BlockPos(-2, 60, 1)));
+                surface(64, 3, 3), world, 10_000));
+        assertBlock(fill, new BlockPos(1, 63, 1), Blocks.DIRT);
+        assertBlock(fill, new BlockPos(0, 63, 0), Blocks.DIRT);
+        assertBlock(fill, new BlockPos(-1, 63, 1), Blocks.GRASS_BLOCK);
+        assertBlock(fill, new BlockPos(-4, 60, 1), Blocks.GRASS_BLOCK);
+        assertFalse(fill.positions().contains(new BlockPos(-5, 60, 1)));
 
         BlockPlacementPlan solid = success(planner.addStructures(
-                surface(66, 3, 3),
-                world,
-                10_000
-        ));
-        assertState(solid, new BlockPos(1, 65, 1),
-                Blocks.GRAY_CONCRETE.defaultBlockState());
-        assertState(solid, new BlockPos(0, 65, 0),
-                Blocks.POLISHED_ANDESITE.defaultBlockState());
-
-        BlockPlacementPlan deck = success(planner.addStructures(
                 surface(67, 3, 3),
                 world,
                 10_000
         ));
-        assertState(deck, new BlockPos(1, 66, 1),
+        assertState(solid, new BlockPos(1, 66, 1),
+                Blocks.GRAY_CONCRETE.defaultBlockState());
+        assertState(solid, new BlockPos(0, 66, 0),
+                Blocks.POLISHED_ANDESITE.defaultBlockState());
+
+        BlockPlacementPlan deck = success(planner.addStructures(
+                surface(68, 3, 3),
+                world,
+                10_000
+        ));
+        assertState(deck, new BlockPos(1, 67, 1),
                 Blocks.COBBLESTONE.defaultBlockState());
-        assertState(deck, new BlockPos(1, 65, 1),
+        assertState(deck, new BlockPos(1, 66, 1),
                 Blocks.SMOOTH_STONE.defaultBlockState());
     }
 
@@ -557,7 +558,7 @@ class RoadStructurePlannerTest {
 
     @Test
     void retainingWallEdgesHaveSupportedRailingsButLowEmbankmentsDoNot() {
-        for (int height : new int[]{2, 3, 7}) {
+        for (int height : new int[]{5, 6, 8}) {
             StraightGeometry geometry = new StraightGeometry(
                     new RoadPoint(0.5, height, 1.5),
                     new RoadPoint(8.5, height, 1.5));
@@ -572,7 +573,7 @@ class RoadStructurePlannerTest {
             for (PlannedBlock slab : slabs.blocks()) {
                 assertState(result, slab.position(), slab.targetState());
             }
-            if (height == 2) {
+            if (height == 5) {
                 assertFalse(result.blocks().stream().anyMatch(block ->
                         block.targetState().is(Blocks.IRON_BARS)));
                 continue;
@@ -822,7 +823,7 @@ class RoadStructurePlannerTest {
     }
 
     @Test
-    void elevatedApproachKeepsItsNodeEdgeOnADeck() {
+    void raisedRoadUsesLocalTerrainHeightEvenNearADeck() {
         MapWorld world = new MapWorld(0);
         for (int x = 0; x < 3; x++) {
             for (int z = 0; z < 3; z++) {
@@ -851,13 +852,9 @@ class RoadStructurePlannerTest {
                         20_000
                 ));
 
-        assertState(result, new BlockPos(1, 8, 1),
-                Blocks.COBBLESTONE.defaultBlockState());
-        assertState(result, new BlockPos(1, 7, 1),
-                Blocks.SMOOTH_STONE.defaultBlockState());
-        assertFalse(result.blocks().stream().anyMatch(block ->
-                block.targetState().is(Blocks.DIRT)
-                        || block.targetState().is(Blocks.GRASS_BLOCK)));
+        assertBlock(result, new BlockPos(1, 8, 1), Blocks.DIRT);
+        assertBlock(result, new BlockPos(1, 7, 1), Blocks.DIRT);
+        assertFalse(result.positions().contains(new BlockPos(1, 6, 1)));
     }
 
     @Test
@@ -1009,15 +1006,18 @@ class RoadStructurePlannerTest {
     }
 
     @Test
-    void fiveBlockRiseUsesRetainingWallsWithoutLateralEarthSpill() {
-        var geometry = new StraightGeometry(new RoadPoint(0.5, 80, 6.5), new RoadPoint(24.5, 80, 6.5));
-        var built = success(new RoadStructurePlanner().addStructures(surface(80, 14, 25),
-                new MapWorld(75), geometry, 14, pos -> false, 20000));
-        assertBlock(built, new BlockPos(12, 79, 0), Blocks.POLISHED_ANDESITE);
-        assertTrue(built.blocks().stream().noneMatch(block -> block.targetState().is(Blocks.DIRT)
-                || block.targetState().is(Blocks.GRASS_BLOCK)));
-        assertTrue(built.blocks().stream().allMatch(block -> block.position().getZ() >= -1
-                && block.position().getZ() <= 14));
+    void uphillRoadTransitionsFromEmbankmentToWallToViaduct() {
+        var geometry = new StraightGeometry(new RoadPoint(0.5, 76, 1.5), new RoadPoint(50.5, 86, 1.5));
+        var road = success(new StraightRoadPlanner().plan(new StraightRoadPlanRequest(
+                Level.OVERWORLD, geometry, new ResolvedRoadSurface(3, Blocks.STONE.defaultBlockState())),
+                20_000, 100_000));
+        var built = success(new RoadStructurePlanner().addStructures(road,
+                new MapWorld(75), geometry, 3, pos -> false, 20_000));
+        assertBlock(built, new BlockPos(20, 79, 0), Blocks.DIRT);
+        assertBlock(built, new BlockPos(20, 79, -1), Blocks.GRASS_BLOCK);
+        assertBlock(built, new BlockPos(35, 82, 0), Blocks.POLISHED_ANDESITE);
+        assertBlock(built, new BlockPos(40, 83, 1), Blocks.COBBLESTONE);
+        assertFalse(built.positions().contains(new BlockPos(40, 80, 1)));
     }
 
     @Test

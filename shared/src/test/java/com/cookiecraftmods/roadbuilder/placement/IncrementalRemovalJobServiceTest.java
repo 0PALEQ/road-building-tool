@@ -336,6 +336,25 @@ class IncrementalRemovalJobServiceTest {
     }
 
     @Test
+    void restoresHardenedConcreteBeforeAndDuringQueuedRemoval() {
+        Fixture fixture = fixture(null, Blocks.GREEN_CONCRETE_POWDER.defaultBlockState());
+        fixture.world.states.put(position(0), Blocks.GREEN_CONCRETE.defaultBlockState());
+        var service = new IncrementalRemovalJobService(new PlacementRemovalService(), 1);
+        var queued = assertInstanceOf(IncrementalRemovalJobService.EnqueueResult.Queued.class,
+                service.enqueueIfExpensive(PLAYER_ID, OPERATION_ID, RemovalMode.SAFE,
+                        fixture.world, fixture.ledger, fixture.jobs));
+        var first = service.tick(queued.job(), 1, fixture.world, fixture.ledger, fixture.graph);
+        fixture.world.states.put(position(1), Blocks.GREEN_CONCRETE.defaultBlockState());
+
+        var finished = service.tick(first.job(), 2, fixture.world, fixture.ledger, fixture.graph);
+        assertEquals(IncrementalRemovalJobService.TickOutcome.COMPLETED, finished.outcome());
+        for (int index = 0; index < 3; index++) {
+            assertEquals(Blocks.DIRT.defaultBlockState(), fixture.world.blockState(position(index)));
+        }
+        assertFalse(fixture.ledger.operation(OPERATION_ID).isPresent());
+    }
+
+    @Test
     void externalEditQuarantinesWithoutReleasingOwnership() {
         Fixture fixture = fixture();
         IncrementalRemovalJobService service =
@@ -408,6 +427,10 @@ class IncrementalRemovalJobServiceTest {
     }
 
     private static Fixture fixture(GraphOwnership graphOwnership) {
+        return fixture(graphOwnership, Blocks.GRAY_CONCRETE.defaultBlockState());
+    }
+
+    private static Fixture fixture(GraphOwnership graphOwnership, BlockState material) {
         MapWorld world = new MapWorld();
         for (int index = 0; index < 3; index++) {
             world.states.put(position(index), Blocks.DIRT.defaultBlockState());
@@ -415,9 +438,9 @@ class IncrementalRemovalJobServiceTest {
         BlockPlacementPlan plan = BlockPlacementPlan.create(
                 Level.OVERWORLD,
                 List.of(
-                        planned(0),
-                        planned(1),
-                        planned(2)
+                        new PlannedBlock(position(0), material),
+                        new PlannedBlock(position(1), material),
+                        new PlannedBlock(position(2), material)
                 )
         );
         PlacementOwnershipLedger ledger =
@@ -443,13 +466,6 @@ class IncrementalRemovalJobServiceTest {
                 ledger,
                 graph,
                 RoadBuilderConstructionJobSavedData.create(Level.OVERWORLD)
-        );
-    }
-
-    private static PlannedBlock planned(int index) {
-        return new PlannedBlock(
-                position(index),
-                Blocks.GRAY_CONCRETE.defaultBlockState()
         );
     }
 

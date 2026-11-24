@@ -19,16 +19,11 @@ import com.cookiecraftmods.roadbuilder.network.RoadNodeId;
 import com.cookiecraftmods.roadbuilder.network.RoadSegment;
 import com.cookiecraftmods.roadbuilder.network.SolvedJunctionApproach;
 import com.cookiecraftmods.roadbuilder.placement.BlockPlacementPlan;
-import com.cookiecraftmods.roadbuilder.placement.BlockPlacementPlans;
 import com.cookiecraftmods.roadbuilder.placement.BlockPlanCommitter;
 import com.cookiecraftmods.roadbuilder.placement.BlockPlanResult;
 import com.cookiecraftmods.roadbuilder.placement.BlockTransitionStateMatcher;
 import com.cookiecraftmods.roadbuilder.placement.ConstructionAuthorizer;
 import com.cookiecraftmods.roadbuilder.placement.ConstructionLimits;
-import com.cookiecraftmods.roadbuilder.placement.ConstructionValidationResult;
-import com.cookiecraftmods.roadbuilder.placement.JunctionMarkingMaterializer;
-import com.cookiecraftmods.roadbuilder.placement.LayeredBlockPlan;
-import com.cookiecraftmods.roadbuilder.placement.MaterialLayer;
 import com.cookiecraftmods.roadbuilder.placement.MaterializationPartition;
 import com.cookiecraftmods.roadbuilder.placement.PlacementCommitResult;
 import com.cookiecraftmods.roadbuilder.placement.PlacementOperation;
@@ -43,7 +38,6 @@ import com.cookiecraftmods.roadbuilder.placement.ServerLevelPlacementBlockWorld;
 import com.cookiecraftmods.roadbuilder.placement.SmoothRoadTransitionMaterializer;
 import com.cookiecraftmods.roadbuilder.placement.StackRemoval;
 import com.cookiecraftmods.roadbuilder.placement.StraightRoadIntersectionMaterializer;
-import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.state.BlockState;
@@ -346,19 +340,12 @@ public final class LaneConnectorEditEndpoint {
                 .map(SolvedJunctionApproach::segment)
                 .findFirst()
                 .orElse(incident.get(0));
-        var style = primary.presetSnapshot().intersectionStyle();
-        var sidewalk = primary.presetSnapshot().surfaceBands().stream()
-                .filter(band -> band.role() == RoadSurfaceRole.SIDEWALK)
-                .findFirst()
-                .map(band -> band.block())
-                .orElse(style.pavementBlock());
         BlockPlanResult surface = new StraightRoadIntersectionMaterializer()
-                .plan(
+                .planWithMarkings(
                         graph.dimension(),
                         node,
                         incident,
-                        style.pavementBlock(),
-                        sidewalk,
+                        primary,
                         limits.maximumAffectedBlocks(),
                         limits.maximumPlanningCandidates(),
                         definition,
@@ -369,34 +356,7 @@ public final class LaneConnectorEditEndpoint {
                     "lane connector junction surface failed"
             );
         }
-        BlockPlacementPlan base = surfaceSuccess.plan();
-        BlockPlanResult markings = new JunctionMarkingMaterializer().plan(
-                graph.dimension(),
-                node,
-                incident,
-                definition,
-                limits.maximumAffectedBlocks()
-        );
-        if (!(markings instanceof BlockPlanResult.Success markingSuccess)) {
-            return completeNodePlan(base, node, incident, planningWorld);
-        }
-        return completeNodePlan(BlockPlacementPlans.mergeLayered(
-                graph.dimension(),
-                List.of(
-                        new LayeredBlockPlan(
-                                base,
-                                MaterialLayer.JUNCTION_SURFACE,
-                                "node",
-                                nodeId.toString()
-                        ),
-                        new LayeredBlockPlan(
-                                markingSuccess.plan(),
-                                MaterialLayer.JUNCTION_MARKING,
-                                "node-marking",
-                                nodeId.toString()
-                        )
-                )
-        ), node, incident, planningWorld);
+        return completeNodePlan(surfaceSuccess.plan(), node, incident, planningWorld);
     }
 
     private BlockPlacementPlan completeNodePlan(BlockPlacementPlan surface, RoadNode node,
@@ -474,7 +434,7 @@ public final class LaneConnectorEditEndpoint {
                     .orElse(current);
             targets.put(
                     position,
-                    BlockTransitionStateMatcher.matchesPlannedTarget(
+                    BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                             current,
                             expected
                     ) ? stateAfterRemoving(

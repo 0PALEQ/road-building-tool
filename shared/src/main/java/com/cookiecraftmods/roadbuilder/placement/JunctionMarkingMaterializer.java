@@ -13,6 +13,9 @@ import com.cookiecraftmods.roadbuilder.network.JunctionSolver;
 import com.cookiecraftmods.roadbuilder.network.SolvedJunctionApproach;
 import com.cookiecraftmods.roadbuilder.preset.IntersectionControl;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
+import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand;
+import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceColumn;
+import com.cookiecraftmods.roadbuilder.preset.RoadMarkingPattern;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
@@ -26,6 +29,7 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.ToDoubleBiFunction;
 
 public final class JunctionMarkingMaterializer {
     private static final int[] CROSSWALK_DISTANCES = {2, 4};
@@ -54,6 +58,7 @@ public final class JunctionMarkingMaterializer {
                 || approaches.stream().mapToDouble(approach ->
                         approach.drivableHalfWidth() * 2.0).max().orElse(0.0)
                         >= 9.0;
+        JunctionSurfaceElevation elevation = new JunctionSurfaceElevation(node, incidentSegments);
         Map<BlockPos, PlannedBlock> crosswalkClearZones =
                 new LinkedHashMap<>();
         Map<BlockPos, PlannedBlock> crosswalks = new LinkedHashMap<>();
@@ -77,51 +82,16 @@ public final class JunctionMarkingMaterializer {
                     Math.max(1, (int) Math.ceil(approach.trimDistance())) + 1
             );
             int crosswalkRows = largeIntersection ? 3 : 2;
-            pavementBlock(approach.segment())
-                    .flatMap(BuiltInRegistries.BLOCK::getOptional)
-                    .map(RoadBlockStateFactory::solid)
-                    .filter(state -> !state.isAir())
-                    .ifPresent(state -> {
-                        List<PlannedBlock> zone = new ArrayList<>();
-                        addCrosswalkZone(
-                                zone,
-                                approach.segment(),
-                                approach.key().end() == ApproachEnd.START,
-                                crosswalkDistance,
-                                maximumDistance,
-                                crosswalkRows,
-                                halfWidth,
-                                state
-                        );
-                        zone.forEach(block -> crosswalkClearZones.put(
-                                block.position(),
-                                block
-                        ));
-                    });
-            crosswalkBlock(approach.segment())
-                    .flatMap(BuiltInRegistries.BLOCK::getOptional)
-                    .map(RoadBlockStateFactory::solid)
-                    .filter(state -> !state.isAir())
-                    .ifPresent(state -> {
-                        List<PlannedBlock> line = new ArrayList<>();
-                        addLongitudinalCrosswalk(
-                                line,
-                                approach.segment(),
-                                approach.key().end() == ApproachEnd.START,
-                                crosswalkDistance,
-                                maximumDistance,
-                                crosswalkRows,
-                                halfWidth,
-                                state
-                        );
-                        line.forEach(block -> crosswalks.put(
-                                block.position(),
-                                block
-                        ));
-                    });
+            var materials = resolveCrosswalkSurface(approach.segment());
+            if (materials instanceof RoadSurfaceResolver.Result.Failure failure) {
+                return new BlockPlanResult.Failure(failure.code());
+            }
+            addCrosswalk(crosswalkClearZones, crosswalks, approach.segment(),
+                    approach.key().end() == ApproachEnd.START, crosswalkDistance,
+                    maximumDistance, crosswalkRows, halfWidth,
+                    ((RoadSurfaceResolver.Result.Success) materials).surface(),
+                    (pos, cell) -> elevation.height(pos.getX() + 0.5, pos.getZ() + 0.5));
         }
-        java.util.Set<BlockPos> crosswalkPositions =
-                BlockPositionSets.copyOf(crosswalkClearZones.keySet());
         Map<BlockPos, PlannedBlock> blocks =
                 new LinkedHashMap<>(crosswalkClearZones);
         blocks.putAll(crosswalks);
@@ -180,12 +150,15 @@ public final class JunctionMarkingMaterializer {
                                         state
                                 );
                             }
-                            line.forEach(block -> {
-                                if (!crosswalkPositions.contains(
-                                        block.position())) {
-                                    blocks.put(block.position(), block);
+                            ResolvedRoadSurface stopLine = new ResolvedRoadSurface(1, state);
+                            for (PlannedBlock block : line) {
+                                BlockPos pos = block.position();
+                                var placement = stopLine.targetPlacement(
+                                        0, 0.0, pos.getX(), pos.getZ(), elevation.height(pos.getX() + 0.5, pos.getZ() + 0.5));
+                                if (!crosswalkClearZones.containsKey(placement.position())) {
+                                    blocks.put(placement.position(), new PlannedBlock(placement.position(), placement.state()));
                                 }
-                            });
+                            }
                         });
             }
             if (blocks.size() > maximumAffectedBlocks) {
@@ -199,41 +172,40 @@ public final class JunctionMarkingMaterializer {
                     BlockPlanFailureCode.INVALID_GEOMETRY
             );
         }
-        var elevation=new JunctionSurfaceElevation(node,incidentSegments);
-        Map<BlockPos,PlannedBlock> elevated=new LinkedHashMap<>();
-        for(var block:blocks.values()) {
-            var pos=block.position();
-            var placement=new ResolvedRoadSurface(1,block.targetState()).targetPlacement(0,0,pos.getX(),pos.getZ(),
-                    elevation.height(pos.getX()+0.5,pos.getZ()+0.5));
-            elevated.put(placement.position(),new PlannedBlock(placement.position(),placement.state()));
+        return new BlockPlanResult.Success(BlockPlacementPlan.create(dimension, blocks.values()));
+    }
+
+    private static RoadSurfaceResolver.Result resolveCrosswalkSurface(RoadSegment segment) {
+        var snapshot = segment.presetSnapshot();
+        var style = snapshot.intersectionStyle();
+        List<RoadSurfaceBand> bands = snapshot.surfaceBands();
+        List<ResourceLocation> pavement = materialBlocks(bands, RoadSurfaceRole.PAVEMENT);
+        if (pavement.isEmpty()) {
+            pavement = List.of(snapshot.surfaceBlock());
         }
-        return new BlockPlanResult.Success(BlockPlacementPlan.create(
-                dimension,
-                elevated.values()
-        ));
+        List<ResourceLocation> paint = style.crosswalkMaterialOverride().map(List::of)
+                .orElseGet(() -> materialBlocks(bands, RoadSurfaceRole.MARKING));
+        if (paint.isEmpty()) {
+            paint = List.of(style.markingBlock().orElse(snapshot.surfaceBlock()));
+        }
+        List<RoadSurfaceColumn> columns = new ArrayList<>(snapshot.surfaceBlockWidth());
+        for (RoadSurfaceBand band : bands) {
+            List<ResourceLocation> underlay = pavement;
+            if (band.role() == RoadSurfaceRole.PAVEMENT) {
+                underlay = band.blockSet();
+            } else if (!band.underlayBlockSet().isEmpty()) {
+                underlay = band.underlayBlockSet();
+            }
+            for (int index = 0; index < band.width(); index++) {
+                columns.add(new RoadSurfaceColumn(paint, underlay, RoadMarkingPattern.CONTINUOUS));
+            }
+        }
+        return RoadSurfaceResolver.resolve(columns);
     }
 
-    private static java.util.Optional<ResourceLocation> crosswalkBlock(
-            RoadSegment segment
-    ) {
-        var snapshot = segment.presetSnapshot();
-        return snapshot.intersectionStyle().crosswalkBlock()
-                .or(() -> snapshot.surfaceBands().stream()
-                        .filter(band ->
-                                band.role() == RoadSurfaceRole.MARKING)
-                        .map(band -> band.block())
-                        .findFirst())
-                .or(() -> snapshot.intersectionStyle().markingBlock())
-                .or(() -> java.util.Optional.of(snapshot.surfaceBlock()));
-    }
-
-    private static java.util.Optional<ResourceLocation> pavementBlock(
-            RoadSegment segment
-    ) {
-        var snapshot = segment.presetSnapshot();
-        return java.util.Optional.of(
-                snapshot.intersectionStyle().pavementBlock()
-        );
+    private static List<ResourceLocation> materialBlocks(List<RoadSurfaceBand> bands, RoadSurfaceRole role) {
+        return bands.stream().filter(band -> band.role() == role)
+                .flatMap(band -> band.blockSet().stream()).distinct().toList();
     }
 
     public BlockPlanResult planTerminalCrosswalk(
@@ -299,48 +271,15 @@ public final class JunctionMarkingMaterializer {
         int startDistance = Math.min(2, maximumDistance);
         int rows = 2;
         Map<BlockPos, PlannedBlock> blocks = new LinkedHashMap<>();
-        pavementBlock(segment)
-                .flatMap(BuiltInRegistries.BLOCK::getOptional)
-                .map(RoadBlockStateFactory::solid)
-                .filter(state -> !state.isAir())
-                .ifPresent(state -> {
-                    List<PlannedBlock> zone = new ArrayList<>();
-                    addCrosswalkZone(
-                            zone,
-                            segment,
-                            atStart,
-                            startDistance,
-                            maximumDistance,
-                            rows,
-                            halfWidth,
-                            state
-                    );
-                    zone.forEach(block -> blocks.put(
-                            block.position(),
-                            block
-                    ));
-                });
-        crosswalkBlock(segment)
-                .flatMap(BuiltInRegistries.BLOCK::getOptional)
-                .map(RoadBlockStateFactory::solid)
-                .filter(state -> !state.isAir())
-                .ifPresent(state -> {
-                    List<PlannedBlock> stripes = new ArrayList<>();
-                    addLongitudinalCrosswalk(
-                            stripes,
-                            segment,
-                            atStart,
-                            startDistance,
-                            maximumDistance,
-                            rows,
-                            halfWidth,
-                            state
-                    );
-                    stripes.forEach(block -> blocks.put(
-                            block.position(),
-                            block
-                    ));
-                });
+        var materials = resolveCrosswalkSurface(segment);
+        if (materials instanceof RoadSurfaceResolver.Result.Failure failure) {
+            return new BlockPlanResult.Failure(failure.code());
+        }
+        Map<BlockPos, PlannedBlock> stripes = new LinkedHashMap<>();
+        addCrosswalk(blocks, stripes, segment, atStart, startDistance, maximumDistance, rows,
+                halfWidth, ((RoadSurfaceResolver.Result.Success) materials).surface(),
+                (pos, cell) -> cell.height());
+        blocks.putAll(stripes);
         if (blocks.isEmpty()) {
             return new BlockPlanResult.Failure(
                     BlockPlanFailureCode.INVALID_GEOMETRY
@@ -460,7 +399,7 @@ public final class JunctionMarkingMaterializer {
             BlockState state
     ) {
         addMarkingPatch(blocks, segment, atStart, distance, distance,
-                halfWidth, state, null, false);
+                halfWidth, state, false);
     }
 
     private static void addDashedTransverseLine(
@@ -472,40 +411,27 @@ public final class JunctionMarkingMaterializer {
             BlockState state
     ) {
         addMarkingPatch(blocks, segment, atStart, distance, distance,
-                halfWidth, state, null, true);
+                halfWidth, state, true);
     }
 
-    private static void addLongitudinalCrosswalk(
-            List<PlannedBlock> blocks,
-            RoadSegment segment,
-            boolean atStart,
-            int startDistance,
-            int maximumDistance,
-            int depth,
-            int halfWidth,
-            BlockState state
-    ) {
-        BlockState pavement = pavementBlock(segment)
-                .flatMap(BuiltInRegistries.BLOCK::getOptional)
-                .map(RoadBlockStateFactory::solid).orElse(state);
-        addMarkingPatch(blocks, segment, atStart, startDistance,
-                Math.min(maximumDistance, startDistance + depth * 2 - 2),
-                halfWidth, state, pavement, true);
-    }
-
-    private static void addCrosswalkZone(
-            List<PlannedBlock> blocks,
-            RoadSegment segment,
-            boolean atStart,
-            int startDistance,
-            int maximumDistance,
-            int depth,
-            int halfWidth,
-            BlockState state
-    ) {
-        addMarkingPatch(blocks, segment, atStart, startDistance,
-                Math.min(maximumDistance, startDistance + depth * 2 - 2),
-                halfWidth, state, null, false);
+    private static void addCrosswalk(Map<BlockPos, PlannedBlock> gaps, Map<BlockPos, PlannedBlock> stripes,
+            RoadSegment segment, boolean atStart, int startDistance, int maximumDistance,
+            int rows, int halfWidth, ResolvedRoadSurface materials,
+            ToDoubleBiFunction<BlockPos, MarkingCell> surfaceHeight) {
+        int endDistance = Math.min(maximumDistance, startDistance + rows * 2 - 2);
+        double centerColumn = (materials.blockWidth() - 1) / 2.0;
+        rasterizePatch(segment, atStart, startDistance, endDistance, halfWidth).forEach((pos, cell) -> {
+            double lateral = atStart ? cell.lateral() : -cell.lateral();
+            int column = (int) Math.round(centerColumn - lateral);
+            double height = surfaceHeight.applyAsDouble(pos, cell);
+            var background = materials.targetCrosswalkPlacement(column, false, pos.getX(), pos.getZ(), height);
+            BlockPos position = background.position();
+            gaps.put(position, new PlannedBlock(position, background.state()));
+            if (isStripe(cell, halfWidth)) {
+                var stripe = materials.targetCrosswalkPlacement(column, true, pos.getX(), pos.getZ(), height);
+                stripes.put(position, new PlannedBlock(position, stripe.state()));
+            }
+        });
     }
 
     /** Rasterize in the road's moving frame, including its elevation. */
@@ -517,9 +443,21 @@ public final class JunctionMarkingMaterializer {
             double endDistance,
             int halfWidth,
             BlockState marking,
-            BlockState pavement,
             boolean striped
     ) {
+        rasterizePatch(segment, atStart, startDistance, endDistance, halfWidth).forEach((pos, cell) -> {
+            if (!striped || isStripe(cell, halfWidth)) {
+                blocks.add(new PlannedBlock(pos, marking));
+            }
+        });
+    }
+
+    private static boolean isStripe(MarkingCell cell, int halfWidth) {
+        return (int) Math.floor(cell.lateral() + halfWidth + 0.5) % 2 == 0;
+    }
+
+    private static Map<BlockPos, MarkingCell> rasterizePatch(RoadSegment segment, boolean atStart,
+            double startDistance, double endDistance, int halfWidth) {
         ReferenceGeometry geometry = segment.referenceGeometry();
         double from = Math.min(startDistance, geometry.length());
         double to = Math.min(endDistance, geometry.length());
@@ -544,22 +482,12 @@ public final class JunctionMarkingMaterializer {
                 double score = dx * dx + dz * dz;
                 MarkingCell previous = cells.get(pos);
                 if (previous == null || score < previous.score() - 1.0e-12) {
-                    int column = (int) Math.floor(lateral + halfWidth + 0.5);
-                    BlockState state = !striped || column % 2 == 0
-                            ? marking : pavement;
-                    cells.put(pos, new MarkingCell(score, state));
+                    cells.put(pos, new MarkingCell(score, lateral, point.y()));
                 }
             }
         }
-        cells.forEach((pos, cell) -> {
-            // Clear zones are merged before stripes, so another approach's
-            // pavement must not erase an already selected white stripe.
-            if (cell.state() != null
-                    && (pavement == null || cell.state().equals(marking))) {
-                blocks.add(new PlannedBlock(pos, cell.state()));
-            }
-        });
+        return cells;
     }
 
-    private record MarkingCell(double score, BlockState state) {}
+    private record MarkingCell(double score, double lateral, double height) {}
 }

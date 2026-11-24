@@ -205,7 +205,7 @@ public record RoadPreset(
     }
 
         public List<RoadSurfaceColumn> surfaceColumns() {
-        return RoadSurfaceColumn.expand(surfaceBlock, surfaceBands);
+        return RoadSurfaceColumn.expand(materialPalette.pavementBlocks(), surfaceBands);
     }
 
     private static List<RoadSurfaceBand> normalizeSurfaceBands(

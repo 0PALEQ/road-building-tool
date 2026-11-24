@@ -68,11 +68,12 @@ public final class PlacementRemovalService {
         for (VisibleAction action : prepared.visibleActions()) {
             BlockState current = world.blockState(action.position());
             boolean stillObserved =
-                    BlockTransitionStateMatcher.matchesPlannedTarget(
+                    BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                             current,
                             action.observedState()
                     );
-            if (!stillObserved && action.desiredState() != null) {
+            if (!stillObserved && action.desiredState() != null
+                    && BlockTransitionStateMatcher.matchesRecordedSource(current, action.desiredState())) {
                 appliedWrites.add(new AppliedWrite(
                         action.position(),
                         action.observedState()
@@ -87,11 +88,7 @@ public final class PlacementRemovalService {
                         appliedWrites
                 );
             }
-            if (action.desiredState() == null
-                    || BlockTransitionStateMatcher.matchesPlannedTarget(
-                            current,
-                            action.desiredState()
-                    )) {
+            if (action.desiredState() == null || current.equals(action.desiredState())) {
                 continue;
             }
 
@@ -111,7 +108,7 @@ public final class PlacementRemovalService {
                             action.desiredState()
                     );
             boolean removedStateGone =
-                    !BlockTransitionStateMatcher.matchesPlannedTarget(
+                    !BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                             observedAfter,
                             action.observedState()
                     );
@@ -148,7 +145,7 @@ public final class PlacementRemovalService {
                     : BlockTransitionStateMatcher.matchesRecordedSource(
                             world.blockState(action.position()),
                             expectedFinalState
-                    ) || !BlockTransitionStateMatcher.matchesPlannedTarget(
+                    ) || !BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                             world.blockState(action.position()),
                             action.observedState()
                     );
@@ -215,10 +212,7 @@ public final class PlacementRemovalService {
             }
             BlockState current = world.blockState(position);
             BlockState target = layer.beforeState();
-            if (BlockTransitionStateMatcher.matchesPlannedTarget(
-                    current,
-                    target
-            )) {
+            if (current.equals(target)) {
                 unchanged++;
                 continue;
             }
@@ -304,7 +298,7 @@ public final class PlacementRemovalService {
 
             BlockState current = world.blockState(position);
             boolean expectedStatePresent =
-                    BlockTransitionStateMatcher.matchesPlannedTarget(
+                    BlockTransitionStateMatcher.matchesUpdateDrivenTarget(
                             current,
                             layer.afterState()
                     );
@@ -331,10 +325,7 @@ public final class PlacementRemovalService {
 
             BlockState desiredState = layer.beforeState();
             actions.add(new VisibleAction(position, current, desiredState));
-            if (BlockTransitionStateMatcher.matchesPlannedTarget(
-                    current,
-                    desiredState
-            )) {
+            if (current.equals(desiredState)) {
                 unchanged++;
             } else {
                 restored++;

@@ -129,7 +129,8 @@ public final class RoadPresetEditorService {
             return false;
         }
         if (preset.surfaceBands().stream()
-                .flatMap(band -> band.blockSet().stream())
+                .flatMap(band -> java.util.stream.Stream.concat(
+                        band.blockSet().stream(), band.underlayBlockSet().stream()))
                 .anyMatch(block -> !knownBlock.test(block))) {
             return false;
         }

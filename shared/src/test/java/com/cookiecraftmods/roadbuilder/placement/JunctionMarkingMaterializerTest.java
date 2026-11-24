@@ -23,6 +23,7 @@ import com.cookiecraftmods.roadbuilder.preset.LaneType;
 import com.cookiecraftmods.roadbuilder.preset.RoadClass;
 import com.cookiecraftmods.roadbuilder.preset.RoadClassification;
 import com.cookiecraftmods.roadbuilder.preset.RoadIntersectionStyle;
+import com.cookiecraftmods.roadbuilder.preset.RoadMarkingPattern;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceBand;
 import com.cookiecraftmods.roadbuilder.preset.RoadSurfaceRole;
 import com.cookiecraftmods.roadbuilder.preset.TrafficHandedness;
@@ -36,6 +37,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -265,6 +268,46 @@ class JunctionMarkingMaterializerTest {
 
         assertTrue(markings.blocks().stream().anyMatch(block ->
                 block.targetState().is(Blocks.WHITE_CONCRETE)));
+    }
+
+    @Test
+    void terminalAndJunctionCrosswalksUseTheRoadPalettesWithLegacyDefaults() {
+        var cobble = MinecraftIds.id("minecraft", "cobblestone");
+        var orange = MinecraftIds.id("minecraft", "orange_concrete");
+        var gray = MinecraftIds.id("minecraft", "gray_concrete");
+        var white = MinecraftIds.id("minecraft", "white_concrete");
+        var pavement = new RoadSurfaceBand(RoadSurfaceRole.PAVEMENT, 4, cobble, RoadMarkingPattern.CONTINUOUS,
+                List.of(cobble, MinecraftIds.id("minecraft", "andesite")));
+        var marking = new RoadSurfaceBand(RoadSurfaceRole.MARKING, 1, orange, RoadMarkingPattern.CONTINUOUS,
+                List.of(orange, MinecraftIds.id("minecraft", "yellow_concrete")));
+        var snapshot = new RoadPresetSnapshot(9, cobble,
+                List.of(new LaneComponent(LaneType.VEHICLE, 9, 0, LaneTravelDirection.FORWARD)),
+                List.of(pavement, marking, pavement), RoadClassification.DEFAULT,
+                new RoadIntersectionStyle(gray, Optional.of(white), Optional.of(white), Optional.empty(),
+                        true, IntersectionControl.FREE));
+        var ends = List.of(new RoadPoint(30.5, 64, 0.5), new RoadPoint(-30.5, 64, 0.5),
+                new RoadPoint(0.5, 64, 30.5), new RoadPoint(0.5, 64, -30.5));
+        var approaches = new java.util.ArrayList<RoadSegment>();
+        for (int index = 0; index < ends.size(); index++) {
+            long seed = 1000 + index * 10;
+            approaches.add(RoadSegment.straight(id(RoadSegmentId::new, seed), id(RoadId::new, seed), NODE_ID,
+                    id(RoadNodeId::new, seed), new StraightGeometry(NODE.position(), ends.get(index)),
+                    MinecraftIds.id("roadbuilder", "textured_crosswalk"), 1, snapshot, TrafficHandedness.RHT,
+                    List.of(id(RoadLaneId::new, seed))));
+        }
+
+        var materializer = new JunctionMarkingMaterializer();
+        var terminal = assertInstanceOf(BlockPlanResult.Success.class, materializer.planTerminalCrosswalk(
+                Level.OVERWORLD, NODE, approaches.get(0), 10_000)).plan();
+        var junction = assertInstanceOf(BlockPlanResult.Success.class, materializer.plan(
+                Level.OVERWORLD, NODE, approaches, JunctionDefinition.automatic(NODE_ID), 10_000)).plan();
+        var roadBlocks = Set.of(Blocks.COBBLESTONE, Blocks.ANDESITE, Blocks.ORANGE_CONCRETE, Blocks.YELLOW_CONCRETE);
+        for (BlockPlacementPlan plan : List.of(terminal, junction)) {
+            assertEquals(roadBlocks, plan.blocks().stream()
+                    .map(block -> block.targetState().getBlock()).collect(Collectors.toSet()));
+        }
+        assertTrue(terminal.blocks().stream().filter(block -> block.position().getZ() % 2 != 0)
+                .allMatch(block -> block.targetState().is(Blocks.COBBLESTONE) || block.targetState().is(Blocks.ANDESITE)));
     }
 
     @Test
