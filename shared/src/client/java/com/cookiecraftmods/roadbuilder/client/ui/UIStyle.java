@@ -29,6 +29,7 @@ public final class UIStyle {
     public static final int TEXT_SECONDARY = 0xFFAAAAAA;
     public static final int TEXT_SUBTITLE = 0xFFBDBDBD;
     public static final int TEXT_DISABLED = 0xFF747474;
+    public static final int TEXT_ERROR = 0xFFFF9999;
     public static final int TEXT_INVERSE = 0xFF181818;
     public static final int HIGHLIGHT = 0xFFD0D0D0;
     public static final int HIGHLIGHT_STRONG = 0xFFE0E0E0;

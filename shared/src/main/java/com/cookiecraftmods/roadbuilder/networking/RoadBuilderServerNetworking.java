@@ -104,6 +104,10 @@ public final class RoadBuilderServerNetworking {
         }
 
         RoadPacketTypes.register();
+        if (!RoadServerTransport.registerGlobalReceiver(
+                RoadPackImportC2SPacket.TYPE, RoadPresetNetworking::receiveRoadPackImport)) {
+            throw new IllegalStateException("road pack import receiver is already registered");
+        }
         if (!RoadServerTransport.registerGlobalReceiver(ClientRoadIntentC2SPacket.TYPE,
                 (packet, player) -> receiveClientRoadIntent(packet, player))) {
             throw new IllegalStateException("client road intent receiver is already registered");

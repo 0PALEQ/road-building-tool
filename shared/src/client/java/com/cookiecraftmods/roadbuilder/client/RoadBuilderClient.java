@@ -10,6 +10,7 @@ import com.cookiecraftmods.roadbuilder.client.render.RoadPreviewMeasurementsRend
 import com.cookiecraftmods.roadbuilder.client.render.StraightRoadPreviewRenderer;
 import com.cookiecraftmods.roadbuilder.client.testmatrix.RoadBuilderLiveMatrixClient;
 import com.cookiecraftmods.roadbuilder.client.tool.RoadBuilderTool;
+import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderSettingsScreen;
 import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderToolbarRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -18,15 +19,15 @@ import com.cookiecraftmods.roadbuilder.client.render.RoadWorldRendering;
 import net.minecraft.client.Minecraft;
 
 public final class RoadBuilderClient implements ClientModInitializer {
-    private static final RoadBuilderClientPreferences PREFERENCES =
+    private static RoadBuilderClientPreferences preferences =
             RoadBuilderClientPreferencesLoader.load();
     private static final RoadBuilderModeController MODE_CONTROLLER =
-            new RoadBuilderModeController(PREFERENCES);
+            new RoadBuilderModeController(preferences);
     private static final RoadBuilderToolbarRenderer TOOLBAR_RENDERER = new RoadBuilderToolbarRenderer();
     private static final RoadPreviewMeasurementsRenderer PREVIEW_MEASUREMENTS = new RoadPreviewMeasurementsRenderer();
     private static final StraightRoadPreviewRenderer PREVIEW_RENDERER = new StraightRoadPreviewRenderer();
     private static final RoadLaneDirectionRenderer LANE_DIRECTION_RENDERER =
-            new RoadLaneDirectionRenderer(PREFERENCES.guidelineRange());
+            new RoadLaneDirectionRenderer(preferences.guidelineRange());
 
     @Override
     public void onInitializeClient() {
@@ -77,6 +78,14 @@ public final class RoadBuilderClient implements ClientModInitializer {
                 PREVIEW_MEASUREMENTS.capture(context, tool);
             }
         });
+    }
+
+    public static void openSettings(Minecraft client) {
+        client.setScreen(new RoadBuilderSettingsScreen(preferences, updated -> {
+            preferences = updated;
+            LANE_DIRECTION_RENDERER.setMaximumRenderDistance(updated.guidelineRange());
+            MODE_CONTROLLER.applyPreferences(updated);
+        }));
     }
 
     public static RoadBuilderModeController modeController() {

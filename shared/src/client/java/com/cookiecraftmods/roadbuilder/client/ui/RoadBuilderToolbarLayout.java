@@ -23,7 +23,8 @@ public record RoadBuilderToolbarLayout(
         UiRectangle presetButton,
         UiRectangle elevationButton,
         UiRectangle snapOptionButton,
-        UiRectangle roundaboutButton
+        UiRectangle roundaboutButton,
+        UiRectangle settingsButton
 ) {
     public static final int PRESET_SLOT_COUNT = 5;
     public static final int PRESET_PAGE_BULLET_COUNT = 3;
@@ -84,7 +85,7 @@ public record RoadBuilderToolbarLayout(
         int compactPadding = mainWidth < 180 ? 2 : PADDING;
         int buttonY = dock.y() + compactPadding;
         int buttonHeight = Math.max(1, dock.height() - compactPadding * 2);
-        int buttonCount = RoadBuilderToolGroup.values().length + 3;
+        int buttonCount = RoadBuilderToolGroup.values().length + 4;
         int usableWidth = mainWidth - compactPadding * 2 - compactGap * (buttonCount - 1);
         int buttonWidth = Math.max(1, usableWidth / buttonCount);
         int remainder = Math.max(0, usableWidth - buttonWidth * buttonCount);
@@ -99,7 +100,9 @@ public record RoadBuilderToolbarLayout(
         nextX = lanePaths.right() + compactGap;
         UiRectangle crosswalks = new UiRectangle(nextX, buttonY, buttonWidth + (remainder-- > 0 ? 1 : 0), buttonHeight);
         nextX = crosswalks.right() + compactGap;
-        UiRectangle roundabout = new UiRectangle(nextX, buttonY, Math.max(1, dock.right() - compactPadding - nextX), buttonHeight);
+        UiRectangle roundabout = new UiRectangle(nextX, buttonY, buttonWidth + (remainder-- > 0 ? 1 : 0), buttonHeight);
+        nextX = roundabout.right() + compactGap;
+        UiRectangle settings = new UiRectangle(nextX, buttonY, Math.max(1, dock.right() - compactPadding - nextX), buttonHeight);
         UiRectangle elevationValue = modeCell(mode, 1, 1, 3);
         UiRectangle elevationLower = modeCell(mode, 1, 0, 3);
         UiRectangle elevationRaise = modeCell(mode, 1, 2, 3);
@@ -162,7 +165,8 @@ public record RoadBuilderToolbarLayout(
                 preset,
                 elevation,
                 snap,
-                roundabout
+                roundabout,
+                settings
         );
     }
 

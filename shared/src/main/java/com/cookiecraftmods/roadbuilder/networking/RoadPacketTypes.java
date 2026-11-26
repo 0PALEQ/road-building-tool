@@ -13,6 +13,7 @@ final class RoadPacketTypes {
         PresetDeleteIntentC2SPacket.TYPE.registerC2S();
         PresetSaveIntentC2SPacket.TYPE.registerC2S();
         RemovalIntentC2SPacket.TYPE.registerC2S();
+        RoadPackImportC2SPacket.TYPE.registerC2S();
         RoadGraphResyncC2SPacket.TYPE.registerC2S();
         RoadPathIntentC2SPacket.TYPE.registerC2S();
         SegmentDirectionInvertIntentC2SPacket.TYPE.registerC2S();
@@ -27,6 +28,7 @@ final class RoadPacketTypes {
         PresetContentS2CPacket.TYPE.registerS2C();
         PresetSaveResultS2CPacket.TYPE.registerS2C();
         RemovalResultS2CPacket.TYPE.registerS2C();
+        RoadPackImportResultS2CPacket.TYPE.registerS2C();
         RoadGraphDeltaS2CPacket.TYPE.registerS2C();
         RoadGraphSnapshotChunkS2CPacket.TYPE.registerS2C();
         RoadGraphSnapshotS2CPacket.TYPE.registerS2C();

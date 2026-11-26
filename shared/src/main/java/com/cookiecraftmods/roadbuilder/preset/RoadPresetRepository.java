@@ -57,7 +57,7 @@ public final class RoadPresetRepository implements RoadPresetLookup {
         return snapshot().size();
     }
 
-    void replaceAll(Map<ResourceLocation, RoadPreset> replacements) {
+    synchronized void replaceAll(Map<ResourceLocation, RoadPreset> replacements) {
         Objects.requireNonNull(replacements, "replacements");
         TreeMap<ResourceLocation, RoadPreset> ordered = new TreeMap<>();
         replacements.forEach((id, preset) -> ordered.put(

@@ -41,6 +41,8 @@ public final class RoadBuilderToolbarRenderer {
             MinecraftIds.id("roadbuilder", "textures/gui/freehand.png");
     private static final ResourceLocation ROUNDABOUT_ICON =
             MinecraftIds.id("roadbuilder", "textures/gui/roundabout.png");
+    static final ResourceLocation SETTINGS_ICON =
+            MinecraftIds.id("roadbuilder", "textures/gui/settings_icon.png");
     private static final ResourceLocation LANE_PATHS_ICON =
             MinecraftIds.id("roadbuilder", "textures/gui/lane_paths.png");
     private static final ResourceLocation CROSSWALK_ICON =
@@ -718,6 +720,16 @@ public final class RoadBuilderToolbarRenderer {
 
         renderModeUtilities(graphics, client, tool, layout, cursor, highContrast);
         roadToolButton(graphics, layout, tool, cursor, highContrast, RoadBuilderTool.ROUNDABOUT);
+        UiRectangle settings = layout.settingsButton();
+        boolean hovered = settings.contains(cursor.x(), cursor.y());
+        fillButton(
+                graphics,
+                settings,
+                hovered ? CONTROL_HOVERED : CONTROL_BACKGROUND,
+                highContrast && hovered ? BORDER_HIGH_CONTRAST : BORDER_PANEL_HIGHLIGHT
+        );
+        drawTextureIcon(graphics, settings, SETTINGS_ICON,
+                hovered ? TEXT_PRIMARY : TEXT_SECONDARY);
     }
 
     private static void renderModeUtilities(
@@ -1233,7 +1245,9 @@ public final class RoadBuilderToolbarRenderer {
                 break;
             }
         }
-        if (layout.lanePathVisibilityButton().contains(
+        if (layout.settingsButton().contains(cursor.x(), cursor.y())) {
+            tooltip = Component.translatable("screen.roadbuilder.settings.title");
+        } else if (layout.lanePathVisibilityButton().contains(
                 cursor.x(),
                 cursor.y()
         )) {

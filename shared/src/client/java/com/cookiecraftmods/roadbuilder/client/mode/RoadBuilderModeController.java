@@ -47,6 +47,11 @@ public final class RoadBuilderModeController {
         return straightRoadTool;
     }
 
+    public void applyPreferences(RoadBuilderClientPreferences preferences) {
+        cameraController.setPreferences(preferences);
+        straightRoadTool.setSnapSettings(preferences.snapSettings());
+    }
+
     public Optional<CityBuilderCameraPose> cameraPose(Entity focusEntity, float partialTick) {
         return cameraController.pose(focusEntity, partialTick);
     }

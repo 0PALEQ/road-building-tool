@@ -27,13 +27,14 @@ class RoadBuilderToolbarLayoutTest {
             assertTrue(layout.toolModePanel().right() <= layout.panel().x());
             var buttons = java.util.List.of(layout.roadButton(), layout.removeButton(),
                     layout.groupButton(RoadBuilderToolGroup.LANE_CONNECTORS), layout.lanePathVisibilityButton(),
-                    layout.crosswalkToolButton(), layout.roundaboutButton());
+                    layout.crosswalkToolButton(), layout.roundaboutButton(), layout.settingsButton());
             for (int i = 0; i < buttons.size(); i++) {
                 var button = buttons.get(i);
                 assertEquals(layout.roadButton().y(), button.y());
                 assertTrue(button.right() <= layout.panel().right());
                 if (i > 0) assertTrue(buttons.get(i - 1).right() <= button.x());
             }
+            assertTrue(layout.owns(layout.settingsButton().x(), layout.settingsButton().y()));
             assertTrue(layout.parallelLowerButton().right() <= layout.parallelDisplay().x());
             assertTrue(layout.parallelDisplay().right() <= layout.parallelRaiseButton().x());
             assertTrue(layout.parallelRaiseButton().right() <= layout.parallelToggleButton().x());

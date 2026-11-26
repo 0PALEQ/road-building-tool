@@ -26,6 +26,8 @@ import com.cookiecraftmods.roadbuilder.networking.PresetContentRequestC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetContentS2CPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetSaveIntentC2SPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetSaveResultS2CPacket;
+import com.cookiecraftmods.roadbuilder.networking.RoadPackImportC2SPacket;
+import com.cookiecraftmods.roadbuilder.networking.RoadPackImportResultS2CPacket;
 import com.cookiecraftmods.roadbuilder.networking.PresetDeleteIntentC2SPacket;
 import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetCatalog;
@@ -73,6 +75,9 @@ public final class RoadBuilderClientNetworking {
             PRESET_CONTENT_RESULTS = new LinkedHashMap<>();
     private static final Map<UUID, PresetSaveResultS2CPacket>
             PRESET_SAVE_RESULTS = new LinkedHashMap<>();
+    private static final int MAX_CACHED_PACK_IMPORT_RESULTS = 16;
+    private static final Map<UUID, RoadPackImportResultS2CPacket>
+            PACK_IMPORT_RESULTS = new LinkedHashMap<>();
     private static ResourceLocation selectedPresetId;
     private static ResourceLocation preferredPresetId =
             RoadPresetSelectionPreferences.load().orElse(null);
@@ -190,6 +195,11 @@ public final class RoadBuilderClientNetworking {
             throw new IllegalStateException(
                     "preset save result receiver is already registered"
             );
+        }
+
+        if (!RoadClientTransport.registerGlobalReceiver(
+                RoadPackImportResultS2CPacket.TYPE, RoadBuilderClientNetworking::rememberPackImportResult)) {
+            throw new IllegalStateException("road pack import result receiver is already registered");
         }
 
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> clearConnectionState());
@@ -380,6 +390,18 @@ public final class RoadBuilderClientNetworking {
         return Optional.ofNullable(PRESET_CONTENT_RESULTS.remove(
                 Objects.requireNonNull(requestId, "requestId")
         ));
+    }
+
+    public static boolean sendRoadPackImport(RoadPackImportC2SPacket packet) {
+        if (!RoadClientTransport.canSend(RoadPackImportC2SPacket.TYPE)) {
+            return false;
+        }
+        RoadClientTransport.send(packet);
+        return true;
+    }
+
+    public static synchronized Optional<RoadPackImportResultS2CPacket> takeRoadPackImportResult(UUID requestId) {
+        return Optional.ofNullable(PACK_IMPORT_RESULTS.remove(requestId));
     }
 
     public static boolean sendPresetSave(PresetSaveIntentC2SPacket packet) {
@@ -595,6 +617,7 @@ public final class RoadBuilderClientNetworking {
         PRESET_CONTENT_REQUESTS.clear();
         PRESET_CONTENT_RESULTS.clear();
         PRESET_SAVE_RESULTS.clear();
+        PACK_IMPORT_RESULTS.clear();
     }
 
         public static synchronized void clearConnectionState() {
@@ -775,6 +798,10 @@ public final class RoadBuilderClientNetworking {
                     MAX_CACHED_PRESET_CONTENT_RESULTS
             );
         }
+    }
+
+    private static synchronized void rememberPackImportResult(RoadPackImportResultS2CPacket packet) {
+        rememberBounded(PACK_IMPORT_RESULTS, packet.requestId(), packet, MAX_CACHED_PACK_IMPORT_RESULTS);
     }
 
     private static synchronized void rememberPresetSaveResult(

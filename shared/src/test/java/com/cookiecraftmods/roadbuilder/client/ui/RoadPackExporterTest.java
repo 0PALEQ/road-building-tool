@@ -1,6 +1,7 @@
 package com.cookiecraftmods.roadbuilder.client.ui;
 
 import com.cookiecraftmods.roadbuilder.compat.MinecraftIds;
+import com.cookiecraftmods.roadbuilder.preset.RoadPackArchive;
 import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetReloadListener;
 import com.cookiecraftmods.roadbuilder.preset.RoadPresetTemplates;
@@ -13,6 +14,7 @@ import net.minecraft.server.packs.resources.MultiPackResourceManager;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +41,7 @@ class RoadPackExporterTest {
         );
 
         assertTrue(pack.getFileName().toString().endsWith(".zip"));
+        assertEquals(Map.of(id, preset), RoadPackArchive.read(Files.readAllBytes(pack)));
         try (ZipFile zip = new ZipFile(pack.toFile())) {
             assertEquals(4, zip.size());
             assertNotNull(zip.getEntry("pack.mcmeta"));

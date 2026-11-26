@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.client.config;
 
+import com.cookiecraftmods.roadbuilder.client.tool.RoadSnapPriority;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -13,6 +14,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RoadBuilderClientPreferencesLoaderTest {
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void savedPreferencesReplaceExistingFileAndRoundTrip() throws Exception {
+        Path path = temporaryDirectory.resolve("client.json");
+        RoadBuilderClientPreferencesLoader.load(path);
+        var edited = new RoadBuilderClientPreferences(
+                RoadBuilderClientPreferences.CURRENT_SCHEMA_VERSION,
+                false, true, false, 4.5, 2.0,
+                RoadSnapPriority.GRID_TANGENT_ANGLE, false, false, 320.0);
+
+        RoadBuilderClientPreferencesLoader.save(path, edited);
+
+        assertEquals(edited, RoadBuilderClientPreferencesLoader.load(path));
+    }
 
     @Test
     void missingFileCreatesAndReturnsRequestedInvertedDefaults() throws Exception {

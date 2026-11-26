@@ -1,9 +1,11 @@
 package com.cookiecraftmods.roadbuilder.client.tool;
 
 import com.cookiecraftmods.roadbuilder.compat.MinecraftIds;
+import com.cookiecraftmods.roadbuilder.client.RoadBuilderClient;
 
 import com.cookiecraftmods.roadbuilder.client.mode.RoadBuilderModeExitReason;
 import com.cookiecraftmods.roadbuilder.client.networking.RoadBuilderClientNetworking;
+import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderSettingsScreen;
 import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderToolbarLayout;
 import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderToolbarPresetWindow;
 import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderToolGroup;
@@ -71,7 +73,8 @@ public final class StraightRoadToolController {
     private static final int TRANSIENT_STATUS_TICKS = 80;
     private static final int MAXIMUM_ELEVATION_OFFSET = 128;
     private static final int FALLBACK_PREVIEW_WIDTH = 9;
-    private final RoadSnapSettings snapSettings;
+    private RoadSnapSettings snapSettings;
+    private boolean snapSettingsChanged;
 
     private ClientPacketListener observedConnection;
     private RoadBuilderTool activeTool = RoadBuilderTool.STRAIGHT_ROAD;
@@ -315,11 +318,23 @@ public final class StraightRoadToolController {
         );
     }
 
+    public void setSnapSettings(RoadSnapSettings settings) {
+        if (!snapSettings.equals(settings)) {
+            snapSettings = Objects.requireNonNull(settings, "settings");
+            snapSettingsChanged = true;
+        }
+    }
+
     public void updatePointer(Minecraft client) {
         Objects.requireNonNull(client, "client");
+        if (client.screen instanceof RoadBuilderSettingsScreen) {
+            return;
+        }
         AuxiliaryLanePorts.Port previousPort = hoveredLanePort;
         CursorTargetResult nextResult = applySnapping(client, CursorRaycaster.cast(client));
-        if (roundaboutDragging || !nextResult.equals(cursorResult) || !Objects.equals(previousPort, hoveredLanePort)) {
+        if (snapSettingsChanged || roundaboutDragging || !nextResult.equals(cursorResult)
+                || !Objects.equals(previousPort, hoveredLanePort)) {
+            snapSettingsChanged = false;
             cursorResult = nextResult;
             if (isRoadPlacementTool()) {
                 captureFreehandPoint();
@@ -819,6 +834,10 @@ public final class StraightRoadToolController {
                 window.getGuiScaledHeight()
         );
 
+        if (layout.settingsButton().contains(guiX, guiY)) {
+            RoadBuilderClient.openSettings(client);
+            return;
+        }
         if (layout.lanePathVisibilityButton().contains(guiX, guiY)) {
             toggleLanePathsVisibility();
             return;

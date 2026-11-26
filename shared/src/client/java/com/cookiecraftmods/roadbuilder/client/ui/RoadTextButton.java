@@ -6,10 +6,11 @@ import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
 
 import java.util.Objects;
+import java.util.function.Consumer;
 
 import static com.cookiecraftmods.roadbuilder.client.ui.UIStyle.*;
 
-final class RoadPresetEditorButton extends RoadButton {
+final class RoadTextButton extends RoadButton {
     enum Style {
         NORMAL,
         PRIMARY,
@@ -18,11 +19,11 @@ final class RoadPresetEditorButton extends RoadButton {
         GHOST
     }
 
-    private final Runnable onPress;
+    private final Consumer<RoadTextButton> onPress;
     private final Style style;
     private final Component subtitle;
 
-    RoadPresetEditorButton(
+    RoadTextButton(
             UiRectangle bounds,
             Component message,
             Style style,
@@ -31,12 +32,31 @@ final class RoadPresetEditorButton extends RoadButton {
         this(bounds, message, null, style, onPress);
     }
 
-    RoadPresetEditorButton(
+    RoadTextButton(
             UiRectangle bounds,
             Component message,
             Component subtitle,
             Style style,
             Runnable onPress
+    ) {
+        this(bounds, message, subtitle, style, ignored -> onPress.run());
+    }
+
+    RoadTextButton(
+            UiRectangle bounds,
+            Component message,
+            Style style,
+            Consumer<RoadTextButton> onPress
+    ) {
+        this(bounds, message, null, style, onPress);
+    }
+
+    private RoadTextButton(
+            UiRectangle bounds,
+            Component message,
+            Component subtitle,
+            Style style,
+            Consumer<RoadTextButton> onPress
     ) {
         super(bounds.x(), bounds.y(), bounds.width(), bounds.height(), message);
         this.style = Objects.requireNonNull(style, "style");
@@ -47,7 +67,7 @@ final class RoadPresetEditorButton extends RoadButton {
     @Override
     protected void roadPress() {
         if (active) {
-            onPress.run();
+            onPress.accept(this);
         }
     }
 

@@ -24,7 +24,7 @@ public final class CityBuilderCameraController {
     private static final double BORDER_MARGIN = 0.5;
     private static final double COLLISION_MARGIN = 1.0 + 1.0E-7;
 
-    private final RoadBuilderClientPreferences preferences;
+    private RoadBuilderClientPreferences preferences;
     private boolean active;
     private CameraType previousCameraType;
     private LocalPlayer entryPlayer;
@@ -37,6 +37,10 @@ public final class CityBuilderCameraController {
     private double lastCursorY;
 
     public CityBuilderCameraController(RoadBuilderClientPreferences preferences) {
+        setPreferences(preferences);
+    }
+
+    public void setPreferences(RoadBuilderClientPreferences preferences) {
         this.preferences = Objects.requireNonNull(preferences, "preferences");
     }
 

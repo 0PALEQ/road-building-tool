@@ -2,6 +2,8 @@ package com.cookiecraftmods.roadbuilder.preset;
 
 import net.minecraft.resources.ResourceLocation;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Predicate;
@@ -79,7 +81,43 @@ public final class RoadPresetEditorService {
         if (repository.find(targetId).isPresent()) {
             return new EditResult.Rejected(EditFailure.STALE_REVISION);
         }
-        RoadPreset copy = new RoadPreset(
+        return save(actorId, targetId, 0, firstRevision(source));
+    }
+
+    public ImportResult importPack(
+            UUID actorId,
+            Map<ResourceLocation, RoadPreset> presets,
+            int maximumCatalogSize
+    ) {
+        if (!authorizer.test(actorId)) {
+            return new ImportResult.Rejected(EditFailure.NOT_AUTHORIZED);
+        }
+        synchronized (repository) {
+            Map<ResourceLocation, RoadPreset> current = repository.snapshot();
+            Map<ResourceLocation, RoadPreset> additions = new LinkedHashMap<>();
+            for (var entry : presets.entrySet()) {
+                if (current.containsKey(entry.getKey())) {
+                    continue;
+                }
+                if (!allBlocksKnown(entry.getValue())) {
+                    return new ImportResult.Rejected(EditFailure.UNKNOWN_BLOCK);
+                }
+                additions.put(entry.getKey(), firstRevision(entry.getValue()));
+            }
+            if (current.size() + additions.size() > maximumCatalogSize) {
+                return new ImportResult.Rejected(EditFailure.PAYLOAD_LIMIT);
+            }
+            if (!additions.isEmpty()) {
+                Map<ResourceLocation, RoadPreset> updated = new LinkedHashMap<>(repository.authoredSnapshot());
+                updated.putAll(additions);
+                repository.replaceServerAuthored(updated);
+            }
+            return new ImportResult.Accepted(additions.size(), presets.size() - additions.size());
+        }
+    }
+
+    private static RoadPreset firstRevision(RoadPreset source) {
+        return new RoadPreset(
                 RoadPreset.CURRENT_SCHEMA_VERSION,
                 1,
                 source.surfaceWidth(),
@@ -91,7 +129,6 @@ public final class RoadPresetEditorService {
                 source.intersectionStyle(),
                 source.materialPalette()
         );
-        return save(actorId, targetId, 0, copy);
     }
 
     public EditResult delete(
@@ -159,6 +196,12 @@ public final class RoadPresetEditorService {
                 Objects.requireNonNull(failure, "failure");
             }
         }
+    }
+
+    public sealed interface ImportResult {
+        record Accepted(int imported, int skipped) implements ImportResult {}
+
+        record Rejected(EditFailure failure) implements ImportResult {}
     }
 
     public enum EditFailure {

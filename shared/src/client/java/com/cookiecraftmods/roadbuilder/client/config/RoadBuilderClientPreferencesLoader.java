@@ -49,11 +49,15 @@ public final class RoadBuilderClientPreferencesLoader {
         return load(FabricLoader.getInstance().getConfigDir().resolve(FILE_NAME));
     }
 
+    public static void save(RoadBuilderClientPreferences preferences) throws IOException {
+        save(FabricLoader.getInstance().getConfigDir().resolve(FILE_NAME), preferences);
+    }
+
     public static RoadBuilderClientPreferences load(Path path) {
         if (!Files.exists(path)) {
             RoadBuilderClientPreferences defaults = RoadBuilderClientPreferences.DEFAULTS;
             try {
-                write(path, defaults);
+                save(path, defaults);
             } catch (IOException exception) {
                 RoadBuilder.LOGGER.warn(
                         "Could not write default Road Builder client preferences to {}",
@@ -70,7 +74,7 @@ public final class RoadBuilderClientPreferencesLoader {
             if (integer(root, "schema_version")
                     != RoadBuilderClientPreferences.CURRENT_SCHEMA_VERSION) {
                 try {
-                    write(path, preferences);
+                    save(path, preferences);
                 } catch (IOException exception) {
                     RoadBuilder.LOGGER.warn(
                             "Could not upgrade Road Builder client preferences at {}",
@@ -115,7 +119,7 @@ public final class RoadBuilderClientPreferencesLoader {
         );
     }
 
-    private static void write(Path path, RoadBuilderClientPreferences preferences)
+    static void save(Path path, RoadBuilderClientPreferences preferences)
             throws IOException {
         JsonObject root = new JsonObject();
         root.addProperty("schema_version", preferences.schemaVersion());

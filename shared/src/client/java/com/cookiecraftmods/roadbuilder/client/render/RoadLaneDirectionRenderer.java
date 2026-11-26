@@ -39,7 +39,7 @@ public final class RoadLaneDirectionRenderer {
     private static final double HALF_PATH_WIDTH = 0.46;
     private static final double CONNECTION_POINT_RADIUS = 0.48;
     private static final int CONNECTION_POINT_SEGMENTS = 24;
-    private final double maximumRenderDistanceSquared;
+    private double maximumRenderDistanceSquared;
     private RoadLaneGraph cachedGraph;
     private final Map<ReferenceGeometry, AABB> pathBounds = new IdentityHashMap<>();
 
@@ -48,9 +48,13 @@ public final class RoadLaneDirectionRenderer {
     }
 
     public RoadLaneDirectionRenderer(double maximumRenderDistance) {
+        setMaximumRenderDistance(maximumRenderDistance);
+    }
+
+    public void setMaximumRenderDistance(double maximumRenderDistance) {
         if (!Double.isFinite(maximumRenderDistance)
-                || maximumRenderDistance < 1.0
-                || maximumRenderDistance > 4_096.0) {
+                || maximumRenderDistance < RoadSnapSettings.MIN_GUIDELINE_RANGE
+                || maximumRenderDistance > RoadSnapSettings.MAX_GUIDELINE_RANGE) {
             throw new IllegalArgumentException(
                     "maximum render distance must be between 1 and 4096"
             );

@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.placement;
 
+import com.cookiecraftmods.roadbuilder.compat.ServerOperatorPermissions;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -27,7 +28,7 @@ public interface ForceRestorePermissionPolicy {
             Objects.requireNonNull(player, "player");
             Objects.requireNonNull(level, "level");
             Objects.requireNonNull(operation, "operation");
-            return player.hasPermissions(permissionLevel);
+            return ServerOperatorPermissions.hasLevel(player, permissionLevel);
         };
     }
 }
