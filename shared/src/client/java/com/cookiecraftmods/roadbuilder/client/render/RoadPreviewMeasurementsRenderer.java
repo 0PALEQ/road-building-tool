@@ -4,9 +4,7 @@ import com.cookiecraftmods.roadbuilder.client.tool.RawRoadPreview;
 import com.cookiecraftmods.roadbuilder.client.tool.StraightRoadToolController;
 import com.cookiecraftmods.roadbuilder.client.tool.StraightRoadToolController.AttachmentAngle;
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.math.Axis;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
+import com.cookiecraftmods.roadbuilder.client.ui.RoadGuiDrawing;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
@@ -23,7 +21,7 @@ public final class RoadPreviewMeasurementsRenderer {
     private static final int ANGLE_STEPS = 32;
     private PreviewFrame frame;
 
-    public void capture(WorldRenderContext context, StraightRoadToolController tool) {
+    public void capture(RoadWorldRenderFrame context, StraightRoadToolController tool) {
         frame = null;
         var preview = tool.rawPreview();
         if (preview.isEmpty() || context.matrixStack() == null) {
@@ -31,11 +29,8 @@ public final class RoadPreviewMeasurementsRenderer {
         }
 
         // Capture the same transform as the preview before the world pass is composited.
-        Matrix4f projection = new Matrix4f(context.projectionMatrix())
-                .mul(RenderSystem.getModelViewMatrix())
-                .mul(context.matrixStack().last().pose());
         frame = new PreviewFrame(preview.get(), tool.previewAttachmentAngles(),
-                context.camera().getPosition(), projection);
+                context.cameraPosition(), context.projection());
     }
 
     public void renderOverlay(GuiGraphics graphics) {
@@ -150,15 +145,7 @@ public final class RoadPreviewMeasurementsRenderer {
             return;
         }
 
-        var pose = graphics.pose();
-        pose.pushPose();
-        try {
-            pose.translate(from.x(), from.y(), 0);
-            pose.mulPose(Axis.ZP.rotation((float) Math.atan2(dy, dx)));
-            graphics.fill(0, 0, length, 1, GUIDE_COLOR);
-        } finally {
-            pose.popPose();
-        }
+        RoadGuiDrawing.line(graphics, from.x(), from.y(), (float) Math.atan2(dy, dx), length, GUIDE_COLOR);
     }
 
     private static RoadPoint anglePoint(RoadPoint pivot, double radius, double angle, double height) {

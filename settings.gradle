@@ -17,8 +17,7 @@ pluginManagement {
 
 rootProject.name = "RoadBuilder"
 
-// The 26.1.2 target joins the build once its platform adapters are implemented.
-['fabric-1.20.1', 'fabric-1.21.1'].each { target ->
+['fabric-1.20.1', 'fabric-1.21.1', 'fabric-1.21.11'].each { target ->
     include(target)
     project(":${target}").projectDir = file("versions/${target}")
 }

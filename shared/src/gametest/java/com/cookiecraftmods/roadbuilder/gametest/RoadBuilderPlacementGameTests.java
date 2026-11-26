@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.gametest;
 
+import com.cookiecraftmods.roadbuilder.persistence.RoadSavedData;
 import com.cookiecraftmods.roadbuilder.compat.MinecraftBlocks;
 
 import com.cookiecraftmods.roadbuilder.compat.MinecraftIds;
@@ -1960,7 +1961,7 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
         helper.setBlock(chestRelative, Blocks.CHEST);
         helper.setBlock(waterTargetRelative, Blocks.DIRT);
         helper.setBlock(chestTargetRelative, Blocks.DIRT);
-        helper.assertTrue(helper.getBlockEntity(chestRelative) != null, "test chest should have a block entity");
+        helper.assertTrue(level.getBlockEntity(helper.absolutePos(chestRelative)) != null, "test chest should have a block entity");
 
         PlacementOperationId waterSourceId = operationId(30);
         commitSingle(
@@ -2059,7 +2060,7 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
         );
         helper.assertTrue(safe.summary().conflictCount() == 1, "chest should be a safe conflict");
         helper.assertBlockPresent(Blocks.CHEST, safeChestRelative);
-        helper.assertTrue(helper.getBlockEntity(safeChestRelative) != null, "chest block entity should remain");
+        helper.assertTrue(level.getBlockEntity(helper.absolutePos(safeChestRelative)) != null, "chest block entity should remain");
 
         PlacementOwnershipLedger waterLedger = new PlacementOwnershipLedger(level.dimension());
         PlacementOperationId waterId = operationId(41);
@@ -2418,7 +2419,7 @@ public final class RoadBuilderPlacementGameTests implements FabricGameTest {
 
         // Persist both stores before releasing the one-tick UNKNOWN load ticket.
         level.getChunkSource().save(true);
-        level.getDataStorage().save();
+        RoadSavedData.flush(level.getDataStorage());
 
         helper.startSequence()
                 .thenWaitUntil(() -> helper.assertTrue(

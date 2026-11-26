@@ -3,7 +3,6 @@ package com.cookiecraftmods.roadbuilder.client.ui;
 import com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
 
@@ -11,7 +10,7 @@ import java.util.Objects;
 
 import static com.cookiecraftmods.roadbuilder.client.ui.UIStyle.*;
 
-final class RoadPresetComponentButton extends AbstractButton {
+final class RoadPresetComponentButton extends RoadButton {
     private final RoadPresetEditorComponent prototype;
     private final Component title;
     private final Component subtitle;
@@ -42,14 +41,14 @@ final class RoadPresetComponentButton extends AbstractButton {
     }
 
     @Override
-    public void onPress() {
+    protected void roadPress() {
         if (active) {
             onPress.run();
         }
     }
 
     @Override
-    protected void renderWidget(
+    protected void renderRoadButton(
             GuiGraphics graphics,
             int mouseX,
             int mouseY,

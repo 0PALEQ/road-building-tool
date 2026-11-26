@@ -10,6 +10,11 @@ abstract class RoadObjectSelectionList<E extends ObjectSelectionList.Entry<E>> e
     }
 
     @Override
+    protected int getScrollbarPosition() {
+        return getRowRight() + 5;
+    }
+
+    @Override
     protected void renderListBackground(GuiGraphics graphics) {
     }
 

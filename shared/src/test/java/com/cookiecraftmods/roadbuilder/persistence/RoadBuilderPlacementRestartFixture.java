@@ -102,10 +102,19 @@ public final class RoadBuilderPlacementRestartFixture {
         require(!Files.exists(constructionJobFile),
                 "Restart fixture was not cleaned: " + constructionJobFile);
 
-        RoadBuilderPlacementSavedData data = RoadBuilderPlacementSavedData.create(Level.OVERWORLD);
-        RoadBuilderNetworkSavedData networkData = RoadBuilderNetworkSavedData.create(Level.OVERWORLD);
-        RoadBuilderConstructionJobSavedData constructionJobData =
-                RoadBuilderConstructionJobSavedData.create(Level.OVERWORLD);
+        DimensionDataStorage storage = RoadSavedDataFixtures.open(dataDirectory);
+        RoadBuilderPlacementSavedData data = RoadSavedData.loadOrCreate(
+                storage, tag -> RoadBuilderPlacementSavedData.load(Level.OVERWORLD, tag),
+                () -> RoadBuilderPlacementSavedData.create(Level.OVERWORLD), RoadBuilderPlacementSavedData.DATA_NAME
+        );
+        RoadBuilderNetworkSavedData networkData = RoadSavedData.loadOrCreate(
+                storage, tag -> RoadBuilderNetworkSavedData.load(Level.OVERWORLD, tag),
+                () -> RoadBuilderNetworkSavedData.create(Level.OVERWORLD), RoadBuilderNetworkSavedData.DATA_NAME
+        );
+        RoadBuilderConstructionJobSavedData constructionJobData = RoadSavedData.loadOrCreate(
+                storage, tag -> RoadBuilderConstructionJobSavedData.load(Level.OVERWORLD, tag),
+                () -> RoadBuilderConstructionJobSavedData.create(Level.OVERWORLD), RoadBuilderConstructionJobSavedData.DATA_NAME
+        );
         RoadGraph pendingGraph = new RoadGraph(Level.OVERWORLD);
         RoadGraphSnapshot pendingGraphBefore = pendingGraph.snapshot();
         PreparedRoadNetworkMutation pendingMutation =
@@ -195,11 +204,7 @@ public final class RoadBuilderPlacementRestartFixture {
         require(constructionJobData.isDirty(),
                 "Persisted construction job must be dirty before the disk save");
 
-        DimensionDataStorage storage = RoadSavedDataFixtures.open(dataDirectory);
-        storage.set(RoadBuilderPlacementSavedData.DATA_NAME, data);
-        storage.set(RoadBuilderNetworkSavedData.DATA_NAME, networkData);
-        storage.set(RoadBuilderConstructionJobSavedData.DATA_NAME, constructionJobData);
-        storage.save();
+        RoadSavedData.flush(storage);
 
         require(Files.isRegularFile(placementFile), "Placement SavedData file was not created");
         require(Files.size(placementFile) > 0, "Placement SavedData file is empty");

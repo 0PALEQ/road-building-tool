@@ -2,7 +2,6 @@ package com.cookiecraftmods.roadbuilder.client.ui;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -15,7 +14,7 @@ import java.util.function.Consumer;
 
 import static com.cookiecraftmods.roadbuilder.client.ui.UIStyle.*;
 
-final class RoadPresetBlockField extends AbstractButton {
+final class RoadPresetBlockField extends RoadButton {
     private static final String KEY = "screen.roadbuilder.block_selector.";
     private final Screen parent;
     private final Consumer<ResourceLocation> onSelected;
@@ -73,7 +72,7 @@ final class RoadPresetBlockField extends AbstractButton {
     }
 
     @Override
-    public void onPress() {
+    protected void roadPress() {
         if (!active) {
             return;
         }
@@ -88,7 +87,7 @@ final class RoadPresetBlockField extends AbstractButton {
     }
 
     @Override
-    protected void renderWidget(
+    protected void renderRoadButton(
             GuiGraphics graphics,
             int mouseX,
             int mouseY,

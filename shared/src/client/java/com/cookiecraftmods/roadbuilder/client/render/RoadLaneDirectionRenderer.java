@@ -21,11 +21,8 @@ import com.cookiecraftmods.roadbuilder.preset.LaneTravelDirection;
 import com.cookiecraftmods.roadbuilder.preset.LaneType;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.debug.DebugRenderer;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -62,7 +59,7 @@ public final class RoadLaneDirectionRenderer {
                 * maximumRenderDistance;
     }
 
-    public void render(WorldRenderContext context, Minecraft client) {
+    public void render(RoadWorldRenderFrame context, Minecraft client) {
         render(
                 context,
                 client,
@@ -73,7 +70,7 @@ public final class RoadLaneDirectionRenderer {
     }
 
     public void render(
-            WorldRenderContext context,
+            RoadWorldRenderFrame context,
             Minecraft client,
             Optional<RoadLaneGraph.ConnectionPoint> selectedPoint,
             Optional<RoadLaneGraph.ConnectionPoint> hoveredPoint
@@ -82,7 +79,7 @@ public final class RoadLaneDirectionRenderer {
     }
 
     private void render(
-            WorldRenderContext context,
+            RoadWorldRenderFrame context,
             Minecraft client,
             Optional<RoadLaneGraph.ConnectionPoint> selectedPoint,
             Optional<RoadLaneGraph.ConnectionPoint> hoveredPoint,
@@ -114,7 +111,7 @@ public final class RoadLaneDirectionRenderer {
 
         PoseStack matrices = context.matrixStack();
         MultiBufferSource consumers = context.consumers();
-        Vec3 camera = context.camera().getPosition();
+        Vec3 camera = context.cameraPosition();
         matrices.pushPose();
         matrices.translate(-camera.x, -camera.y, -camera.z);
         try {
@@ -133,7 +130,7 @@ public final class RoadLaneDirectionRenderer {
                             0.45F,
                             0.28F
                     )));
-            VertexConsumer lines = consumers.getBuffer(RenderType.lines());
+            VertexConsumer lines = RoadWorldRendering.lines(consumers);
             for (RoadLaneGraph.LanePath lane :
                     cachedGraph.lanePaths().values()) {
                 renderArrows(matrices, lines, camera, lane);
@@ -250,7 +247,7 @@ public final class RoadLaneDirectionRenderer {
                     > maximumRenderDistanceSquared) {
                 continue;
             }
-            DebugRenderer.renderFilledBox(
+            RoadWorldRendering.filledBox(
                     matrices,
                     consumers,
                     new AABB(

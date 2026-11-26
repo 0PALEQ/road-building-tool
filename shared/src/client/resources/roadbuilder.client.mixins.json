@@ -12,7 +12,7 @@
     "KeyboardHandlerMixin",
     "KeyboardInputMixin",
     "MinecraftMixin",
-    "MouseHandlerMixin"
+    "MouseHandlerMixin"${extra_client_mixins}
   ],
   "injectors": {
     "defaultRequire": 1

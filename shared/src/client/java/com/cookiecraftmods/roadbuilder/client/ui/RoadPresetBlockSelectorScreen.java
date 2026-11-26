@@ -5,7 +5,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.CommonComponents;
@@ -88,7 +87,7 @@ public final class RoadPresetBlockSelectorScreen extends RoadBuilderScreen {
                 Component.translatable(KEY + "search")
         );
         searchBox.setMaxLength(128);
-        searchBox.setHint(Component.translatable(KEY + "search_hint"));
+        searchBox.setHint(Component.translatable(KEY + "search_hint").withStyle(style -> style.withColor(0xE0E0E0)));
         searchBox.setValue(query);
         searchBox.setResponder(value -> {
             query = value;
@@ -180,7 +179,7 @@ public final class RoadPresetBlockSelectorScreen extends RoadBuilderScreen {
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    protected boolean roadKeyPressed(int keyCode, boolean controlDown) {
         if (keyCode == GLFW.GLFW_KEY_ENTER
                 || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
             acceptSelection();
@@ -193,14 +192,14 @@ public final class RoadPresetBlockSelectorScreen extends RoadBuilderScreen {
             blockList.setFocused(blockList.getSelected());
             return true;
         }
-        if (keyCode == GLFW.GLFW_KEY_F && Screen.hasControlDown()) {
+        if (keyCode == GLFW.GLFW_KEY_F && controlDown) {
             setFocused(searchBox);
             searchBox.setFocused(true);
             searchBox.setHighlightPos(0);
             searchBox.setCursorPosition(searchBox.getValue().length());
             return true;
         }
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return false;
     }
 
     @Override
@@ -349,14 +348,10 @@ public final class RoadPresetBlockSelectorScreen extends RoadBuilderScreen {
             return rowWidth;
         }
 
-        @Override
-        protected int getScrollbarPosition() {
-            return getRowRight() + 5;
-        }
     }
 
     private final class BlockEntry
-            extends ObjectSelectionList.Entry<BlockEntry> {
+            extends RoadListEntry<BlockEntry> {
         private final BlockOption option;
         private long lastClickTime;
 
@@ -365,17 +360,15 @@ public final class RoadPresetBlockSelectorScreen extends RoadBuilderScreen {
         }
 
         @Override
-        public void render(
+        protected void renderRoadRow(
                 GuiGraphics graphics,
-                int index,
                 int top,
                 int left,
                 int width,
                 int height,
                 int mouseX,
                 int mouseY,
-                boolean hovered,
-                float partialTick
+                boolean hovered
         ) {
             if (hovered) {
                 graphics.fill(
@@ -424,22 +417,13 @@ public final class RoadPresetBlockSelectorScreen extends RoadBuilderScreen {
                     false
             );
             if (hovered) {
-                RoadPresetBlockSelectorScreen.this
-                        .setTooltipForNextRenderPass(
-                                Component.literal(
-                                        option.displayName().getString()
-                                                + "\n" + option.id()
-                                )
-                        );
+                roadTooltip(graphics, Component.literal(option.displayName().getString()
+                        + "\n" + option.id()), mouseX, mouseY);
             }
         }
 
         @Override
-        public boolean mouseClicked(
-                double mouseX,
-                double mouseY,
-                int button
-        ) {
+        protected boolean roadRowClicked(int button) {
             if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
                 return false;
             }

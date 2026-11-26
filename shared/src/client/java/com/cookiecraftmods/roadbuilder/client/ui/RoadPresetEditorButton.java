@@ -2,7 +2,6 @@ package com.cookiecraftmods.roadbuilder.client.ui;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
 
@@ -10,7 +9,7 @@ import java.util.Objects;
 
 import static com.cookiecraftmods.roadbuilder.client.ui.UIStyle.*;
 
-final class RoadPresetEditorButton extends AbstractButton {
+final class RoadPresetEditorButton extends RoadButton {
     enum Style {
         NORMAL,
         PRIMARY,
@@ -46,14 +45,14 @@ final class RoadPresetEditorButton extends AbstractButton {
     }
 
     @Override
-    public void onPress() {
+    protected void roadPress() {
         if (active) {
             onPress.run();
         }
     }
 
     @Override
-    protected void renderWidget(
+    protected void renderRoadButton(
             GuiGraphics graphics,
             int mouseX,
             int mouseY,

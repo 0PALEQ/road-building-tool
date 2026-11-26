@@ -21,7 +21,6 @@ import net.minecraft.nbt.IntTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.LongTag;
 import net.minecraft.nbt.LongArrayTag;
-import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
@@ -347,8 +346,8 @@ public final class RoadBuilderConstructionJobSavedData extends RoadSavedData {
         ListTag jobs = new ListTag();
         for (ConstructionJob job : jobs()) {
             CompoundTag jobTag = new CompoundTag();
-            jobTag.putUUID(ID_KEY, job.id());
-            jobTag.putUUID(REQUESTED_BY_KEY, job.requestedBy());
+            RoadNbtIo.putUuid(jobTag, ID_KEY, job.id());
+            RoadNbtIo.putUuid(jobTag, REQUESTED_BY_KEY, job.requestedBy());
             jobTag.putString(ACTION_KEY, job.action().serializedName());
             jobTag.putString(PHASE_KEY, job.phase().serializedName());
             jobTag.putInt(CURSOR_KEY, job.cursor());
@@ -542,7 +541,7 @@ public final class RoadBuilderConstructionJobSavedData extends RoadSavedData {
                 OWNER_TYPE_KEY,
                 directOwner == null ? "" : directOwner.type().serializedName()
         );
-        tag.putUUID(
+        RoadNbtIo.putUuid(tag,
                 OWNER_ID_KEY,
                 directOwner == null ? new UUID(0L, 0L) : directOwner.ownerId()
         );
@@ -551,14 +550,14 @@ public final class RoadBuilderConstructionJobSavedData extends RoadSavedData {
         for (OperationMaterializationRepartition repartition :
                 metadata.repartitions()) {
             CompoundTag repartitionTag = new CompoundTag();
-            repartitionTag.putUUID(
+            RoadNbtIo.putUuid(repartitionTag,
                     SOURCE_OPERATION_ID_KEY,
                     repartition.sourceOperationId().value()
             );
             ListTag partitions = new ListTag();
             for (MaterializationPartition partition : repartition.partitions()) {
                 CompoundTag partitionTag = new CompoundTag();
-                partitionTag.putUUID(
+                RoadNbtIo.putUuid(partitionTag,
                         OPERATION_ID_KEY,
                         partition.operationId().value()
                 );
@@ -566,7 +565,7 @@ public final class RoadBuilderConstructionJobSavedData extends RoadSavedData {
                         OWNER_TYPE_KEY,
                         partition.owner().type().serializedName()
                 );
-                partitionTag.putUUID(OWNER_ID_KEY, partition.owner().ownerId());
+                RoadNbtIo.putUuid(partitionTag, OWNER_ID_KEY, partition.owner().ownerId());
                 partitionTag.putLongArray(
                         POSITIONS_KEY,
                         partition.positions().stream()
@@ -780,7 +779,7 @@ public final class RoadBuilderConstructionJobSavedData extends RoadSavedData {
             throw malformed(path + " must be a four-int UUID");
         }
         try {
-            return NbtUtils.loadUUID(array);
+            return RoadNbtIo.readUuid(array);
         } catch (RuntimeException exception) {
             throw malformed(path + " is not a valid UUID");
         }
@@ -828,7 +827,7 @@ public final class RoadBuilderConstructionJobSavedData extends RoadSavedData {
     }
 
     private static void requireCompoundElements(ListTag list, String path) {
-        if (!list.isEmpty() && list.getElementType() != Tag.TAG_COMPOUND) {
+        if (!list.isEmpty() && list.stream().anyMatch(element -> element.getId() != Tag.TAG_COMPOUND)) {
             throw malformed(path + " entries must be compounds");
         }
     }

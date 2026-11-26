@@ -429,7 +429,7 @@ class RoadBuilderNetworkSavedDataTest {
                 "diagnostic save file does not exist: " + saveFile
         );
         CompoundTag raw = RoadNbtIo.readCompressed(file.toPath());
-        CompoundTag root = raw.contains("data", TagIds.COMPOUND)
+        CompoundTag root = raw.get("data") instanceof CompoundTag
                 ? raw.getCompound("data")
                 : raw;
         ListTag nodeTags = root.getList("nodes", TagIds.COMPOUND);
@@ -441,7 +441,7 @@ class RoadBuilderNetworkSavedDataTest {
         );
         for (int index = 0; index < nodeTags.size(); index++) {
             CompoundTag nodeTag = nodeTags.getCompound(index);
-            UUID nodeId = nodeTag.getUUID("id");
+            UUID nodeId = RoadNbtIo.getUuid(nodeTag, "id");
             double x = nodeTag.getDouble("x");
             double y = nodeTag.getDouble("y");
             double z = nodeTag.getDouble("z");
@@ -451,8 +451,8 @@ class RoadBuilderNetworkSavedDataTest {
                  segmentIndex < segmentTags.size();
                  segmentIndex++) {
                 CompoundTag segmentTag = segmentTags.getCompound(segmentIndex);
-                if (segmentTag.getUUID("start_node").equals(nodeId)
-                        || segmentTag.getUUID("end_node").equals(nodeId)) {
+                if (RoadNbtIo.getUuid(segmentTag, "start_node").equals(nodeId)
+                        || RoadNbtIo.getUuid(segmentTag, "end_node").equals(nodeId)) {
                     incident.add(segmentFromTag(segmentTag));
                 }
             }
@@ -517,10 +517,10 @@ class RoadBuilderNetworkSavedDataTest {
     }
 
     private static RoadSegment segmentFromTag(CompoundTag segmentTag) {
-        UUID id = segmentTag.getUUID("id");
-        UUID roadId = segmentTag.getUUID("road");
-        UUID startNodeId = segmentTag.getUUID("start_node");
-        UUID endNodeId = segmentTag.getUUID("end_node");
+        UUID id = RoadNbtIo.getUuid(segmentTag, "id");
+        UUID roadId = RoadNbtIo.getUuid(segmentTag, "road");
+        UUID startNodeId = RoadNbtIo.getUuid(segmentTag, "start_node");
+        UUID endNodeId = RoadNbtIo.getUuid(segmentTag, "end_node");
         CompoundTag geometryTag = segmentTag.getCompound("geometry");
         String type = geometryTag.getString("type");
         ReferenceGeometry geometry;
@@ -538,10 +538,7 @@ class RoadBuilderNetworkSavedDataTest {
                     )
             );
         } else {
-            ListTag points = geometryTag.getList(
-                    "control_points",
-                    TagIds.COMPOUND
-            );
+            ListTag points = geometryTag.getList("control_points", TagIds.COMPOUND);
             List<RoadPoint> controls = new java.util.ArrayList<>();
             for (int index = 0; index < points.size(); index++) {
                 CompoundTag pointTag = points.getCompound(index);
@@ -589,7 +586,7 @@ class RoadBuilderNetworkSavedDataTest {
         List<RoadLaneId> laneIds = new java.util.ArrayList<>();
         for (int index = 0; index < laneIdTags.size(); index++) {
             laneIds.add(new RoadLaneId(
-                    laneIdTags.getCompound(index).getUUID("id")
+                    RoadNbtIo.getUuid(laneIdTags.getCompound(index), "id")
             ));
         }
         return RoadSegment.path(
@@ -640,7 +637,7 @@ class RoadBuilderNetworkSavedDataTest {
                     && geometryTag.getDouble("start_z") == 0.5
                     && geometryTag.getDouble("end_x") == 10.5
                     && geometryTag.getDouble("end_z") == 0.5) {
-                return segmentTag.getUUID("id");
+                return RoadNbtIo.getUuid(segmentTag, "id");
             }
         }
         throw new IllegalStateException("trunk segment not found");
@@ -657,15 +654,12 @@ class RoadBuilderNetworkSavedDataTest {
         UUID removedRoad = null;
         for (int index = 0; index < segments.size(); index++) {
             CompoundTag segmentTag = segments.getCompound(index);
-            if (segmentTag.getUUID("id").equals(segmentId)) {
-                removedRoad = segmentTag.getUUID("road");
-                ListTag laneIds = segmentTag.getList(
-                        "lane_ids",
-                        TagIds.COMPOUND
-                );
+            if (RoadNbtIo.getUuid(segmentTag, "id").equals(segmentId)) {
+                removedRoad = RoadNbtIo.getUuid(segmentTag, "road");
+                ListTag laneIds = segmentTag.getList("lane_ids", TagIds.COMPOUND);
                 for (int laneIndex = 0; laneIndex < laneIds.size(); laneIndex++) {
                     removedLanes.add(
-                            laneIds.getCompound(laneIndex).getUUID("id")
+                            RoadNbtIo.getUuid(laneIds.getCompound(laneIndex), "id")
                     );
                 }
             } else {
@@ -675,13 +669,13 @@ class RoadBuilderNetworkSavedDataTest {
         tag.put("segments", remainingSegments);
         Set<UUID> referencedNodes = new HashSet<>();
         for (int index = 0; index < remainingSegments.size(); index++) {
-            referencedNodes.add(remainingSegments.getCompound(index).getUUID("start_node"));
-            referencedNodes.add(remainingSegments.getCompound(index).getUUID("end_node"));
+            referencedNodes.add(RoadNbtIo.getUuid(remainingSegments.getCompound(index), "start_node"));
+            referencedNodes.add(RoadNbtIo.getUuid(remainingSegments.getCompound(index), "end_node"));
         }
         ListTag remainingNodes = new ListTag();
         ListTag nodes = tag.getList("nodes", TagIds.COMPOUND);
         for (int index = 0; index < nodes.size(); index++) {
-            if (referencedNodes.contains(nodes.getCompound(index).getUUID("id"))) {
+            if (referencedNodes.contains(RoadNbtIo.getUuid(nodes.getCompound(index), "id"))) {
                 remainingNodes.add(nodes.getCompound(index));
             }
         }
@@ -691,7 +685,7 @@ class RoadBuilderNetworkSavedDataTest {
             ListTag remainingRoads = new ListTag();
             for (int index = 0; index < roads.size(); index++) {
                 CompoundTag roadTag = roads.getCompound(index);
-                if (!roadTag.getUUID("id").equals(removedRoad)) {
+                if (!RoadNbtIo.getUuid(roadTag, "id").equals(removedRoad)) {
                     remainingRoads.add(roadTag);
                 }
             }
@@ -701,8 +695,8 @@ class RoadBuilderNetworkSavedDataTest {
         ListTag remainingConnectors = new ListTag();
         for (int index = 0; index < connectors.size(); index++) {
             CompoundTag connectorTag = connectors.getCompound(index);
-            if (!removedLanes.contains(connectorTag.getUUID("from_lane"))
-                    && !removedLanes.contains(connectorTag.getUUID("to_lane"))) {
+            if (!removedLanes.contains(RoadNbtIo.getUuid(connectorTag, "from_lane"))
+                    && !removedLanes.contains(RoadNbtIo.getUuid(connectorTag, "to_lane"))) {
                 remainingConnectors.add(connectorTag);
             }
         }

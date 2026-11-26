@@ -49,7 +49,6 @@ import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.IntTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.LongTag;
-import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
@@ -456,7 +455,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         ListTag roads = new ListTag();
         for (Road road : snapshot.roads().values()) {
             CompoundTag roadTag = new CompoundTag();
-            roadTag.putUUID(ID_KEY, road.id().value());
+            RoadNbtIo.putUuid(roadTag, ID_KEY, road.id().value());
             roadTag.putString(HANDEDNESS_KEY, road.trafficHandedness().serializedName());
             roads.add(roadTag);
         }
@@ -465,7 +464,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         ListTag nodes = new ListTag();
         for (RoadNode node : snapshot.nodes().values()) {
             CompoundTag nodeTag = new CompoundTag();
-            nodeTag.putUUID(ID_KEY, node.id().value());
+            RoadNbtIo.putUuid(nodeTag, ID_KEY, node.id().value());
             nodeTag.putDouble(X_KEY, node.position().x());
             nodeTag.putDouble(Y_KEY, node.position().y());
             nodeTag.putDouble(Z_KEY, node.position().z());
@@ -476,17 +475,17 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         ListTag segments = new ListTag();
         for (RoadSegment segment : snapshot.segments().values()) {
             CompoundTag segmentTag = new CompoundTag();
-            segmentTag.putUUID(ID_KEY, segment.id().value());
-            segmentTag.putUUID(ROAD_KEY, segment.roadId().value());
-            segmentTag.putUUID(START_NODE_KEY, segment.startNodeId().value());
-            segmentTag.putUUID(END_NODE_KEY, segment.endNodeId().value());
+            RoadNbtIo.putUuid(segmentTag, ID_KEY, segment.id().value());
+            RoadNbtIo.putUuid(segmentTag, ROAD_KEY, segment.roadId().value());
+            RoadNbtIo.putUuid(segmentTag, START_NODE_KEY, segment.startNodeId().value());
+            RoadNbtIo.putUuid(segmentTag, END_NODE_KEY, segment.endNodeId().value());
             segmentTag.put(GEOMETRY_KEY, writeGeometry(segment.referenceGeometry()));
             segmentTag.put(PRESET_KEY, writePreset(segment));
 
             ListTag laneIds = new ListTag();
             for (RoadLane lane : segment.lanes()) {
                 CompoundTag laneIdTag = new CompoundTag();
-                laneIdTag.putUUID(ID_KEY, lane.id().value());
+                RoadNbtIo.putUuid(laneIdTag, ID_KEY, lane.id().value());
                 laneIds.add(laneIdTag);
             }
             segmentTag.put(LANE_IDS_KEY, laneIds);
@@ -497,9 +496,9 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         ListTag connectors = new ListTag();
         for (LaneConnector connector : snapshot.connectors().values()) {
             CompoundTag connectorTag = new CompoundTag();
-            connectorTag.putUUID(ID_KEY, connector.id().value());
-            connectorTag.putUUID(FROM_LANE_KEY, connector.fromLaneId().value());
-            connectorTag.putUUID(TO_LANE_KEY, connector.toLaneId().value());
+            RoadNbtIo.putUuid(connectorTag, ID_KEY, connector.id().value());
+            RoadNbtIo.putUuid(connectorTag, FROM_LANE_KEY, connector.fromLaneId().value());
+            RoadNbtIo.putUuid(connectorTag, TO_LANE_KEY, connector.toLaneId().value());
             connectorTag.putString(
                     MOVEMENT_TYPE_KEY,
                     connector.movement().type().name()
@@ -665,7 +664,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
             JunctionDefinition definition
     ) {
         CompoundTag tag = new CompoundTag();
-        tag.putUUID(NODE_KEY, definition.nodeId().value());
+        RoadNbtIo.putUuid(tag, NODE_KEY, definition.nodeId().value());
         tag.putString(STRATEGY_KEY, definition.strategy().name());
         tag.putString(
                 PRIORITY_POLICY_KEY,
@@ -692,7 +691,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
             JunctionApproachOverride override
     ) {
         CompoundTag tag = new CompoundTag();
-        tag.putUUID(SEGMENT_KEY, key.segmentId().value());
+        RoadNbtIo.putUuid(tag, SEGMENT_KEY, key.segmentId().value());
         tag.putString(END_KEY, key.end().name());
         if (override != null) {
             tag.putString(
@@ -851,15 +850,9 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
                                             connectorTag,
                                             path
                                     ),
-                                    connectorTag.getBoolean(
-                                            MOVEMENT_ALLOWED_KEY
-                                    ),
-                                    connectorTag.getBoolean(
-                                            MOVEMENT_MANUAL_KEY
-                                    ),
-                                    connectorTag.getInt(
-                                            MOVEMENT_PRIORITY_KEY
-                                    )
+                                    connectorTag.getBoolean(MOVEMENT_ALLOWED_KEY),
+                                    connectorTag.getBoolean(MOVEMENT_MANUAL_KEY),
+                                    connectorTag.getInt(MOVEMENT_PRIORITY_KEY)
                             )
             );
             requireAbsent(connectors.put(id, connector), "connector", id);
@@ -952,7 +945,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
             String path, int maximum
     ) {
         if (!(rawTag instanceof ListTag tags)
-                || tags.getElementType() != Tag.TAG_COMPOUND) {
+                || tags.stream().anyMatch(element -> element.getId() != Tag.TAG_COMPOUND)) {
             throw malformed(path + " must be a compound list");
         }
         if (tags.size() < 2 || tags.size() > maximum) {
@@ -997,7 +990,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
                 ? PRESET_V2_KEYS : tag.contains(SURFACE_BANDS_KEY) ? PRESET_KEYS : LEGACY_PRESET_KEYS);
         if (tag.contains("sunken_road")) {
             presetKeys.add("sunken_road");
-            if (!tag.contains("sunken_road", Tag.TAG_BYTE)
+            if (!RoadNbtIo.contains(tag, "sunken_road", Tag.TAG_BYTE)
                     || (tag.getByte("sunken_road") != 0 && tag.getByte("sunken_road") != 1)) {
                 throw malformed(path + ".sunken_road must be a boolean");
             }
@@ -1249,7 +1242,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         if (!tag.contains(key)) {
             return Optional.empty();
         }
-        if (!tag.contains(key, Tag.TAG_BYTE) || (tag.getByte(key) != 0 && tag.getByte(key) != 1)) {
+        if (!RoadNbtIo.contains(tag, key, Tag.TAG_BYTE) || (tag.getByte(key) != 0 && tag.getByte(key) != 1)) {
             throw malformed(path + "." + key + " must be a boolean");
         }
         return Optional.of(tag.getBoolean(key));
@@ -1403,7 +1396,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         if (!(rawTag instanceof ListTag list)) {
             throw malformed(path + " must be a list");
         }
-        if (!list.isEmpty() && list.getElementType() != Tag.TAG_COMPOUND) {
+        if (!list.isEmpty() && list.stream().anyMatch(element -> element.getId() != Tag.TAG_COMPOUND)) {
             throw malformed(path + " entries must be compounds");
         }
         return list;
@@ -1419,7 +1412,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
         if (list.isEmpty() || list.size() > 16) {
             throw malformed(path + " must contain between 1 and 16 blocks");
         }
-        if (list.getElementType() != Tag.TAG_STRING) {
+        if (list.stream().anyMatch(element -> element.getId() != Tag.TAG_STRING)) {
             throw malformed(path + " entries must be strings");
         }
         List<ResourceLocation> blocks = new ArrayList<>(list.size());
@@ -1481,7 +1474,7 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
             throw malformed(path + " must be a four-int UUID");
         }
         try {
-            return NbtUtils.loadUUID(uuidTag);
+            return RoadNbtIo.readUuid(uuidTag);
         } catch (RuntimeException exception) {
             throw malformed(path + " is not a valid UUID");
         }
@@ -1509,10 +1502,10 @@ public final class RoadBuilderNetworkSavedData extends RoadSavedData {
             CompoundTag tag,
             String path
     ) {
-        if (!tag.contains(MOVEMENT_TYPE_KEY, Tag.TAG_STRING)
-                || !tag.contains(MOVEMENT_ALLOWED_KEY, Tag.TAG_BYTE)
-                || !tag.contains(MOVEMENT_MANUAL_KEY, Tag.TAG_BYTE)
-                || !tag.contains(MOVEMENT_PRIORITY_KEY, Tag.TAG_INT)) {
+        if (!RoadNbtIo.contains(tag, MOVEMENT_TYPE_KEY, Tag.TAG_STRING)
+                || !RoadNbtIo.contains(tag, MOVEMENT_ALLOWED_KEY, Tag.TAG_BYTE)
+                || !RoadNbtIo.contains(tag, MOVEMENT_MANUAL_KEY, Tag.TAG_BYTE)
+                || !RoadNbtIo.contains(tag, MOVEMENT_PRIORITY_KEY, Tag.TAG_INT)) {
             throw new IllegalArgumentException(
                     path + " has invalid connector movement fields"
             );

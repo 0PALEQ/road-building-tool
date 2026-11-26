@@ -78,10 +78,7 @@ public final class RoadBuilderLiveMatrixServer {
                 prepareUnevenTerrain(server.overworld());
             }
             prepareNetherArrival(server.getLevel(Level.NETHER));
-            server.overworld().setDefaultSpawnPos(
-                    new BlockPos(40, 76, 36),
-                    0.0F
-            );
+            MatrixServerPlayer.setSpawn(server.overworld(), new BlockPos(40, 76, 36));
             writeEvidence("server-ready", Instant.now().toString());
             initialized = true;
             RoadBuilder.LOGGER.info(
@@ -98,20 +95,13 @@ public final class RoadBuilderLiveMatrixServer {
     }
 
     private static void configurePlayer(ServerPlayer player) {
-        String name = player.getGameProfile().getName();
+        String name = MatrixServerPlayer.name(player);
         if ("RoadActor".equals(name)) {
             player.setGameMode(GameType.CREATIVE);
         } else if ("RoadObserver".equals(name)) {
             player.setGameMode(GameType.SURVIVAL);
         }
-        player.teleportTo(
-                player.server.overworld(),
-                40.5,
-                76.0,
-                36.5,
-                0.0F,
-                0.0F
-        );
+        MatrixServerPlayer.teleport(player, player.serverLevel().getServer().overworld(), 40.5, 76.0, 36.5);
     }
 
     private static void tick(MinecraftServer server) {
@@ -162,7 +152,7 @@ public final class RoadBuilderLiveMatrixServer {
                 fail(server, "Nether level was not available");
                 return;
             }
-            actor.teleportTo(nether, 0.5, 80.0, 0.5, 0.0F, 0.0F);
+            MatrixServerPlayer.teleport(actor, nether, 0.5, 80.0, 0.5);
             sentToNether = true;
             writeEvidence("server-sent-nether", "ok");
             return;
@@ -170,14 +160,7 @@ public final class RoadBuilderLiveMatrixServer {
         if (sentToNether
                 && !returnedFromNether
                 && exists("dimension-nether-observed")) {
-            actor.teleportTo(
-                    server.overworld(),
-                    40.5,
-                    76.0,
-                    36.5,
-                    0.0F,
-                    0.0F
-            );
+            MatrixServerPlayer.teleport(actor, server.overworld(), 40.5, 76.0, 36.5);
             returnedFromNether = true;
             writeEvidence("server-returned-overworld", "ok");
         }

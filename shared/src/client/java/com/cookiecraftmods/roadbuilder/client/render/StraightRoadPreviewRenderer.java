@@ -1,6 +1,5 @@
 package com.cookiecraftmods.roadbuilder.client.render;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.cookiecraftmods.roadbuilder.client.tool.RawRoadPreview;
 import com.cookiecraftmods.roadbuilder.client.tool.StraightRoadToolController;
 import com.cookiecraftmods.roadbuilder.client.tool.RoadSnapGuide;
@@ -9,15 +8,8 @@ import com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import com.cookiecraftmods.roadbuilder.network.RoadNode;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import com.mojang.blaze3d.vertex.VertexFormat;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.minecraft.client.renderer.GameRenderer;
-import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.debug.DebugRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -26,28 +18,7 @@ import java.util.List;
 import java.util.Objects;
 
 public final class StraightRoadPreviewRenderer {
-    private static final RenderType NODE_FILL = new RenderType(
-            "roadbuilder_node_fill",
-            DefaultVertexFormat.POSITION_COLOR,
-            VertexFormat.Mode.TRIANGLES,
-            256,
-            false,
-            true,
-            () -> {
-                RenderSystem.enableBlend();
-                RenderSystem.defaultBlendFunc();
-                RenderSystem.disableCull();
-                RenderSystem.depthMask(false);
-                RenderSystem.setShader(GameRenderer::getPositionColorShader);
-            },
-            () -> {
-                RenderSystem.depthMask(true);
-                RenderSystem.enableCull();
-                RenderSystem.disableBlend();
-            }
-    ) { };
-
-    public void render(WorldRenderContext context, StraightRoadToolController tool) {
+    public void render(RoadWorldRenderFrame context, StraightRoadToolController tool) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(tool, "tool");
         MultiBufferSource consumers = context.consumers();
@@ -56,7 +27,7 @@ public final class StraightRoadPreviewRenderer {
         }
 
         PoseStack matrices = context.matrixStack();
-        Vec3 cameraPosition = context.camera().getPosition();
+        Vec3 cameraPosition = context.cameraPosition();
         matrices.pushPose();
         matrices.translate(-cameraPosition.x, -cameraPosition.y, -cameraPosition.z);
         try {
@@ -64,7 +35,7 @@ public final class StraightRoadPreviewRenderer {
             float previewGreen = tool.previewInvalid() ? 0.15F : tool.placementPending() ? 0.62F : 0.72F;
             float previewBlue = tool.previewInvalid() ? 0.15F : tool.placementPending() ? 0.12F : 0.95F;
             tool.rawPreviews().forEach(preview -> {
-                VertexConsumer fill = consumers.getBuffer(NODE_FILL);
+                VertexConsumer fill = RoadWorldRendering.fill(consumers);
                 List<RawRoadPreview.CrossSection> sections =
                         preview.crossSections();
                 for (int index = 0; index < sections.size() - 1; index++) {
@@ -78,9 +49,7 @@ public final class StraightRoadPreviewRenderer {
                             previewBlue
                     );
                 }
-                VertexConsumer edgeLines = consumers.getBuffer(
-                        RenderType.lines()
-                );
+                VertexConsumer edgeLines = RoadWorldRendering.lines(consumers);
                 for (int index = 0; index < sections.size() - 1; index++) {
                     renderPreviewEdge(
                             matrices,
@@ -93,12 +62,12 @@ public final class StraightRoadPreviewRenderer {
                     );
                 }
             });
-            VertexConsumer lines = consumers.getBuffer(RenderType.lines());
+            VertexConsumer lines = RoadWorldRendering.lines(consumers);
             tool.snapGuides().forEach(guide ->
                     renderSnapGuide(matrices, lines, guide));
 
             for (BlockPos conflict : tool.removalConflictSamples()) {
-                DebugRenderer.renderFilledBox(
+                RoadWorldRendering.filledBox(
                         matrices,
                         consumers,
                         surfaceOverlay(conflict),
@@ -114,26 +83,22 @@ public final class StraightRoadPreviewRenderer {
             );
 
             var nodeMarkers = tool.visibleNodeMarkers();
-            VertexConsumer nodeFill = consumers.getBuffer(
-                    NODE_FILL
-            );
+            VertexConsumer nodeFill = RoadWorldRendering.fill(consumers);
             for (RoadNodeMarker marker : nodeMarkers) {
                 renderNodeMarkerFill(matrices, nodeFill, marker);
             }
-            VertexConsumer markerLines = consumers.getBuffer(
-                    RenderType.lines()
-            );
+            VertexConsumer markerLines = RoadWorldRendering.lines(consumers);
             for (RoadNodeMarker marker : nodeMarkers) {
                 renderNodeMarkerOutline(matrices, markerLines, marker);
             }
             for (var port : tool.visibleLanePorts()) {
                 var point = port.position();
-                LevelRenderer.renderLineBox(matrices, markerLines,
+                RoadWorldRendering.lineBox(matrices, markerLines,
                         new AABB(point.x() - 0.65, point.y() + 1.02, point.z() - 0.65,
                                 point.x() + 0.65, point.y() + 1.08, point.z() + 0.65),
                         0.1F, 0.95F, 0.3F, 1.0F);
             }
-            tool.startBlock().ifPresent(position -> LevelRenderer.renderLineBox(
+            tool.startBlock().ifPresent(position -> RoadWorldRendering.lineBox(
                     matrices,
                     markerLines,
                     new AABB(position).inflate(0.004),
@@ -142,7 +107,7 @@ public final class StraightRoadPreviewRenderer {
                     1.0F,
                     1.0F
             ));
-            tool.cursorBlock().ifPresent(position -> LevelRenderer.renderLineBox(
+            tool.cursorBlock().ifPresent(position -> RoadWorldRendering.lineBox(
                     matrices,
                     markerLines,
                     new AABB(position).inflate(0.008),
@@ -436,7 +401,7 @@ public final class StraightRoadPreviewRenderer {
         for (int index = 0; index <= sampleCount; index++) {
             double distance = SegmentHighlightSampling.distance(length, sampleCount, index);
             var point = geometry.sample(distance).position();
-            DebugRenderer.renderFilledBox(
+            RoadWorldRendering.filledBox(
                     matrices,
                     consumers,
                     new AABB(

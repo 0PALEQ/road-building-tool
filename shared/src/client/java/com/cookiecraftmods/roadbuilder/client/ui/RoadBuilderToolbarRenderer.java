@@ -418,17 +418,9 @@ public final class RoadBuilderToolbarRenderer {
                 ? PAGE_BULLET_ACTIVE_ICON
                 : PAGE_BULLET_ICON;
         int size = Math.min(10, Math.min(bounds.width(), bounds.height()));
-        graphics.blit(
-                texture,
+        RoadGuiDrawing.icon(graphics, texture,
                 bounds.x() + (bounds.width() - size) / 2,
-                bounds.y() + (bounds.height() - size) / 2,
-                0,
-                0,
-                size,
-                size,
-                10,
-                10
-        );
+                bounds.y() + (bounds.height() - size) / 2, size, 10, 0xFFFFFFFF);
     }
 
     private static void roadSnappingButton(
@@ -1001,27 +993,7 @@ public final class RoadBuilderToolbarRenderer {
         );
         int x = button.x() + (button.width() - size) / 2;
         int y = button.y() + (button.height() - size) / 2;
-        float red = ((tint >> 16) & 0xFF) / 255.0F;
-        float green = ((tint >> 8) & 0xFF) / 255.0F;
-        float blue = (tint & 0xFF) / 255.0F;
-        graphics.setColor(red, green, blue, 1.0F);
-        float scale = size / (float) ICON_TEXTURE_SIZE;
-        graphics.pose().pushPose();
-        graphics.pose().translate(x, y, 0.0F);
-        graphics.pose().scale(scale, scale, 1.0F);
-        graphics.blit(
-                texture,
-                0,
-                0,
-                0,
-                0,
-                ICON_TEXTURE_SIZE,
-                ICON_TEXTURE_SIZE,
-                ICON_TEXTURE_SIZE,
-                ICON_TEXTURE_SIZE
-        );
-        graphics.pose().popPose();
-        graphics.setColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RoadGuiDrawing.icon(graphics, texture, x, y, size, ICON_TEXTURE_SIZE, tint);
     }
 
     private static void quadraticPath(
@@ -1371,7 +1343,7 @@ public final class RoadBuilderToolbarRenderer {
             };
         }
         if (tooltip != null) {
-            graphics.renderTooltip(
+            RoadGuiDrawing.tooltip(graphics,
                     client.font,
                     tooltip,
                     (int) cursor.x(),

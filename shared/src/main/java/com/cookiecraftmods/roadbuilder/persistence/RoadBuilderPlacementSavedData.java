@@ -13,7 +13,6 @@ import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.IntTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.LongTag;
-import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
@@ -227,7 +226,7 @@ public final class RoadBuilderPlacementSavedData extends RoadSavedData {
             ListTag layers = new ListTag();
             for (BlockChangeLayer layer : entry.getValue().layers()) {
                 CompoundTag layerTag = new CompoundTag();
-                layerTag.putUUID(OPERATION_KEY, layer.operationId().value());
+                RoadNbtIo.putUuid(layerTag, OPERATION_KEY, layer.operationId().value());
                 layerTag.put(BEFORE_STATE_KEY, StrictBlockStateNbtCodec.write(layer.beforeState()));
                 layerTag.put(AFTER_STATE_KEY, StrictBlockStateNbtCodec.write(layer.afterState()));
                 layers.add(layerTag);
@@ -241,9 +240,9 @@ public final class RoadBuilderPlacementSavedData extends RoadSavedData {
         for (var operation : compatibleLedger.operations()) {
             operation.materializationOwner().ifPresent(owner -> {
                 CompoundTag materializationTag = new CompoundTag();
-                materializationTag.putUUID(OPERATION_KEY, operation.id().value());
+                RoadNbtIo.putUuid(materializationTag, OPERATION_KEY, operation.id().value());
                 materializationTag.putString(OWNER_TYPE_KEY, owner.type().serializedName());
-                materializationTag.putUUID(OWNER_ID_KEY, owner.ownerId());
+                RoadNbtIo.putUuid(materializationTag, OWNER_ID_KEY, owner.ownerId());
                 materializations.add(materializationTag);
             });
         }
@@ -418,7 +417,7 @@ public final class RoadBuilderPlacementSavedData extends RoadSavedData {
             throw malformed(path + " must be a four-int UUID");
         }
         try {
-            return new PlacementOperationId(NbtUtils.loadUUID(operationArray));
+            return new PlacementOperationId(RoadNbtIo.readUuid(operationArray));
         } catch (RuntimeException exception) {
             throw malformed(path + " is not a valid UUID");
         }
@@ -429,7 +428,7 @@ public final class RoadBuilderPlacementSavedData extends RoadSavedData {
             throw malformed(path + " must be a four-int UUID");
         }
         try {
-            return NbtUtils.loadUUID(uuidArray);
+            return RoadNbtIo.readUuid(uuidArray);
         } catch (RuntimeException exception) {
             throw malformed(path + " is not a valid UUID");
         }
@@ -491,7 +490,7 @@ public final class RoadBuilderPlacementSavedData extends RoadSavedData {
     }
 
     private static void requireCompoundElements(ListTag list, String path) {
-        if (!list.isEmpty() && list.getElementType() != Tag.TAG_COMPOUND) {
+        if (!list.isEmpty() && list.stream().anyMatch(element -> element.getId() != Tag.TAG_COMPOUND)) {
             throw malformed(path + " entries must be compounds");
         }
     }

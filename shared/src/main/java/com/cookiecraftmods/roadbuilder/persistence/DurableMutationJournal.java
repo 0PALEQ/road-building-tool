@@ -1,6 +1,7 @@
 package com.cookiecraftmods.roadbuilder.persistence;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.storage.LevelResource;
@@ -75,7 +76,7 @@ public final class DurableMutationJournal {
             return false;
         }
         CompoundTag envelope = RoadNbtIo.readCompressed(path);
-        if (!envelope.contains("data", CompoundTag.TAG_COMPOUND)) {
+        if (!RoadNbtIo.contains(envelope, "data", Tag.TAG_COMPOUND)) {
             throw new IOException("mutation journal has no data envelope");
         }
         RoadBuilderConstructionJobSavedData recovered =

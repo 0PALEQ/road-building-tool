@@ -22,18 +22,16 @@ toolchains.
 | --- | --- | --- | --- |
 | `:fabric-1.20.1` | 1.20.1 | 17 | Existing target |
 | `:fabric-1.21.1` | 1.21.1 | 21 | Ported |
+| `:fabric-1.21.11` | 1.21.11 | 21 | Ported |
 
-Install JDKs 17 and 21 to build both targets. Set `JAVA_HOME` to JDK 21 for the
+Install JDKs 17 and 21 to build all targets. Set `JAVA_HOME` to JDK 21 for the
 Gradle wrapper and select JDK 21 as the Gradle JVM when importing the root
 project into IntelliJ IDEA. Gradle selects the appropriate Java toolchain for
 each game's compilation, tests and runs.
 
-`versions/fabric-26.1.2` reserves dependency and toolchain settings for a future
-port. It joins the Gradle build when its Minecraft and Fabric API adapters are ready.
-
 ```powershell
 .\gradlew.bat build
-.\gradlew.bat :fabric-1.21.1:build
+.\gradlew.bat :fabric-1.21.11:build
 .\gradlew.bat :fabric-1.20.1:test
 .\gradlew.bat :fabric-1.20.1:runGameTest
 .\gradlew.bat :fabric-1.20.1:runClient
@@ -42,7 +40,7 @@ port. It joins the Gradle build when its Minecraft and Fabric API adapters are r
 ```
 
 On Linux or macOS, use `./gradlew` instead of `.\gradlew.bat`. The root
-`build` and `check` tasks verify both supported versions with JUnit and headless
+`build` and `check` tasks verify all supported versions with JUnit and headless
 GameTests. Use `test` when you only need JUnit.
 
 Additional verification tasks include `verifyPlacementProcessRestart`,
@@ -68,6 +66,12 @@ two Minecraft clients with a dedicated server.
 Each version writes jars to `versions/fabric-*/build/libs`, reports to
 `versions/fabric-*/build/reports`, and develops in its own `run` directory.
 The jar filename includes the Fabric target.
+
+All supported versions export one road-pack ZIP that works on Minecraft 1.20.1,
+1.21.1 and 1.21.11. Enable the ZIP in the client's Resource Packs menu for
+personal use, or place it in a world's `datapacks` directory to share its
+presets through the server. Each preset requires its blocks to be available
+in the destination game version.
 
 ## Status
 

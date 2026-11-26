@@ -4,7 +4,6 @@ import com.cookiecraftmods.roadbuilder.preset.RoadPreset;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.JsonOps;
-import net.minecraft.SharedConstants;
 import net.minecraft.resources.ResourceLocation;
 
 import java.io.IOException;
@@ -20,6 +19,10 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 public final class RoadPackExporter {
+    private static final int MINIMUM_PACK_FORMAT = 15;
+    private static final int MAXIMUM_PACK_FORMAT = 94;
+    private static final int MAXIMUM_PACK_FORMAT_MINOR = 1;
+
     private RoadPackExporter() {
     }
 
@@ -80,55 +83,46 @@ public final class RoadPackExporter {
     ) throws IOException {
         try (OutputStream stream = Files.newOutputStream(destination);
              ZipOutputStream zip = new ZipOutputStream(stream)) {
-            JsonObject pack = new JsonObject();
-            JsonObject metadata = new JsonObject();
-            int dataFormat = SharedConstants.DATA_PACK_FORMAT;
-            int resourceFormat = SharedConstants.RESOURCE_PACK_FORMAT;
-            metadata.addProperty("pack_format", dataFormat);
-            if (resourceFormat != dataFormat) {
-                JsonArray supportedFormats = new JsonArray();
-                supportedFormats.add(Math.min(dataFormat, resourceFormat));
-                supportedFormats.add(Math.max(dataFormat, resourceFormat));
-                metadata.add("supported_formats", supportedFormats);
-            }
-            metadata.addProperty(
-                    "description",
-                    packName + " - Road Builder road pack"
-            );
-            pack.add("pack", metadata);
-            write(zip, "pack.mcmeta", pack.toString());
-
-            JsonObject manifest = new JsonObject();
-            manifest.addProperty("name", packName);
-            manifest.addProperty("road_count", presets.size());
-            write(zip, "roadbuilder-pack.json", manifest.toString());
-
-            for (Map.Entry<ResourceLocation, RoadPreset> entry
-                    : presets.entrySet()) {
-                String json = RoadPreset.CODEC.encodeStart(
-                        JsonOps.INSTANCE,
-                        entry.getValue()
-                ).result().orElseThrow(() -> new IllegalArgumentException(
-                        "road preset could not be encoded: " + entry.getKey()
-                )).toString();
-                write(
-                        zip,
-                        "assets/" + entry.getKey().getNamespace()
-                                + "/road_presets/"
-                                + entry.getKey().getPath() + ".json",
-                        json
-                );
-                write(zip, "data/" + entry.getKey().getNamespace()
-                        + "/road_presets/" + entry.getKey().getPath() + ".json", json);
+            writeMetadata(zip, packName, presets.size());
+            for (var entry : presets.entrySet()) {
+                var id = entry.getKey();
+                String json = RoadPreset.CODEC.encodeStart(JsonOps.INSTANCE, entry.getValue())
+                        .result().orElseThrow(() -> new IllegalArgumentException(
+                                "road preset could not be encoded: " + id
+                        )).toString();
+                String path = id.getNamespace() + "/road_presets/" + id.getPath() + ".json";
+                write(zip, "assets/" + path, json);
+                write(zip, "data/" + path, json);
             }
         }
     }
 
-    private static void write(
-            ZipOutputStream zip,
-            String name,
-            String value
-    ) throws IOException {
+    private static void writeMetadata(ZipOutputStream zip, String name, int roadCount) throws IOException {
+        JsonObject metadata = new JsonObject();
+        // 1.20.1 reads only pack_format, 1.21.1 reads supported_formats, and 1.21.11 reads the minor-aware range.
+        metadata.addProperty("pack_format", MINIMUM_PACK_FORMAT);
+        JsonArray supported = new JsonArray();
+        supported.add(MINIMUM_PACK_FORMAT);
+        supported.add(MAXIMUM_PACK_FORMAT);
+        metadata.add("supported_formats", supported);
+        metadata.addProperty("min_format", MINIMUM_PACK_FORMAT);
+        JsonArray maximum = new JsonArray();
+        maximum.add(MAXIMUM_PACK_FORMAT);
+        maximum.add(MAXIMUM_PACK_FORMAT_MINOR);
+        metadata.add("max_format", maximum);
+        metadata.addProperty("description", name + " - Road Builder road pack");
+
+        JsonObject pack = new JsonObject();
+        pack.add("pack", metadata);
+        write(zip, "pack.mcmeta", pack.toString());
+
+        JsonObject manifest = new JsonObject();
+        manifest.addProperty("name", name);
+        manifest.addProperty("road_count", roadCount);
+        write(zip, "roadbuilder-pack.json", manifest.toString());
+    }
+
+    private static void write(ZipOutputStream zip, String name, String value) throws IOException {
         ZipEntry entry = new ZipEntry(name);
         entry.setTime(0L);
         zip.putNextEntry(entry);

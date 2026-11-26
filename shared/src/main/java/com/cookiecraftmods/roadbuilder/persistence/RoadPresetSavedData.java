@@ -68,7 +68,9 @@ public final class RoadPresetSavedData extends RoadSavedData {
                     "unsupported world-preset schema"
             );
         }
-        ListTag entries = root.getList("presets", Tag.TAG_COMPOUND);
+        ListTag entries = root.get("presets") instanceof ListTag list
+                && list.stream().allMatch(entry -> entry.getId() == Tag.TAG_COMPOUND)
+                ? list : new ListTag();
         if (entries.size() > MAXIMUM_PRESETS) {
             throw new IllegalArgumentException(
                     "world preset count exceeds limit"

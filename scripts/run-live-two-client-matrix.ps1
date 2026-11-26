@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PresetDirectory,
     [Parameter(Mandatory = $true)]
-    [int]$DataPackFormat,
+    [string]$DataPackFormat,
     [int]$BasePort = 25576,
     [ValidateSet("BOTH", "RHT", "LHT")]
     [string]$Handedness = "BOTH"
@@ -176,12 +176,16 @@ function Write-ServerConfiguration {
     $packDirectory = Join-Path $ServerRunDirectory "matrix-world-$RunId\datapacks\roadbuilder-matrix"
     $presets = Join-Path $packDirectory "data\roadbuilder\road_presets"
     New-Item -ItemType Directory -Force -Path $presets | Out-Null
-    $packMetadata = @{
-        pack = @{
-            pack_format = $DataPackFormat
-            description = "Road Builder live matrix fixtures"
-        }
-    } | ConvertTo-Json
+    $format = $DataPackFormat.Split('.')
+    $pack = @{ description = "Road Builder live matrix fixtures" }
+    if ($format.Count -eq 2) {
+        $version = @([int]$format[0], [int]$format[1])
+        $pack.min_format = $version
+        $pack.max_format = $version
+    } else {
+        $pack.pack_format = [int]$format[0]
+    }
+    $packMetadata = @{ pack = $pack } | ConvertTo-Json
     [System.IO.File]::WriteAllText((Join-Path $packDirectory "pack.mcmeta"), $packMetadata, $utf8NoBom)
     foreach ($preset in Get-ChildItem -LiteralPath $PresetDirectory -Filter "*.json" -File) {
         Copy-Item -LiteralPath $preset.FullName -Destination $presets
@@ -420,7 +424,8 @@ $matrixReport = @{
     client_count = 2
     rows = $rows
 }
-$matrixReport | ConvertTo-Json -Depth 8 |
-    Set-Content -LiteralPath (
-        Join-Path $reportRoot "matrix.json"
-    ) -Encoding utf8
+[System.IO.File]::WriteAllText(
+    (Join-Path $reportRoot "matrix.json"),
+    (($matrixReport | ConvertTo-Json -Depth 8) + [Environment]::NewLine),
+    [System.Text.UTF8Encoding]::new($false)
+)

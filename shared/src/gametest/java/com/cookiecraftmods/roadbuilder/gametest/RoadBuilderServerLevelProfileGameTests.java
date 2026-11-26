@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.gametest;
 
+import com.cookiecraftmods.roadbuilder.persistence.RoadSavedData;
 import com.cookiecraftmods.roadbuilder.compat.MinecraftIds;
 
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
@@ -104,7 +105,7 @@ public final class RoadBuilderServerLevelProfileGameTests implements FabricGameT
                     );
                 }
                 level.getChunkSource().save(true);
-                level.getDataStorage().save();
+                RoadSavedData.flush(level.getDataStorage());
                 helper.runAfterDelay(1, () -> executeRun(sampleIndex, runIndex, plan));
             } catch (RuntimeException exception) {
                 fail("preparing sample " + sampleIndex + " run " + runIndex, exception);
@@ -137,7 +138,7 @@ public final class RoadBuilderServerLevelProfileGameTests implements FabricGameT
 
                 long saveStarted = System.nanoTime();
                 level.getChunkSource().save(true);
-                level.getDataStorage().save();
+                RoadSavedData.flush(level.getDataStorage());
                 long saveNanos = System.nanoTime() - saveStarted;
 
                 PendingSample pending = new PendingSample(
@@ -175,7 +176,7 @@ public final class RoadBuilderServerLevelProfileGameTests implements FabricGameT
                         "profile cleanup should succeed; got " + removal
                 );
                 level.getChunkSource().save(true);
-                level.getDataStorage().save();
+                RoadSavedData.flush(level.getDataStorage());
 
                 int nextRun = pending.runIndex() + 1;
                 if (nextRun < WARMUP_RUNS + MEASURED_RUNS) {

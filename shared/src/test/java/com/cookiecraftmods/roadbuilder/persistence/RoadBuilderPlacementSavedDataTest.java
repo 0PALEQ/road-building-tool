@@ -344,7 +344,7 @@ class RoadBuilderPlacementSavedDataTest {
             BlockState afterState
     ) {
         CompoundTag layer = new CompoundTag();
-        layer.putUUID("operation", operationId.value());
+        RoadNbtIo.putUuid(layer, "operation", operationId.value());
         layer.put("before_state", StrictBlockStateNbtCodec.write(beforeState));
         layer.put("after_state", StrictBlockStateNbtCodec.write(afterState));
         return layer;

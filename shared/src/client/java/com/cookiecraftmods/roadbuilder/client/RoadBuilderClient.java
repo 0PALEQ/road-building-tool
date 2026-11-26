@@ -14,7 +14,7 @@ import com.cookiecraftmods.roadbuilder.client.ui.RoadBuilderToolbarRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import com.cookiecraftmods.roadbuilder.client.render.RoadWorldRendering;
 import net.minecraft.client.Minecraft;
 
 public final class RoadBuilderClient implements ClientModInitializer {
@@ -53,7 +53,7 @@ public final class RoadBuilderClient implements ClientModInitializer {
                 );
             }
         });
-        WorldRenderEvents.AFTER_ENTITIES.register(context -> {
+        RoadWorldRendering.afterEntities(context -> {
             var tool = MODE_CONTROLLER.straightRoadTool();
             if (MODE_CONTROLLER.isActive()) {
                 tool.updatePointer(Minecraft.getInstance());

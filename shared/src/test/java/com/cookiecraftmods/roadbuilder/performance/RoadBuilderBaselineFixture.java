@@ -1,5 +1,6 @@
 package com.cookiecraftmods.roadbuilder.performance;
 
+import com.cookiecraftmods.roadbuilder.persistence.RoadSavedData;
 import com.cookiecraftmods.roadbuilder.compat.MinecraftIds;
 
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
@@ -142,8 +143,10 @@ public final class RoadBuilderBaselineFixture {
             BlockPlacementPlan plan,
             Path dataDirectory
     ) throws Exception {
-        RoadBuilderPlacementSavedData placement = RoadBuilderPlacementSavedData.create(
-                Level.OVERWORLD
+        DimensionDataStorage storage = RoadSavedDataFixtures.open(dataDirectory);
+        RoadBuilderPlacementSavedData placement = RoadSavedData.loadOrCreate(
+                storage, tag -> RoadBuilderPlacementSavedData.load(Level.OVERWORLD, tag),
+                () -> RoadBuilderPlacementSavedData.create(Level.OVERWORLD), RoadBuilderPlacementSavedData.DATA_NAME
         );
         MapWorld world = MapWorld.dirtUnder(plan);
         PlacementCommitResult placementResult = new BlockPlanCommitter().commit(
@@ -158,8 +161,9 @@ public final class RoadBuilderBaselineFixture {
                 "placement SavedData fixture commit failed"
         );
 
-        RoadBuilderNetworkSavedData network = RoadBuilderNetworkSavedData.create(
-                Level.OVERWORLD
+        RoadBuilderNetworkSavedData network = RoadSavedData.loadOrCreate(
+                storage, tag -> RoadBuilderNetworkSavedData.load(Level.OVERWORLD, tag),
+                () -> RoadBuilderNetworkSavedData.create(Level.OVERWORLD), RoadBuilderNetworkSavedData.DATA_NAME
         );
         for (int index = 0; index < GRAPH_SEGMENT_COUNT; index++) {
             double x = index * 4.0;
@@ -175,10 +179,7 @@ public final class RoadBuilderBaselineFixture {
             network.graph().applyAddition(addition);
         }
 
-        DimensionDataStorage storage = RoadSavedDataFixtures.open(dataDirectory);
-        storage.set(RoadBuilderPlacementSavedData.DATA_NAME, placement);
-        storage.set(RoadBuilderNetworkSavedData.DATA_NAME, network);
-        storage.save();
+        RoadSavedData.flush(storage);
         Path placementFile = dataDirectory.resolve(
                 RoadBuilderPlacementSavedData.DATA_NAME + ".dat"
         );

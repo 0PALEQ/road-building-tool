@@ -2,8 +2,6 @@ package com.cookiecraftmods.roadbuilder.preset;
 
 import com.cookiecraftmods.roadbuilder.compat.MinecraftIds;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.JsonOps;
@@ -11,7 +9,6 @@ import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.ResourceManager;
-import net.minecraft.server.packs.resources.SimpleJsonResourceReloadListener;
 import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.level.block.Block;
 import org.slf4j.Logger;
@@ -23,13 +20,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-public final class RoadPresetReloadListener extends SimpleJsonResourceReloadListener
+public final class RoadPresetReloadListener extends RoadPresetJsonResources
         implements IdentifiableResourceReloadListener {
     public static final String DIRECTORY = "road_presets";
     public static final ResourceLocation RELOAD_ID =
             MinecraftIds.id("roadbuilder", "road_presets");
 
-    private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
     private static final Logger LOGGER = LoggerFactory.getLogger("roadbuilder/presets");
 
     private final java.util.function.Consumer<Map<ResourceLocation, RoadPreset>> receiver;
@@ -44,7 +40,7 @@ public final class RoadPresetReloadListener extends SimpleJsonResourceReloadList
     public RoadPresetReloadListener(
             java.util.function.Consumer<Map<ResourceLocation, RoadPreset>> receiver
     ) {
-        super(GSON, DIRECTORY);
+        super(DIRECTORY);
         this.receiver = Objects.requireNonNull(receiver, "receiver");
     }
 

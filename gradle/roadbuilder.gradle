@@ -8,7 +8,8 @@ def modResourceProperties = [
         version          : project.mod_version,
         minecraft_version: project.minecraft_version,
         loader_version   : project.loader_version,
-        java_version     : targetJavaVersion
+        java_version     : targetJavaVersion,
+        extra_client_mixins: project.findProperty("extraClientMixins") ?: ""
 ]
 def roadBuilderArchiveName = "${project.archives_base_name}-${project.name}"
 
@@ -120,7 +121,28 @@ if (serverBaselineRequested) {
 
 sourceSets {
     [main, client, test, gametest].each { sources ->
-        sources.java.srcDir(new File(sharedSources, "${sources.name}/java"))
+        if (project.hasProperty("adaptSharedJava")) {
+            def sourceDirectory = new File(sharedSources, "${sources.name}/java")
+            def adapterDirectory = file("src/${sources.name}/java")
+            def adaptedSources = tasks.register("adapt${sources.name.capitalize()}Sources", Sync) {
+                from(sourceDirectory) {
+                    exclude { details -> new File(adapterDirectory, details.path).isFile() }
+                    eachFile { details ->
+                        def sourcePath = details.path
+                        details.filter { String line ->
+                            project.adaptSharedJava(line, sourcePath)
+                        }
+                    }
+                }
+                inputs.dir(adapterDirectory)
+                inputs.file(project.buildFile)
+                into(layout.buildDirectory.dir("generated/sources/minecraft/${sources.name}"))
+                filteringCharset = "UTF-8"
+            }
+            sources.java.srcDir(adaptedSources)
+        } else {
+            sources.java.srcDir(new File(sharedSources, "${sources.name}/java"))
+        }
         sources.resources.srcDir(new File(sharedSources, "${sources.name}/resources"))
     }
 }

@@ -8,7 +8,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
@@ -63,7 +62,7 @@ public final class RoadPackScreen extends RoadBuilderScreen {
         );
         nameBox.setMaxLength(64);
         nameBox.setValue("My Road Pack");
-        nameBox.setHint(Component.translatable(KEY + "name_hint"));
+        nameBox.setHint(Component.translatable(KEY + "name_hint").withStyle(style -> style.withColor(0xE0E0E0)));
         nameBox.setResponder(ignored -> refreshExportButton());
         addRenderableWidget(nameBox);
 
@@ -229,13 +228,9 @@ public final class RoadPackScreen extends RoadBuilderScreen {
             return rowWidth;
         }
 
-        @Override
-        protected int getScrollbarPosition() {
-            return getRowRight() + 5;
-        }
     }
 
-    private final class RoadEntry extends ObjectSelectionList.Entry<RoadEntry> {
+    private final class RoadEntry extends RoadListEntry<RoadEntry> {
         private final RoadPresetCatalogEntry entry;
 
         private RoadEntry(RoadPresetCatalogEntry entry) {
@@ -243,17 +238,15 @@ public final class RoadPackScreen extends RoadBuilderScreen {
         }
 
         @Override
-        public void render(
+        protected void renderRoadRow(
                 GuiGraphics graphics,
-                int index,
                 int top,
                 int left,
                 int width,
                 int height,
                 int mouseX,
                 int mouseY,
-                boolean hovered,
-                float partialTick
+                boolean hovered
         ) {
             boolean checked = selected.contains(entry.id());
             if (hovered || checked) {
@@ -282,7 +275,7 @@ public final class RoadPackScreen extends RoadBuilderScreen {
         }
 
         @Override
-        public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        protected boolean roadRowClicked(int button) {
             if (button != 0) {
                 return false;
             }

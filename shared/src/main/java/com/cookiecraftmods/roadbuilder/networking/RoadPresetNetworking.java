@@ -60,7 +60,7 @@ final class RoadPresetNetworking {
                     packet.candidate().revision(),
                     accepted.fingerprint()
             );
-            broadcastCatalog(player.server);
+            broadcastCatalog(player.serverLevel().getServer());
         } else {
             RoadPresetEditorService.EditFailure failure =
                     ((RoadPresetEditorService.EditResult.Rejected) editResult).failure();
@@ -98,7 +98,7 @@ final class RoadPresetNetworking {
                     0,
                     ""
             );
-            broadcastCatalog(player.server);
+            broadcastCatalog(player.serverLevel().getServer());
         } else {
             RoadPresetEditorService.EditFailure failure =
                     ((RoadPresetEditorService.EditResult.Rejected) editResult).failure();
@@ -129,7 +129,7 @@ final class RoadPresetNetworking {
     }
 
     private static void persistRepository(ServerPlayer player) {
-        RoadPresetSavedData.get(player.server.overworld())
+        RoadPresetSavedData.get(player.serverLevel().getServer().overworld())
                 .replaceFrom(RoadPresetResources.repository());
     }
 

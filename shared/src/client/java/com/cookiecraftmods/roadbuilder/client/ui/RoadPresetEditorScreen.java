@@ -660,7 +660,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
         searchBox.setMaxLength(64);
         searchBox.setValue(searchQuery);
         searchBox.setHint(Component.translatable(KEY + (tab == RoadPresetEditorTab.SAVED_ROADS
-                ? "search_roads" : "search_components")));
+                ? "search_roads" : "search_components")).withStyle(style -> style.withColor(0xE0E0E0)));
         searchBox.setResponder(this::onSearchChanged);
         addRenderableWidget(searchBox);
     }
@@ -1465,7 +1465,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                 RoadPresetEditorComponent part = draft.components().get(component);
                 Component tooltip = componentLabel(part).copy().append(" · ")
                         .append(Component.translatable(KEY + "component_width", part.width()));
-                graphics.renderTooltip(font, font.split(tooltip, Math.min(260, width - 20)), mouseX, mouseY);
+                RoadGuiDrawing.tooltip(graphics, font, font.split(tooltip, Math.min(260, width - 20)), mouseX, mouseY);
             } else if (layout.statusBar().contains(mouseX, mouseY)
                     && mouseY < layout.statusBar().y() + 15) {
                 Component feedback = invalidSpeed ? Component.translatable(KEY + "invalid_speed") : status;
@@ -1473,18 +1473,14 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                     feedback = Component.translatable(KEY + "name_required");
                 }
                 if (!feedback.getString().isEmpty()) {
-                    graphics.renderTooltip(font, font.split(feedback, Math.min(300, width - 20)), mouseX, mouseY);
+                    RoadGuiDrawing.tooltip(graphics, font, font.split(feedback, Math.min(300, width - 20)), mouseX, mouseY);
                 }
             }
         }
     }
 
     @Override
-    public boolean mouseClicked(
-            double mouseX,
-            double mouseY,
-            int button
-    ) {
+    protected boolean roadMouseClicked(double mouseX, double mouseY, int button, boolean shiftDown) {
         if (draft != null && button == 0) {
             if (activeViewport != null && panelScroll.maximum() > 0
                     && mouseX >= activeViewport.right() + 3
@@ -1509,7 +1505,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
 
             int component = componentIndexAt(mouseX, mouseY);
             if (component >= 0) {
-                if (hasShiftDown()) {
+                if (shiftDown) {
                     toggleComponentSelection(component);
                     dragState = null;
                     requestRebuild();
@@ -1529,17 +1525,11 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
                 return true;
             }
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        return false;
     }
 
     @Override
-    public boolean mouseDragged(
-            double mouseX,
-            double mouseY,
-            int button,
-            double dragX,
-            double dragY
-    ) {
+    protected boolean roadMouseDragged(double mouseX, double mouseY, int button) {
         if (button == 0 && draggingScrollbar) {
             scrollToMouse(mouseY);
             return true;
@@ -1551,15 +1541,11 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
             ));
             return true;
         }
-        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        return false;
     }
 
     @Override
-    public boolean mouseReleased(
-            double mouseX,
-            double mouseY,
-            int button
-    ) {
+    protected boolean roadMouseReleased(double mouseX, double mouseY, int button) {
         if (button == 0 && draggingScrollbar) {
             draggingScrollbar = false;
             return true;
@@ -1587,11 +1573,11 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
             }
             return true;
         }
-        return super.mouseReleased(mouseX, mouseY, button);
+        return false;
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    protected boolean roadKeyPressed(int keyCode, boolean controlDown) {
         if (draggingScrollbar && keyCode == GLFW.GLFW_KEY_ESCAPE) {
             draggingScrollbar = false;
             return true;
@@ -1603,7 +1589,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
         boolean textInputFocused = nameBox != null && nameBox.isFocused()
                 || searchBox != null && searchBox.isFocused()
                 || speedBox != null && speedBox.isFocused();
-        if (hasControlDown() && keyCode == GLFW.GLFW_KEY_S) {
+        if (controlDown && keyCode == GLFW.GLFW_KEY_S) {
             saveDraft();
             return true;
         }
@@ -1622,7 +1608,7 @@ public final class RoadPresetEditorScreen extends RoadBuilderScreen {
             }
             return true;
         }
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return false;
     }
 
     private int componentIndexAt(double mouseX, double mouseY) {

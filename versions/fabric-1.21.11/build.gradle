@@ -1,0 +1,49 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap'
+    id 'maven-publish'
+}
+
+ext.extraClientMixins = ', "LevelRendererMixin", "RenderTypeInvoker"'
+
+ext.adaptSharedJava = { String line, String sourcePath ->
+    def adapted = line.replaceAll(/\bResourceLocation\b/, "Identifier")
+            .replaceAll(/\b(read|write)ResourceLocation\b/, '$1Identifier')
+            .replace('.location()', '.identifier()')
+            .replace('.serverLevel()', '.level()')
+            .replace('.getMinBuildHeight()', '.getMinY()')
+            .replace('.getMaxBuildHeight()', '.getMaxY() + 1')
+            .replace('BuiltInRegistries.BLOCK.get(', 'BuiltInRegistries.BLOCK.getValue(')
+            .replace('BuiltInRegistries.BLOCK.asLookup()', 'BuiltInRegistries.BLOCK')
+            .replace('import net.minecraft.Util;', 'import net.minecraft.util.Util;')
+            .replace('getWindow().getWindow()', 'getWindow().handle()')
+            .replace('camera.getPosition()', 'camera.position()')
+            .replace('camera.getLookVector()', 'camera.forwardVector()')
+            .replace('camera.getLeftVector()', 'camera.leftVector()')
+            .replace('camera.getUpVector()', 'camera.upVector()')
+    if (sourcePath.endsWith("GameTests.java")) {
+        adapted = adapted.replace('import net.minecraft.gametest.framework.GameTest;', 'import net.fabricmc.fabric.api.gametest.v1.GameTest;')
+                .replace('import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;', '')
+                .replace(' implements FabricGameTest', '')
+                .replace('template = FabricGameTest.EMPTY_STRUCTURE', 'structure = "fabric-gametest-api-v1:empty"')
+                .replace('template = ', 'structure = ')
+                .replace('timeoutTicks = ', 'maxTicks = ')
+                .replaceAll(/batch = "([A-Za-z]+)"/) { match, batch -> 'environment = "roadbuilder:' + batch.toLowerCase(Locale.ROOT) + '"' }
+    }
+    if (sourcePath.contains('/persistence/') || sourcePath.endsWith('/RoadGraphSnapshotS2CPacketTest.java')) {
+        adapted = adapted.replace('.getAllKeys()', '.keySet()')
+                .replace('.getCompound(', '.getCompoundOrEmpty(')
+                .replace('.getAsInt()', '.intValue()')
+                .replace('.getAsLong()', '.longValue()')
+                .replace('.getAsDouble()', '.doubleValue()')
+                .replace('.getAsByte()', '.byteValue()')
+                .replace('.getAsString()', '.asString().orElseThrow()')
+                .replaceAll(/\.getList\(\s*("[^"]+")\s*,\s*(?:Tag\.TAG_\w+|TagIds\.\w+|10)\s*\)/, '.getListOrEmpty($1)')
+                .replaceAll(/\.get(Int|Double|Long)\(([^()]*)\)/, '.get$1Or($2, 0)')
+                .replaceAll(/\.getByte\(([^()]*)\)/, '.getByteOr($1, (byte) 0)')
+                .replaceAll(/\.getBoolean\(([^()]*)\)/, '.getBooleanOr($1, false)')
+                .replaceAll(/\.getString\(([^()]+)\)/, '.getStringOr($1, "")')
+    }
+    adapted
+}
+
+apply from: rootProject.file('gradle/roadbuilder.gradle')
