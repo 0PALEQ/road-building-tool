@@ -2173,6 +2173,7 @@ public final class StraightRoadToolController {
         return switch (code) {
             case TOO_SHARP_TURN -> placementResultLabel(PlacementResultCode.TOO_SHARP_TURN);
             case SELF_INTERSECTION -> placementResultLabel(PlacementResultCode.SELF_INTERSECTION);
+            case EXCAVATION_OBSTRUCTED -> placementResultLabel(PlacementResultCode.WORLD_CONFLICT);
             default -> Component.literal(code.name());
         };
     }

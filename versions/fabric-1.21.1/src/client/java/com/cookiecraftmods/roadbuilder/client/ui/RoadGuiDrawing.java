@@ -13,6 +13,12 @@ public final class RoadGuiDrawing {
     private RoadGuiDrawing() {
     }
 
+    static void texture(GuiGraphics graphics, ResourceLocation texture, int x, int y,
+                        int width, int height, int textureWidth, int textureHeight) {
+        graphics.blit(texture, x, y, width, height, 0.0F, 0.0F,
+                textureWidth, textureHeight, textureWidth, textureHeight);
+    }
+
     static void icon(GuiGraphics graphics, ResourceLocation texture, int x, int y, int size, int textureSize, int tint) {
         float scale = size / (float) textureSize;
         var pose = graphics.pose();

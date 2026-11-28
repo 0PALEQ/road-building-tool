@@ -596,6 +596,7 @@ public final class StraightRoadPlacementEndpoint {
             case PRESET_REVISION_MISMATCH -> PlacementResultCode.PRESET_REVISION_MISMATCH;
             case TOO_SHARP_TURN -> PlacementResultCode.TOO_SHARP_TURN;
             case SELF_INTERSECTION -> PlacementResultCode.SELF_INTERSECTION;
+            case EXCAVATION_OBSTRUCTED -> PlacementResultCode.WORLD_CONFLICT;
             case INVALID_GEOMETRY, COORDINATE_OUT_OF_RANGE ->
                     PlacementResultCode.INVALID_GEOMETRY;
             case BLOCK_LIMIT_EXCEEDED, RASTERIZATION_WORK_LIMIT_EXCEEDED,

@@ -1,4 +1,6 @@
 {
+  "message.roadbuilder.placement_rejected": "Nie można zbudować drogi — %s.",
+  "result.roadbuilder.placement.world_conflict": "planowana zmiana koliduje z aktualnym stanem świata",
   "screen.roadbuilder.settings.server": "Serwer",
   "screen.roadbuilder.settings.server.title": "Importuj paczkę dróg",
   "screen.roadbuilder.settings.server.description": "Dodaj presety z pliku ZIP Road Buildera do tego świata. Istniejące identyfikatory zostaną pominięte.",
@@ -16,6 +18,7 @@
   "screen.roadbuilder.settings.server.timed_out": "Serwer nie odpowiedział. Spróbuj ponownie lub otwórz zakładkę Serwer.",
   "screen.roadbuilder.settings.server.imported": "Zaimportowano %s. Pominięto istniejące %s.",
   "screen.roadbuilder.settings.title": "Ustawienia Road Buildera",
+  "screen.roadbuilder.settings.support_kofi": "Wesprzyj Road Buildera na Ko-fi",
   "screen.roadbuilder.settings.camera": "Kamera",
   "screen.roadbuilder.settings.snapping": "Przyciąganie",
   "screen.roadbuilder.settings.invert_movement": "Odwróć ruch kamery na boki",

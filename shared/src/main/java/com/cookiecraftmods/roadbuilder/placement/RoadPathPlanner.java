@@ -4,17 +4,35 @@ import com.cookiecraftmods.roadbuilder.geometry.PathSample;
 import com.cookiecraftmods.roadbuilder.geometry.ReferenceGeometry;
 import com.cookiecraftmods.roadbuilder.geometry.RoadPoint;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.concurrent.ForkJoinPool;
+import java.util.stream.IntStream;
 
 public final class RoadPathPlanner {
     public static final double MAXIMUM_PATH_STEP = 0.25;
     private static final double TRAVERSAL_TOLERANCE = 1.0e-12;
     private static final double GRADE_TOLERANCE = 1.0e-12;
+    private static final int MINIMUM_PARALLEL_SPANS = 16_384;
+    private static final int SPANS_PER_TASK = 2_048;
+    private static final int MAXIMUM_CANDIDATES_PER_TASK = 8_192;
+    private static final int MAXIMUM_TASKS_PER_BATCH = 8;
+
+    private final int maximumTasksPerBatch;
+
+    public RoadPathPlanner() {
+        this(MAXIMUM_TASKS_PER_BATCH);
+    }
+
+    RoadPathPlanner(int maximumTasksPerBatch) {
+        this.maximumTasksPerBatch = maximumTasksPerBatch;
+    }
 
     public BlockPlanResult plan(
             RoadPathPlanRequest request,
@@ -83,51 +101,112 @@ public final class RoadPathPlanner {
             centerSamples.add(sample);
         }
 
-        List<PlannedBlock> blocks = new ArrayList<>();
-        Map<BlockPos, CellCandidate> occupiedPositions = new HashMap<>();
-        WorkBudget work = new WorkBudget(
-                maximumPlanningCandidates,
-                baseSampleWork
-        );
-        int surfaceWidth = request.surface().blockWidth();
-        for (int lateralIndex = 0; lateralIndex < surfaceWidth; lateralIndex++) {
-            double lateralOffset = (surfaceWidth - 1) / 2.0
-                    - lateralIndex;
-            PathSample previousSample = centerSamples.get(0);
-            RoadPoint previous = offset(previousSample, lateralOffset);
-            for (int sampleIndex = 1;
-                 sampleIndex < centerSamples.size();
-                 sampleIndex++) {
-                PathSample nextSample = centerSamples.get(sampleIndex);
-                RoadPoint next = offset(
-                        nextSample,
-                        lateralOffset
-                );
-                if (!rasterizeSpan(
-                        previous,
-                        next,
-                        previousSample.distance(),
-                        nextSample.distance(),
-                        request.surface(),
-                        lateralIndex,
-                        geometry.length(),
-                        maximumAffectedBlocks,
-                        work,
-                        blocks,
-                        occupiedPositions
-                )) {
-                    return failure(work.failureCode());
-                }
-                previous = next;
-                previousSample = nextSample;
-            }
+        ResolvedRoadSurface surface = request.surface();
+        Rasterization rasterization = new Rasterization(centerSamples, surface, geometry.length());
+        WorkBudget work = new WorkBudget(maximumPlanningCandidates, baseSampleWork);
+        BlockCollector collector = new BlockCollector(maximumAffectedBlocks);
+        if (!rasterization.collect(work, collector, maximumTasksPerBatch)) {
+            return failure(work.failureCode());
         }
-        if (blocks.isEmpty()) {
+        if (collector.blocks.isEmpty()) {
             return failure(BlockPlanFailureCode.INVALID_GEOMETRY);
         }
         return new BlockPlanResult.Success(
-                BlockPlacementPlan.create(request.dimension(), blocks)
+                BlockPlacementPlan.create(request.dimension(), collector.blocks)
         );
+    }
+
+    private record Rasterization(
+            List<PathSample> samples,
+            ResolvedRoadSurface surface,
+            double pathLength
+    ) {
+        private boolean collect(WorkBudget work, BlockCollector collector, int maximumTasksPerBatch) {
+            long spans = (long) (samples.size() - 1) * surface.blockWidth();
+            int tasksPerBatch = Math.min(maximumTasksPerBatch, ForkJoinPool.getCommonPoolParallelism());
+            if (spans < MINIMUM_PARALLEL_SPANS || tasksPerBatch < 2
+                    || work.remaining() < MINIMUM_PARALLEL_SPANS || hasFlatWholeBlockElevation()) {
+                return rasterize(0, spans, work, collector::add);
+            }
+
+            for (long batchStart = 0; batchStart < spans; ) {
+                long first = batchStart;
+                if (work.remaining() < SPANS_PER_TASK) {
+                    return rasterize(first, spans, work, collector::add);
+                }
+                int tasks = (int) Math.min(tasksPerBatch,
+                        (spans - first + SPANS_PER_TASK - 1) / SPANS_PER_TASK);
+                int taskBudget = (int) Math.min(work.remaining(), MAXIMUM_CANDIDATES_PER_TASK);
+                List<Optional<List<RasterCandidate>>> batches = IntStream.range(0, tasks).parallel()
+                        .mapToObj(task -> collectBatch(
+                                first + (long) task * SPANS_PER_TASK, spans, taskBudget))
+                        .toList();
+                // Replay in column/span order so ties and limit failures match serial planning.
+                for (Optional<List<RasterCandidate>> batch : batches) {
+                    // Replay an incomplete worker batch through the serial path, where the
+                    // remaining work and block limits determine which error comes first.
+                    if (batch.isEmpty()) {
+                        if (!rasterize(batchStart, Math.min(spans, batchStart + SPANS_PER_TASK),
+                                work, collector::add)) {
+                            return false;
+                        }
+                    } else {
+                        for (RasterCandidate candidate : batch.orElseThrow()) {
+                            if (!work.consume() || !collector.add(candidate.position(), candidate.state(),
+                                    candidate.distanceSquared())) {
+                                return false;
+                            }
+                        }
+                    }
+                    batchStart += SPANS_PER_TASK;
+                }
+            }
+            return true;
+        }
+
+        private boolean hasFlatWholeBlockElevation() {
+            // Whole-block placement skips slab resolution. For this case the ordered
+            // merge costs about as much as the parallel work saves.
+            double elevation = Math.rint(samples.get(0).position().y());
+            return samples.stream().allMatch(sample -> Math.abs(sample.position().y() - elevation) <= 0.25);
+        }
+
+        private Optional<List<RasterCandidate>> collectBatch(long first, long spans, int maximumCandidates) {
+            List<RasterCandidate> candidates = new ArrayList<>();
+            WorkBudget work = new WorkBudget(maximumCandidates, 0);
+            boolean complete = rasterize(first, Math.min(spans, first + SPANS_PER_TASK), work,
+                    (position, state, distanceSquared) -> {
+                        candidates.add(new RasterCandidate(position, state, distanceSquared));
+                        return true;
+                    });
+            return complete ? Optional.of(candidates) : Optional.empty();
+        }
+
+        private boolean rasterize(long first, long end, WorkBudget work, CandidateSink sink) {
+            int spansPerColumn = samples.size() - 1;
+            int surfaceWidth = surface.blockWidth();
+            while (first < end) {
+                int lateralIndex = (int) (first / spansPerColumn);
+                int sampleIndex = (int) (first % spansPerColumn);
+                int spanCount = (int) Math.min(end - first, spansPerColumn - sampleIndex);
+                int lastSample = sampleIndex + spanCount;
+                double lateralOffset = (surfaceWidth - 1) / 2.0 - lateralIndex;
+                PathSample previousSample = samples.get(sampleIndex);
+                RoadPoint previous = offset(previousSample, lateralOffset);
+                for (sampleIndex++; sampleIndex <= lastSample; sampleIndex++) {
+                    PathSample nextSample = samples.get(sampleIndex);
+                    RoadPoint next = offset(nextSample, lateralOffset);
+                    if (!rasterizeSpan(previous, next, previousSample.distance(), nextSample.distance(),
+                            surface, lateralIndex, pathLength, work, sink)) {
+                        return false;
+                    }
+                    previous = next;
+                    previousSample = nextSample;
+                }
+                first += spanCount;
+            }
+            return true;
+        }
     }
 
     private static RoadPoint offset(
@@ -147,10 +226,8 @@ public final class RoadPathPlanner {
             ResolvedRoadSurface surface,
             int lateralIndex,
             double maximumPathDistance,
-            int maximumAffectedBlocks,
             WorkBudget work,
-            List<PlannedBlock> blocks,
-            Map<BlockPos, CellCandidate> occupiedPositions
+            CandidateSink sink
     ) {
         OptionalInt startX = floorToInt(start.x());
         OptionalInt startZ = floorToInt(start.z());
@@ -176,10 +253,8 @@ public final class RoadPathPlanner {
                 surface,
                 lateralIndex,
                 maximumPathDistance,
-                maximumAffectedBlocks,
                 work,
-                blocks,
-                occupiedPositions
+                sink
         )) {
             return false;
         }
@@ -206,7 +281,7 @@ public final class RoadPathPlanner {
                         cellX, cellZ, start, end,
                         startDistance, endDistance, surface, lateralIndex,
                         maximumPathDistance,
-                        maximumAffectedBlocks, work, blocks, occupiedPositions
+                        work, sink
                 )) {
                     return false;
                 }
@@ -217,7 +292,7 @@ public final class RoadPathPlanner {
                         cellX, cellZ, start, end,
                         startDistance, endDistance, surface, lateralIndex,
                         maximumPathDistance,
-                        maximumAffectedBlocks, work, blocks, occupiedPositions
+                        work, sink
                 )) {
                     return false;
                 }
@@ -228,17 +303,17 @@ public final class RoadPathPlanner {
                         nextX, cellZ, start, end,
                         startDistance, endDistance, surface, lateralIndex,
                         maximumPathDistance,
-                        maximumAffectedBlocks, work, blocks, occupiedPositions
+                        work, sink
                 ) || !addTarget(
                         cellX, nextZ, start, end,
                         startDistance, endDistance, surface, lateralIndex,
                         maximumPathDistance,
-                        maximumAffectedBlocks, work, blocks, occupiedPositions
+                        work, sink
                 ) || !addTarget(
                         nextX, nextZ, start, end,
                         startDistance, endDistance, surface, lateralIndex,
                         maximumPathDistance,
-                        maximumAffectedBlocks, work, blocks, occupiedPositions
+                        work, sink
                 )) {
                     return false;
                 }
@@ -261,10 +336,8 @@ public final class RoadPathPlanner {
             ResolvedRoadSurface surface,
             int lateralIndex,
             double maximumPathDistance,
-            int maximumAffectedBlocks,
             WorkBudget work,
-            List<PlannedBlock> blocks,
-            Map<BlockPos, CellCandidate> occupiedPositions
+            CandidateSink sink
     ) {
         if (!work.consume()) {
             return false;
@@ -311,23 +384,7 @@ public final class RoadPathPlanner {
         double dz = blockZ + 0.5
                 - (start.z() + (end.z() - start.z()) * elevationParameter);
         double distanceSquared = dx * dx + dz * dz;
-        CellCandidate previous = occupiedPositions.get(position);
-        if (previous != null
-                && previous.distanceSquared() <= distanceSquared + 1.0e-12) {
-            return true;
-        }
-        PlannedBlock block = new PlannedBlock(position, target.state());
-        if (previous == null) {
-            if (blocks.size() >= maximumAffectedBlocks) {
-                return false;
-            }
-            occupiedPositions.put(position, new CellCandidate(blocks.size(), distanceSquared));
-            blocks.add(block);
-        } else {
-            occupiedPositions.put(position, new CellCandidate(previous.index(), distanceSquared));
-            blocks.set(previous.index(), block);
-        }
-        return true;
+        return sink.add(position, target.state(), distanceSquared);
     }
 
     private static double parameterAt(
@@ -420,7 +477,43 @@ public final class RoadPathPlanner {
         return new BlockPlanResult.Failure(code);
     }
 
+    @FunctionalInterface
+    private interface CandidateSink {
+        boolean add(BlockPos position, BlockState state, double distanceSquared);
+    }
+
+    private record RasterCandidate(BlockPos position, BlockState state, double distanceSquared) {}
+
     private record CellCandidate(int index, double distanceSquared) {}
+
+    private static final class BlockCollector {
+        private final int maximumAffectedBlocks;
+        private final List<PlannedBlock> blocks = new ArrayList<>();
+        private final Map<BlockPos, CellCandidate> occupiedPositions = new HashMap<>();
+
+        private BlockCollector(int maximumAffectedBlocks) {
+            this.maximumAffectedBlocks = maximumAffectedBlocks;
+        }
+
+        private boolean add(BlockPos position, BlockState state, double distanceSquared) {
+            CellCandidate previous = occupiedPositions.get(position);
+            if (previous != null && previous.distanceSquared() <= distanceSquared + 1.0e-12) {
+                return true;
+            }
+            PlannedBlock block = new PlannedBlock(position, state);
+            if (previous == null) {
+                if (blocks.size() >= maximumAffectedBlocks) {
+                    return false;
+                }
+                occupiedPositions.put(position, new CellCandidate(blocks.size(), distanceSquared));
+                blocks.add(block);
+            } else {
+                occupiedPositions.put(position, new CellCandidate(previous.index(), distanceSquared));
+                blocks.set(previous.index(), block);
+            }
+            return true;
+        }
+    }
 
     private static final class WorkBudget {
         private final long maximum;
@@ -430,6 +523,10 @@ public final class RoadPathPlanner {
         private WorkBudget(long maximum, long consumed) {
             this.maximum = maximum;
             this.consumed = consumed;
+        }
+
+        private long remaining() {
+            return maximum - consumed;
         }
 
         private boolean consume() {

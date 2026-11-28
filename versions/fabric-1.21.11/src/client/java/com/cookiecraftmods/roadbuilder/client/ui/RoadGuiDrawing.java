@@ -14,6 +14,12 @@ public final class RoadGuiDrawing {
     private RoadGuiDrawing() {
     }
 
+    static void texture(GuiGraphics graphics, Identifier texture, int x, int y,
+                        int width, int height, int textureWidth, int textureHeight) {
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, 0, 0,
+                width, height, textureWidth, textureHeight, textureWidth, textureHeight);
+    }
+
     static void icon(GuiGraphics graphics, Identifier texture, int x, int y, int size, int textureSize, int tint) {
         graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, 0, 0,
                 size, size, textureSize, textureSize, textureSize, textureSize, tint | 0xFF000000);

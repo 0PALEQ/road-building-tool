@@ -53,14 +53,14 @@ class SunkenRoadPlannerTest {
         var planner = new SunkenRoadPlanner();
         assertInstanceOf(BlockPlanResult.Failure.class,
                 planner.excavate(surface, Set.of(position), new Terrain(80), p -> false, 10));
-        assertInstanceOf(BlockPlanResult.Failure.class,
-                planner.excavate(surface, Set.of(position), new Terrain(80), p -> p.equals(position.above()), 20000));
+        assertEquals(new BlockPlanResult.Failure(BlockPlanFailureCode.EXCAVATION_OBSTRUCTED),
+                planner.excavate(surface, Set.of(position), new Terrain(80), position.above()::equals, 20000));
         var water = new Terrain(80) {
             @Override public BlockState blockState(BlockPos pos) {
                 return pos.equals(position.above()) ? Blocks.WATER.defaultBlockState() : super.blockState(pos);
             }
         };
-        assertInstanceOf(BlockPlanResult.Failure.class,
+        assertEquals(new BlockPlanResult.Failure(BlockPlanFailureCode.EXCAVATION_OBSTRUCTED),
                 planner.excavate(surface, Set.of(position), water, p -> false, 20000));
     }
 

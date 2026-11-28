@@ -117,7 +117,7 @@ public final class SunkenRoadPlanner {
                     com.cookiecraftmods.roadbuilder.RoadBuilder.LOGGER.warn(
                             "Rejected sunken-road excavation: floor={}, position={}, state={}, protectedRoad={}, blockEntity={}, fluid={}",
                             floor.toShortString(), position.toShortString(), state, protectedRoad, blockEntity, fluid);
-                    return new BlockPlanResult.Failure(BlockPlanFailureCode.INVALID_GEOMETRY);
+                    return new BlockPlanResult.Failure(BlockPlanFailureCode.EXCAVATION_OBSTRUCTED);
                 }
                 if (planned != null && !planned.targetState().isAir()) continue;
                 cutTerrain |= RoadTunnelPlanner.isTerrain(state);

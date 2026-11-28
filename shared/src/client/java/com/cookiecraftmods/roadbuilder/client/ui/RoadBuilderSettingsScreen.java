@@ -5,15 +5,20 @@ import com.cookiecraftmods.roadbuilder.client.config.RoadBuilderClientPreference
 import com.cookiecraftmods.roadbuilder.client.config.RoadBuilderClientPreferencesLoader;
 import com.cookiecraftmods.roadbuilder.client.tool.RoadSnapPriority;
 import com.cookiecraftmods.roadbuilder.client.tool.RoadSnapSettings;
+import com.cookiecraftmods.roadbuilder.compat.MinecraftIds;
+import net.minecraft.Util;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.ConfirmLinkScreen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.FormattedCharSequence;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -27,6 +32,11 @@ public final class RoadBuilderSettingsScreen extends RoadBuilderScreen {
     private static final String KEY = "screen.roadbuilder.settings.";
     private static final int PADDING = 8;
     private static final int GAP = 4;
+    private static final URI KOFI_PAGE = URI.create("https://ko-fi.com/cookiecraftmods");
+    private static final ResourceLocation KOFI_LOGO =
+            MinecraftIds.id("roadbuilder", "textures/gui/kofi_logo.png");
+    private static final int KOFI_LOGO_WIDTH = 984;
+    private static final int KOFI_LOGO_HEIGHT = 269;
 
     private final RoadBuilderClientPreferences initial;
     private final Consumer<RoadBuilderClientPreferences> applyPreferences;
@@ -47,6 +57,7 @@ public final class RoadBuilderSettingsScreen extends RoadBuilderScreen {
     private RoadTextButton saveButton;
     private RoadTextButton defaultsButton;
     private RoadTextButton sectionButton;
+    private RoadTextButton supportButton;
     private boolean rebuildPending;
     private boolean invalidDraft;
     private boolean saveFailed;
@@ -79,6 +90,7 @@ public final class RoadBuilderSettingsScreen extends RoadBuilderScreen {
                 panelWidth, panelHeight);
         int left = panel.x() + PADDING;
         int contentWidth = Math.max(1, panel.width() - PADDING * 2);
+        addSupportButton(left + contentWidth, Math.min(60, Math.max(1, contentWidth / 3)));
         int tabCount = Section.values().length;
         int tabWidth = Math.max(1, (contentWidth - GAP * (tabCount - 1)) / tabCount);
         int tabY = panel.y() + 29;
@@ -131,6 +143,32 @@ public final class RoadBuilderSettingsScreen extends RoadBuilderScreen {
         saveButton = addButton(new UiRectangle(right - buttonWidth, buttonY, buttonWidth, 20),
                 text("save"), RoadTextButton.Style.PRIMARY, this::save);
         refreshButtons();
+    }
+
+    private void addSupportButton(int right, int buttonWidth) {
+        UiRectangle bounds = new UiRectangle(right - buttonWidth, panel.y() + 5, buttonWidth, 20);
+        Component label = text("support_kofi");
+        supportButton = addRenderableWidget(new RoadTextButton(
+                bounds, label, RoadTextButton.Style.NORMAL, this::openSupportPage) {
+            @Override
+            void renderContent(GuiGraphics graphics, int left, int top) {
+                int logoWidth = Math.max(1, getWidth() - 8);
+                int logoHeight = Math.max(1, Math.round(logoWidth * KOFI_LOGO_HEIGHT / (float) KOFI_LOGO_WIDTH));
+                RoadGuiDrawing.texture(graphics, KOFI_LOGO,
+                        left + (getWidth() - logoWidth) / 2, top + (getHeight() - logoHeight) / 2,
+                        logoWidth, logoHeight, KOFI_LOGO_WIDTH, KOFI_LOGO_HEIGHT);
+            }
+        });
+        supportButton.setTooltip(Tooltip.create(label));
+    }
+
+    private void openSupportPage() {
+        minecraft.setScreen(new ConfirmLinkScreen(confirmed -> {
+            if (confirmed) {
+                Util.getPlatform().openUri(KOFI_PAGE);
+            }
+            minecraft.setScreen(this);
+        }, KOFI_PAGE.toString(), false));
     }
 
     private void selectSection(Section target) {
@@ -305,7 +343,10 @@ public final class RoadBuilderSettingsScreen extends RoadBuilderScreen {
         graphics.renderOutline(panel.x(), panel.y(), panel.width(), panel.height(), BORDER_FRAME);
         RoadGuiDrawing.icon(graphics, RoadBuilderToolbarRenderer.SETTINGS_ICON,
                 panel.x() + PADDING, panel.y() + 6, 18, 32, TEXT_PRIMARY);
-        graphics.drawString(font, title, panel.x() + PADDING + 24, panel.y() + 11, TEXT_PRIMARY, false);
+        int titleX = panel.x() + PADDING + 24;
+        String headerTitle = font.plainSubstrByWidth(title.getString(),
+                Math.max(0, supportButton.getX() - titleX - GAP));
+        graphics.drawString(font, headerTitle, titleX, panel.y() + 11, TEXT_PRIMARY, false);
         graphics.fill(body.x(), body.y(), body.right(), body.bottom(), BACKGROUND_PANEL);
         graphics.renderOutline(body.x(), body.y(), body.width(), body.height(), BORDER_PANEL);
         if (section == Section.SERVER && !rebuildPending) {

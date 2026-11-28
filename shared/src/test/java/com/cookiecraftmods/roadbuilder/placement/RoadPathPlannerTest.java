@@ -10,9 +10,11 @@ import com.cookiecraftmods.roadbuilder.test.MinecraftBootstrap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -185,6 +187,43 @@ class RoadPathPlannerTest {
             }
         }
         assertTrue(checked > 50);
+    }
+
+    @Test
+    void parallelPlanningPreservesOrderedBlocksAndPlanningLimits() {
+        QuadraticBezierGeometry geometry = new QuadraticBezierGeometry(
+                new RoadPoint(0.5, 64.0, 0.5),
+                new RoadPoint(200.5, 78.0, 170.5),
+                new RoadPoint(400.5, 92.0, 0.5)
+        );
+        ResolvedRoadSurface surface = patternedSurface(24);
+        RoadPathPlanRequest request = new RoadPathPlanRequest(Level.OVERWORLD, geometry, surface);
+        RoadPathPlanner serial = new RoadPathPlanner(1);
+        BlockPlacementPlan expected = assertInstanceOf(BlockPlanResult.Success.class,
+                serial.plan(request, 20_000, 100_000)).plan();
+        BlockPlacementPlan actual = assertInstanceOf(BlockPlanResult.Success.class,
+                PLANNER.plan(request, 20_000, 100_000)).plan();
+        assertEquals(expected.blocks(), actual.blocks());
+        assertEquals(expected.touchedChunks(), actual.touchedChunks());
+
+        assertEquals(new BlockPlanResult.Failure(BlockPlanFailureCode.RASTERIZATION_WORK_LIMIT_EXCEEDED),
+                PLANNER.plan(request, 20_000, 20_000));
+        assertEquals(new BlockPlanResult.Failure(BlockPlanFailureCode.BLOCK_LIMIT_EXCEEDED),
+                PLANNER.plan(request, 100, 100_000));
+    }
+
+    private static ResolvedRoadSurface patternedSurface(int width) {
+        var materials = new ArrayList<BlockState>(width);
+        var underlay = new ArrayList<BlockState>(width);
+        var patterns = new ArrayList<RoadMarkingPattern>(width);
+        for (int column = 0; column < width; column++) {
+            boolean markings = column % 3 == 0;
+            materials.add(markings ? Blocks.WHITE_CONCRETE.defaultBlockState()
+                    : Blocks.STONE_SLAB.defaultBlockState());
+            underlay.add(Blocks.STONE_SLAB.defaultBlockState());
+            patterns.add(markings ? RoadMarkingPattern.DASHED : RoadMarkingPattern.CONTINUOUS);
+        }
+        return new ResolvedRoadSurface(materials, underlay, patterns);
     }
 
     private static BlockPlacementPlan success(

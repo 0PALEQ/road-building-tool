@@ -10,7 +10,7 @@ import java.util.function.Consumer;
 
 import static com.cookiecraftmods.roadbuilder.client.ui.UIStyle.*;
 
-final class RoadTextButton extends RoadButton {
+class RoadTextButton extends RoadButton {
     enum Style {
         NORMAL,
         PRIMARY,
@@ -98,6 +98,10 @@ final class RoadTextButton extends RoadButton {
         if (isFocused()) {
             graphics.renderOutline(left, top, getWidth(), getHeight(), HIGHLIGHT_STRONG);
         }
+        renderContent(graphics, left, top);
+    }
+
+    void renderContent(GuiGraphics graphics, int left, int top) {
         var font = Minecraft.getInstance().font;
         if (subtitle == null || getHeight() < 27) {
             graphics.drawCenteredString(
